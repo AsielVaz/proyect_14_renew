@@ -1,0 +1,75 @@
+/**
+ * SISTEMA 14 — TOKENS DE DISEÑO
+ * --------------------------------------------------------------------------
+ * Este es el archivo principal para cambiar la identidad visual.
+ * Modificar primero estas variables; no es necesario editar PHP.
+ * Los componentes y su distribución se encuentran en app.css.
+ */
+
+:root {
+    /* Tipografía */
+    --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-size-base: 15px;
+    --line-height-base: 1.5;
+
+    /* Marca */
+    --color-primary: #e86f21;
+    --color-primary-dark: #c9530d;
+    --color-primary-soft: #fff2e8;
+    --color-primary-focus: #ffeadb;
+    --color-primary-border: #edc7aa;
+
+    /* Texto */
+    --color-text: #24211f;
+    --color-text-secondary: #5f5853;
+    --color-muted: #7c746f;
+    --color-label: #a06642;
+    --color-faint: #aaa19a;
+
+    /* Superficies */
+    --color-page: #f8f6f3;
+    --color-surface: #ffffff;
+    --color-surface-subtle: #fcfaf8;
+    --color-surface-hover: #fffaf6;
+    --color-navigation-hover: #fbf7f3;
+
+    /* Bordes y controles */
+    --color-border: #e9e2dc;
+    --color-border-control: #dcd3cc;
+    --color-border-hover: #e2b696;
+    --color-navigation-line: #ead9cc;
+    --color-navigation-dot: #d4c6bc;
+
+    /* Estados */
+    --color-success: #287143;
+    --color-success-dot: #42a566;
+    --color-success-bg: #edf8f0;
+    --color-danger: #bf4242;
+    --color-danger-dark: #a8323b;
+    --color-danger-bg: #fff0f0;
+    --color-warning: #9a4b13;
+    --color-warning-bg: #fff5eb;
+
+    /* Superficies translúcidas para alertas y confirmaciones */
+    --glass-background: rgba(255, 255, 255, 0.74);
+    --glass-background-strong: rgba(255, 255, 255, 0.9);
+    --glass-border: rgba(255, 255, 255, 0.82);
+    --glass-overlay: rgba(50, 38, 30, 0.22);
+    --glass-blur: 18px;
+    --glass-shadow: 0 22px 65px rgba(67, 43, 28, 0.2);
+
+    /* Forma y profundidad */
+    --radius-control: 9px;
+    --radius-navigation: 10px;
+    --radius-card: 14px;
+    --radius-panel: 16px;
+    --shadow-panel: 0 12px 34px rgba(83, 57, 40, 0.08);
+    --shadow-card: 0 5px 20px rgba(83, 57, 40, 0.04);
+    --shadow-primary: 0 5px 14px rgba(232, 111, 33, 0.18);
+    --shadow-brand: 0 7px 18px rgba(232, 111, 33, 0.23);
+
+    /* Distribución principal */
+    --sidebar-width: 270px;
+    --page-padding: 36px;
+    --transition-fast: 150ms ease;
+}

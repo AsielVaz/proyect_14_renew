@@ -1,0 +1,6 @@
+Options -Indexes
+DirectoryIndex index.php
+
+<FilesMatch "^(\.env(?:\..*)?|README\.md|database\.php)$">
+    Require all denied
+</FilesMatch>
