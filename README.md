@@ -16,6 +16,8 @@ Y abrir `http://127.0.0.1:8080/`.
 
 La configuración local y las credenciales están en `.env`. `config/database.php` no contiene secretos y exige las variables `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` y `DB_PASSWORD`. El archivo `.env` está bloqueado por Apache y excluido de Git; `.env.example` sirve como plantilla sin credenciales reales.
 
+`DASHBOARD_CACHE_SECONDS` controla por cuántos segundos se reutilizan los indicadores globales dentro de la sesión. El valor recomendado es `30` cuando PHP y MariaDB están en servicios distintos; las listas y búsquedas siguen consultando datos actuales.
+
 Si se usa el servidor integrado de PHP, cambia temporalmente `APP_URL` a `http://127.0.0.1:8080` antes de abrir la aplicación.
 
 ## Alcance
@@ -26,6 +28,7 @@ Si se usa el servidor integrado de PHP, cambia temporalmente `APP_URL` a `http:/
 - Movimientos sin asignar, asignados, reasignación, traspasos y consultas STP.
 - Facturación con consulta, búsqueda, alta transaccional, catálogos fiscales y conceptos dinámicos.
 - Panel principal de carteras con saldos, movimientos, cheques y facturas pendientes, usando la misma información calculada del sistema anterior.
+- Listados con paginación rápida sin ejecutar conteos globales en cada solicitud, pensados para PHP y MariaDB alojados en servicios separados.
 - PDO con parámetros preparados, escape HTML y protección CSRF.
 - No modifica el esquema de la base ni copia información.
 - El guardado de facturas y sus conceptos está integrado. El timbrado fiscal, reenvío y cancelación permanecen separados para evitar emitir o alterar CFDI reales durante pruebas sin autenticación.

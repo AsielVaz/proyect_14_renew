@@ -29,19 +29,24 @@ final class InvoiceRepository
             LEFT JOIN formas_pago fp ON fp.id = f.forma_pago
             LEFT JOIN metodos_pago mp ON mp.id = f.metodo_pago
             LEFT JOIN usuarios u ON u.id = f.usuario_crea ';
-        $count = $this->pdo->prepare('SELECT COUNT(*)' . $joins . $where);
-        $count->execute($params);
-        $total = (int) $count->fetchColumn();
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min(max(1, $page), $lastPage);
+        $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
+        $fetchLimit = $perPage + 1;
         $query = $this->pdo->prepare('SELECT f.id, f.fecha, f.serie, f.folio, f.total_iva, f.uuid,
             f.status, f.status_error, f.status_pago, f.id_pago, c.nombre AS cliente,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
             fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
-            $joins . $where . " ORDER BY f.id DESC LIMIT {$perPage} OFFSET {$offset}");
+            $joins . $where . " ORDER BY f.id DESC LIMIT {$fetchLimit} OFFSET {$offset}");
         $query->execute($params);
-        return ['rows' => $query->fetchAll(), 'total' => $total, 'page' => $page, 'lastPage' => $lastPage];
+        $rows = $query->fetchAll();
+        $hasNext = count($rows) > $perPage;
+        if ($hasNext) {
+            array_pop($rows);
+        }
+        return [
+            'rows' => $rows, 'total' => count($rows), 'page' => $page,
+            'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
+        ];
     }
 
     public function formData(): array

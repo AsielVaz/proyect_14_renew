@@ -15,7 +15,7 @@ final class ReportRepository
     {
         [$source, $params, $sort] = $this->source($key, $filters);
         $columns = array_keys($definition['columns']);
-        $queryText = 'SELECT * FROM (' . $source . ') AS report_data';
+        $queryText = 'SELECT report_data.* FROM (' . $source . ') AS report_data';
 
         $search = trim((string) ($filters['q'] ?? ''));
         if ($search !== '') {
@@ -24,26 +24,29 @@ final class ReportRepository
             $params['report_search'] = '%' . $search . '%';
         }
 
-        $count = $this->pdo->prepare('SELECT COUNT(*) FROM (' . $queryText . ') AS report_count');
-        $count->execute($params);
-        $total = (int) $count->fetchColumn();
-
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min(max(1, $page), $lastPage);
-        $limit = $export ? 10000 : $perPage;
+        $page = max(1, $page);
+        $limit = $export ? 10001 : $perPage + 1;
         $offset = $export ? 0 : ($page - 1) * $perPage;
         $queryText .= ' ORDER BY ' . $sort . " LIMIT {$limit} OFFSET {$offset}";
 
         $query = $this->pdo->prepare($queryText);
         $query->execute($params);
-        $rows = $this->transform($key, $query->fetchAll());
+        $rows = $query->fetchAll();
+        $visibleLimit = $export ? 10000 : $perPage;
+        $hasNext = count($rows) > $visibleLimit;
+        if ($hasNext) {
+            array_pop($rows);
+        }
+        $rows = $this->transform($key, $rows);
 
         return [
             'rows' => $rows,
-            'total' => $total,
+            'total' => count($rows),
             'page' => $page,
-            'lastPage' => $lastPage,
-            'exportLimited' => $export && $total > $limit,
+            'lastPage' => $page + ($hasNext ? 1 : 0),
+            'hasNext' => $hasNext,
+            'totalExact' => false,
+            'exportLimited' => $export && $hasNext,
         ];
     }
 

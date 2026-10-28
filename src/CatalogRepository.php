@@ -28,17 +28,22 @@ final class CatalogRepository
             $where = ' WHERE ' . implode(' OR ', $parts);
         }
 
-        $count = $this->pdo->prepare("SELECT COUNT(*) FROM {$table}{$where}");
-        $count->execute($params);
-        $total = (int) $count->fetchColumn();
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min(max(1, $page), $lastPage);
+        $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
+        $fetchLimit = $perPage + 1;
 
-        $query = $this->pdo->prepare("SELECT {$select} FROM {$table}{$where} ORDER BY id DESC LIMIT {$perPage} OFFSET {$offset}");
+        $query = $this->pdo->prepare("SELECT {$select} FROM {$table}{$where} ORDER BY id DESC LIMIT {$fetchLimit} OFFSET {$offset}");
         $query->execute($params);
+        $rows = $query->fetchAll();
+        $hasNext = count($rows) > $perPage;
+        if ($hasNext) {
+            array_pop($rows);
+        }
 
-        return ['rows' => $query->fetchAll(), 'total' => $total, 'page' => $page, 'lastPage' => $lastPage];
+        return [
+            'rows' => $rows, 'total' => count($rows), 'page' => $page,
+            'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
+        ];
     }
 
     public function find(array $catalog, int $id): ?array

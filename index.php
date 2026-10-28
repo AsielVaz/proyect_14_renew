@@ -258,7 +258,7 @@ if ($catalog && $action === 'form' && $id) {
         <?php else: ?>
             <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage); ?>
             <section class="report-intro"><p>Facturas guardadas en la tabla original, con emisor, receptor, relación de pago y estado fiscal.</p></section>
-            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2><?= number_format($invoiceResult['total']) ?> facturas</h2></div><form method="get" class="search"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente…"><button class="button">Buscar</button></form></div>
+            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Facturas</h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="search"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente…"><button class="button">Buscar</button></form></div>
                 <div class="table-wrap"><table class="movement-table invoice-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado fiscal</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><tr>
                     <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? '') . ($row['folio'] ?? '')) ?> · <?= e($row['fecha']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa']) ?></span><span class="movement-cell-secondary"><?= e($row['usuario']) ?></span></td>
@@ -267,7 +267,7 @@ if ($catalog && $action === 'form' && $id) {
                     <td><?= e(report_value($row['total_iva'], 'money')) ?></td>
                     <td><span class="movement-cell-main"><?= e($row['status'] ?: (($row['uuid'] ?? '') ? 'Timbrada' : 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span></td>
                 </tr><?php endforeach; ?><?php if ($invoiceResult['rows'] === []): ?><tr><td colspan="6" class="empty">No hay facturas para mostrar.</td></tr><?php endif; ?></tbody></table></div>
-                <div class="pagination"><span>Página <?= $invoiceResult['page'] ?> de <?= $invoiceResult['lastPage'] ?></span><div><?php if ($invoiceResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($invoiceResult['page'] < $invoiceResult['lastPage']): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
+                <div class="pagination"><span>Página <?= $invoiceResult['page'] ?><?= $invoiceResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($invoiceResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($invoiceResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
             </section>
         <?php endif; ?>
     <?php elseif ($movement): ?>
@@ -313,7 +313,7 @@ if ($catalog && $action === 'form' && $id) {
                 </form>
             <?php endif; ?>
             <div class="panel-heading list-tools">
-                <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementResult['total']) ?> registros</h2></div>
+                <div><p class="eyebrow">Movimientos</p><h2><?= number_format(count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy">Resultados de la página actual</p></div>
                 <form method="get" class="search">
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
@@ -321,6 +321,9 @@ if ($catalog && $action === 'form' && $id) {
                     <button class="button" type="submit">Buscar</button>
                 </form>
             </div>
+            <?php if (in_array($movementAction, ['assign', 'reassign'], true)): ?>
+                <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
+            <?php endif; ?>
             <div class="table-wrap">
                 <table class="movement-table<?= $movementAction ? ' has-actions' : '' ?>">
                     <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
@@ -374,16 +377,15 @@ if ($catalog && $action === 'form' && $id) {
                             <?php if ($movementAction): ?>
                                 <td class="movement-action">
                                     <?php if ($movementAction === 'assign'): ?>
-                                        <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>">
+                                        <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>" data-client-picker>
                                             <option value="">Seleccionar cartera…</option>
-                                            <?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?>
                                         </select>
                                     <?php elseif ($movementAction === 'reassign'): ?>
                                         <form method="post" class="inline-operation" data-confirm="¿Confirmar esta reasignación y su cálculo de comisiones?" data-confirm-title="Confirmar reasignación">
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                             <input type="hidden" name="action" value="movement_reassign">
                                             <input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
-                                            <select name="client_id" aria-label="Cartera" required><option value="">Cartera…</option><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></select>
+                                            <select name="client_id" aria-label="Cartera" required data-client-picker><option value="">Cartera…</option></select>
                                             <button class="button primary" type="submit">Reasignar</button>
                                         </form>
                                     <?php elseif ($movementAction === 'unassign'): ?>
@@ -412,10 +414,10 @@ if ($catalog && $action === 'form' && $id) {
                 </div>
             <?php endif; ?>
             <div class="pagination">
-                <span>Página <?= $movementResult['page'] ?> de <?= $movementResult['lastPage'] ?></span>
+                <span>Página <?= $movementResult['page'] ?><?= $movementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span>
                 <div>
                     <?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
-                    <?php if ($movementResult['page'] < $movementResult['lastPage']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
+                    <?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
                 </div>
             </div>
         </section>
@@ -436,7 +438,7 @@ if ($catalog && $action === 'form' && $id) {
         </section>
         <section class="panel report-panel">
             <div class="panel-heading list-tools">
-                <div><p class="eyebrow">Resultados</p><h2><?= number_format($reportResult['total']) ?> registros</h2></div>
+                <div><p class="eyebrow">Resultados</p><h2><?= number_format(count($reportResult['rows'])) ?> registros</h2><p class="panel-copy">Resultados de la página actual</p></div>
                 <form method="get" class="report-filters">
                     <input type="hidden" name="report" value="<?= e($reportKey) ?>">
                     <input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="Buscar en el reporte…">
@@ -464,10 +466,10 @@ if ($catalog && $action === 'form' && $id) {
                 </table>
             </div>
             <div class="pagination">
-                <span>Página <?= $reportResult['page'] ?> de <?= $reportResult['lastPage'] ?></span>
+                <span>Página <?= $reportResult['page'] ?><?= $reportResult['hasNext'] ? ' · Hay más resultados' : '' ?></span>
                 <div>
                     <?php if ($reportResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query($queryValues + ['page' => $reportResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
-                    <?php if ($reportResult['page'] < $reportResult['lastPage']): ?><a class="button" href="?<?= e(http_build_query($queryValues + ['page' => $reportResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
+                    <?php if ($reportResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query($queryValues + ['page' => $reportResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
                 </div>
             </div>
         </section>
@@ -475,7 +477,7 @@ if ($catalog && $action === 'form' && $id) {
         <?php
         $dashboardSearch = trim((string) ($_GET['q'] ?? ''));
         $dashboardPage = max(1, (int) ($_GET['page'] ?? 1));
-        $dashboardOverview = dashboard_repository()->overview(current_operator_id());
+        $dashboardOverview = dashboard_overview(current_operator_id());
         $dashboardWallets = dashboard_repository()->wallets($dashboardSearch, $dashboardPage, current_operator_id());
         ?>
         <section class="dashboard-summary">
@@ -565,7 +567,7 @@ if ($catalog && $action === 'form' && $id) {
         ?>
         <section class="panel">
             <div class="panel-heading list-tools">
-                <div><p class="eyebrow">Registros</p><h2><?= number_format($result['total']) ?> encontrados</h2></div>
+                <div><p class="eyebrow">Registros</p><h2><?= number_format(count($result['rows'])) ?> resultados</h2><p class="panel-copy">Resultados de la página actual</p></div>
                 <form method="get" class="search">
                     <input type="hidden" name="catalog" value="<?= e($key) ?>">
                     <input type="search" name="q" value="<?= e($search) ?>" placeholder="Buscar en este catálogo…">
@@ -593,10 +595,10 @@ if ($catalog && $action === 'form' && $id) {
                 </table>
             </div>
             <div class="pagination">
-                <span>Página <?= $result['page'] ?> de <?= $result['lastPage'] ?></span>
+                <span>Página <?= $result['page'] ?><?= $result['hasNext'] ? ' · Hay más resultados' : '' ?></span>
                 <div>
                     <?php if ($result['page'] > 1): ?><a class="button" href="?catalog=<?= e($key) ?>&amp;q=<?= e(rawurlencode($search)) ?>&amp;page=<?= $result['page'] - 1 ?>">← Anterior</a><?php endif; ?>
-                    <?php if ($result['page'] < $result['lastPage']): ?><a class="button" href="?catalog=<?= e($key) ?>&amp;q=<?= e(rawurlencode($search)) ?>&amp;page=<?= $result['page'] + 1 ?>">Siguiente →</a><?php endif; ?>
+                    <?php if ($result['hasNext']): ?><a class="button" href="?catalog=<?= e($key) ?>&amp;q=<?= e(rawurlencode($search)) ?>&amp;page=<?= $result['page'] + 1 ?>">Siguiente →</a><?php endif; ?>
                 </div>
             </div>
         </section>
@@ -639,6 +641,13 @@ if ($catalog && $action === 'form' && $id) {
     const invoiceLines = document.getElementById('invoiceLines');
     const addInvoiceConcept = document.getElementById('addInvoiceConcept');
     const invoiceMoney = new Intl.NumberFormat('es-MX', {style: 'currency', currency: 'MXN'});
+
+    const movementClientOptions = document.getElementById('movementClientOptions');
+    if (movementClientOptions) {
+        document.querySelectorAll('select[data-client-picker]').forEach((select) => {
+            select.appendChild(movementClientOptions.content.cloneNode(true));
+        });
+    }
 
     const recalculateInvoice = () => {
         if (!invoiceLines) return;

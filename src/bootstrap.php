@@ -140,6 +140,22 @@ function dashboard_repository(): DashboardRepository
     return $repository ??= new DashboardRepository(db());
 }
 
+function dashboard_overview(int $operatorId): array
+{
+    $ttl = max(0, (int) env_value('DASHBOARD_CACHE_SECONDS', '30'));
+    $cacheKey = 'dashboard_overview_' . $operatorId;
+    $cached = $_SESSION[$cacheKey] ?? null;
+    if ($ttl > 0 && is_array($cached) && (int) ($cached['expires'] ?? 0) >= time() && is_array($cached['data'] ?? null)) {
+        return $cached['data'];
+    }
+
+    $data = dashboard_repository()->overview($operatorId);
+    if ($ttl > 0) {
+        $_SESSION[$cacheKey] = ['expires' => time() + $ttl, 'data' => $data];
+    }
+    return $data;
+}
+
 function report_value(mixed $value, string $format = 'text'): string
 {
     if ($value === null || $value === '') {

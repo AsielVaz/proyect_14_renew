@@ -46,17 +46,20 @@ final class MovementRepository
             $queryText .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
-        $count = $this->pdo->prepare('SELECT COUNT(*) FROM (' . $queryText . ') movement_count');
-        $count->execute($params);
-        $total = (int) $count->fetchColumn();
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min(max(1, $page), $lastPage);
+        $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
-
-        $query = $this->pdo->prepare($queryText . " ORDER BY {$sort} LIMIT {$perPage} OFFSET {$offset}");
+        $fetchLimit = $perPage + 1;
+        $query = $this->pdo->prepare($queryText . " ORDER BY {$sort} LIMIT {$fetchLimit} OFFSET {$offset}");
         $query->execute($params);
-
-        return ['rows' => $query->fetchAll(), 'total' => $total, 'page' => $page, 'lastPage' => $lastPage];
+        $rows = $query->fetchAll();
+        $hasNext = count($rows) > $perPage;
+        if ($hasNext) {
+            array_pop($rows);
+        }
+        return [
+            'rows' => $rows, 'total' => count($rows), 'page' => $page,
+            'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
+        ];
     }
 
     public function clients(): array
