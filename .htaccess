@@ -1,6 +1,12 @@
 Options -Indexes
 DirectoryIndex index.php
 
-<FilesMatch "^(\.env(?:\..*)?|README\.md|database\.php)$">
+<FilesMatch "^(\.env(?:\..*)?|.*\.(?:md|sql|log|ini)|database\.php)$">
+    Require all denied
+</FilesMatch>
+
+# El único controlador público PHP es index.php. Las clases, vistas y
+# configuración continúan disponibles para includes internos, no por HTTP.
+<FilesMatch "^(?!index\.php$).*\.php$">
     Require all denied
 </FilesMatch>

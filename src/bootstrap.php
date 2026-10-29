@@ -7,6 +7,9 @@ use App\ReportRepository;
 use App\MovementRepository;
 use App\InvoiceRepository;
 use App\DashboardRepository;
+use App\PaymentComplementRepository;
+use App\CompanyPanelRepository;
+use App\CaptureAnalysisService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -61,7 +64,23 @@ spl_autoload_register(static function (string $class): void {
 });
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+    ini_set('session.cookie_httponly', '1');
+    ini_set('session.cookie_samesite', 'Lax');
+    $configuredPath = (string) (parse_url(env_value('APP_URL'), PHP_URL_PATH) ?: '/');
+    $configuredPath = rtrim($configuredPath, '/') . '/';
+    $httpsRequest = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+        || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
+    $secureCookie = filter_var(env_value('SESSION_SECURE_COOKIE', $httpsRequest ? 'true' : 'false'), FILTER_VALIDATE_BOOL);
     session_name(env_value('SESSION_NAME', 'proyect_14_session'));
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => $configuredPath,
+        'secure' => $secureCookie,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
     session_start();
 }
 
@@ -69,8 +88,16 @@ date_default_timezone_set(env_value('APP_TIMEZONE', 'America/Mexico_City'));
 
 function current_operator_id(): int
 {
-    // Sustituir por la cookie/sesión autenticada cuando se integre el login.
-    return (int) env_value('APP_OPERATOR_ID', '1');
+    $operatorId = (int) ($_SESSION['auth_user']['id'] ?? 0);
+    if ($operatorId <= 0) {
+        throw new RuntimeException('La sesión autenticada no está disponible.');
+    }
+    return $operatorId;
+}
+
+function current_user(): array
+{
+    return is_array($_SESSION['auth_user'] ?? null) ? $_SESSION['auth_user'] : [];
 }
 
 function app_url(string $path = ''): string
@@ -83,6 +110,30 @@ function app_url(string $path = ''): string
         return $base . '/' . $path;
     }
     return $base . '/' . ltrim($path, '/');
+}
+
+function legacy_asset_url(?string $path): string
+{
+    $path = trim((string) $path);
+    if ($path === '') {
+        return '';
+    }
+    $path = preg_replace('#^https?://[^/]+/#i', '', $path) ?? $path;
+    $path = ltrim($path, '/');
+    if (str_starts_with($path, 'sistema/')) {
+        $path = substr($path, strlen('sistema/'));
+    }
+    $base = rtrim(env_value('APP_URL'), '/');
+    $parts = parse_url($base);
+    $origin = ($parts['scheme'] ?? 'http') . '://' . ($parts['host'] ?? 'localhost');
+    if (isset($parts['port'])) {
+        $origin .= ':' . $parts['port'];
+    }
+    $applicationPath = rtrim((string) ($parts['path'] ?? ''), '/');
+    $parentPath = $applicationPath === '' ? '' : rtrim(str_replace('\\', '/', dirname($applicationPath)), '/.');
+    $segments = array_values(array_filter(explode('/', preg_replace('#/+#', '/', $path) ?? $path), 'strlen'));
+    return $origin . ($parentPath !== '' ? '/' . ltrim($parentPath, '/') : '')
+        . '/sistema/' . implode('/', array_map('rawurlencode', $segments));
 }
 
 function db(): PDO
@@ -134,10 +185,44 @@ function invoice_repository(): InvoiceRepository
     return $repository ??= new InvoiceRepository(db());
 }
 
+function payment_complement_repository(): PaymentComplementRepository
+{
+    static $repository;
+    return $repository ??= new PaymentComplementRepository(db());
+}
+
+function company_panel_repository(): CompanyPanelRepository
+{
+    static $repository;
+    return $repository ??= new CompanyPanelRepository(db());
+}
+
+function capture_analysis_service(): CaptureAnalysisService
+{
+    static $service;
+    return $service ??= new CaptureAnalysisService(db(), company_panel_repository());
+}
+
 function dashboard_repository(): DashboardRepository
 {
     static $repository;
     return $repository ??= new DashboardRepository(db());
+}
+
+function auth_service(): App\AuthService
+{
+    static $service;
+    return $service ??= new App\AuthService(db());
+}
+
+function auth_rate_limiter(): App\AuthRateLimiter
+{
+    static $limiter;
+    return $limiter ??= new App\AuthRateLimiter(
+        env_value('APP_KEY'),
+        max(3, (int) env_value('AUTH_MAX_ATTEMPTS', '5')),
+        max(60, (int) env_value('AUTH_LOCK_SECONDS', '900')),
+    );
 }
 
 function dashboard_overview(int $operatorId): array
@@ -209,4 +294,29 @@ function redirect(string $url): never
     }
     header('Location: ' . $url);
     exit;
+}
+
+function csp_nonce(): string
+{
+    static $nonce;
+    return $nonce ??= base64_encode(random_bytes(18));
+}
+
+function send_security_headers(): void
+{
+    if (headers_sent()) {
+        return;
+    }
+    header_remove('X-Powered-By');
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Referrer-Policy: no-referrer');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    header('Cross-Origin-Opener-Policy: same-origin');
+    header('Cache-Control: no-store, private, max-age=0');
+    if ((!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+        || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443') {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+    header('Content-Security-Policy: default-src \'self\'; base-uri \'self\'; form-action \'self\'; frame-ancestors \'none\'; object-src \'none\'; img-src \'self\' data:; style-src \'self\' \'unsafe-inline\'; script-src \'self\' \'nonce-' . csp_nonce() . '\'; connect-src \'self\'');
 }

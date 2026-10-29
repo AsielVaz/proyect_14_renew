@@ -3,6 +3,10 @@
 declare(strict_types=1);
 
 require __DIR__ . '/src/bootstrap.php';
+require __DIR__ . '/src/auth.php';
+
+send_security_headers();
+handle_authentication();
 
 use App\Catalogs;
 use App\Movements;
@@ -20,8 +24,40 @@ $movement = $movementKey !== '' ? Movements::get($movementKey) : null;
 $movementAction = $movement['action'] ?? null;
 $invoiceView = (string) ($_GET['invoice'] ?? '');
 $invoiceModule = in_array($invoiceView, ['list', 'create'], true);
+$complementView = (string) ($_GET['complement'] ?? '');
+$complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
+$companyView = (string) ($_GET['companies'] ?? '');
+$companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture', 'movements', 'account', 'analyze'], true);
 $action = (string) ($_GET['action'] ?? 'list');
-$id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT) ?: null;
+$id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+
+if ($companyView === 'analyze' && in_array((string) ($_GET['data'] ?? ''), ['parse', 'short_keys'], true)
+    && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=UTF-8');
+    try {
+        verify_csrf();
+        if (($_GET['data'] ?? '') === 'parse') {
+            $analysis = capture_analysis_service()->analyze(
+                (int) ($id ?? 0), (int) ($_POST['account_id'] ?? 0),
+                (string) ($_POST['capture'] ?? ''), current_operator_id()
+            );
+            echo json_encode(['ok' => true, 'analysis' => $analysis], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        } else {
+            $descriptions = json_decode((string) ($_POST['descriptions'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($descriptions)) {
+                throw new RuntimeException('La lista de movimientos no es válida.');
+            }
+            $matches = company_panel_repository()->analyzeShortKeys(
+                (int) ($id ?? 0), (int) ($_POST['account_id'] ?? 0), $descriptions, current_operator_id()
+            );
+            echo json_encode(['ok' => true, 'matches' => $matches], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        }
+    } catch (Throwable $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
 
 if ($invoiceModule && isset($_GET['data'])) {
     header('Content-Type: application/json; charset=UTF-8');
@@ -29,6 +65,17 @@ if ($invoiceModule && isset($_GET['data'])) {
         'receivers' => invoice_repository()->receivers((int) ($_GET['client'] ?? 0)),
         'concepts' => invoice_repository()->concepts((int) ($_GET['company'] ?? 0)),
         default => throw new RuntimeException('Catálogo de facturación desconocido.'),
+    };
+    echo json_encode(['ok' => true, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    exit;
+}
+
+if ($complementModule && isset($_GET['data'])) {
+    header('Content-Type: application/json; charset=UTF-8');
+    $data = match ((string) $_GET['data']) {
+        'receivers' => payment_complement_repository()->receivers((int) ($_GET['client'] ?? 0)),
+        'invoice' => payment_complement_repository()->invoiceByUuid((string) ($_GET['uuid'] ?? '')),
+        default => throw new RuntimeException('Consulta de complementos desconocida.'),
     };
     echo json_encode(['ok' => true, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     exit;
@@ -54,7 +101,19 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         verify_csrf();
         $postAction = (string) ($_POST['action'] ?? '');
-        if ($invoiceModule) {
+        if ($complementModule) {
+            if ($postAction === 'complement_create') {
+                $complementId = payment_complement_repository()->create($_POST);
+                flash('success', 'Complemento #' . $complementId . ' guardado con sus facturas relacionadas. Quedó pendiente de timbrado.');
+                redirect('?complement=detail&id=' . $complementId);
+            } elseif ($postAction === 'complement_delete') {
+                payment_complement_repository()->deletePending((int) ($_POST['id'] ?? 0));
+                flash('success', 'Complemento pendiente eliminado junto con sus relaciones.');
+                redirect('?complement=list');
+            } else {
+                throw new RuntimeException('Acción de complemento no permitida.');
+            }
+        } elseif ($invoiceModule) {
             if ($postAction !== 'invoice_create') {
                 throw new RuntimeException('Acción de facturación no permitida.');
             }
@@ -119,7 +178,7 @@ try {
         exit;
     }
     flash('error', $exception->getMessage());
-    $target = $invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './'));
+    $target = $complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './')));
     redirect($target);
 }
 
@@ -132,6 +191,45 @@ if ($catalog && $action === 'form' && $id) {
         redirect('?catalog=' . rawurlencode($key));
     }
 }
+
+$companyError = null;
+$companyData = null;
+$companyResult = null;
+$companySummary = null;
+$companyCapture = null;
+if ($companyModule) {
+    try {
+        $operatorId = current_operator_id();
+        $companyPage = max(1, (int) ($_GET['page'] ?? 1));
+        if ($companyView === 'list') {
+            $companyResult = company_panel_repository()->companies(trim((string) ($_GET['q'] ?? '')), $companyPage, $operatorId);
+        } else {
+            $companyId = (int) ($id ?? 0);
+            $companyData = company_panel_repository()->company($companyId, $operatorId);
+            if ($companyView === 'detail') {
+                $companySummary = company_panel_repository()->summary($companyId, $operatorId);
+            } elseif ($companyView === 'captures') {
+                $companyResult = company_panel_repository()->captures($companyId, $_GET, $companyPage, $operatorId);
+            } elseif ($companyView === 'movements') {
+                $companyResult = company_panel_repository()->movements($companyId, $_GET, $companyPage, $operatorId);
+            } elseif ($companyView === 'capture') {
+                $captureId = (int) ($_GET['capture_id'] ?? 0);
+                $companyCapture = company_panel_repository()->capture($companyId, $captureId, $operatorId);
+                $companyResult = company_panel_repository()->captureMovements($captureId, $companyPage);
+            } elseif ($companyView === 'account') {
+                $companyResult = company_panel_repository()->accountMovements(
+                    $companyId, (int) ($_GET['account_id'] ?? 0), $_GET, $companyPage, $operatorId
+                );
+            } elseif ($companyView === 'analyze') {
+                $companyResult = ['account' => company_panel_repository()->accountMovements(
+                    $companyId, (int) ($_GET['account_id'] ?? 0), [], 1, $operatorId, 1
+                )['account']];
+            }
+        }
+    } catch (Throwable $exception) {
+        $companyError = $exception->getMessage();
+    }
+}
 ?>
 <!doctype html>
 <html lang="es">
@@ -139,7 +237,7 @@ if ($catalog && $action === 'form' && $id) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <base href="<?= e(app_url('/')) ?>">
-    <title><?= e($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : 'Facturas') : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')) ?> · Sistema 14</title>
+    <title><?= e($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Detalle de complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : 'Facturas') : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
@@ -148,9 +246,13 @@ if ($catalog && $action === 'form' && $id) {
 <aside class="sidebar">
     <a class="brand" href="./"><img src="assets/logo-s14.png" alt="Sistema 14"><strong>Sistema 14</strong></a>
     <nav class="main-nav">
-        <a class="dashboard-link <?= !$catalog && !$report && !$movement && !$invoiceModule ? 'active' : '' ?>" href="./">
+        <a class="dashboard-link <?= !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule ? 'active' : '' ?>" href="./">
             <span class="nav-icon">⌂</span>
             Panel principal
+        </a>
+        <a class="dashboard-link <?= $companyModule ? 'active' : '' ?>" href="?companies=list">
+            <span class="nav-icon">▥</span>
+            Panel de empresas
         </a>
         <details class="catalog-menu" <?= $catalog ? 'open' : '' ?>>
             <summary>
@@ -178,11 +280,12 @@ if ($catalog && $action === 'form' && $id) {
                 <?php endforeach; ?>
             </div>
         </details>
-        <details class="catalog-menu" <?= $invoiceModule ? 'open' : '' ?>>
+        <details class="catalog-menu" <?= $invoiceModule || $complementModule ? 'open' : '' ?>>
             <summary><span><span class="nav-icon">▧</span> Facturación</span><span class="chevron">⌄</span></summary>
             <div class="catalog-links">
                 <a class="<?= $invoiceView === 'list' ? 'active' : '' ?>" href="?invoice=list"><span></span>Facturas</a>
                 <a class="<?= $invoiceView === 'create' ? 'active' : '' ?>" href="?invoice=create"><span></span>Crear factura</a>
+                <a class="<?= $complementModule ? 'active' : '' ?>" href="?complement=list"><span></span>Complementos de pago</a>
             </div>
         </details>
         <details class="catalog-menu report-menu" <?= $report ? 'open' : '' ?>>
@@ -199,14 +302,23 @@ if ($catalog && $action === 'form' && $id) {
             </div>
         </details>
     </nav>
-    <p class="phase">Sistema 14 renovado · PHP <?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?><br>Acceso sin login</p>
+    <?php $signedUser = current_user(); ?>
+    <div class="session-user">
+        <span><?= e($signedUser['name'] ?? '') ?></span>
+        <small><?= e($signedUser['type'] ?? '') ?></small>
+        <form method="post" action="?auth=logout">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <button type="submit">Cerrar sesión</button>
+        </form>
+    </div>
+    <p class="phase">Sistema 14 renovado · PHP <?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?></p>
 </aside>
 
 <main>
     <header class="topbar">
         <div>
-            <p class="eyebrow"><?= $invoiceModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración')) ?></p>
-            <h1><?= e($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : 'Facturas') : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))) ?></h1>
+            <p class="eyebrow"><?= $companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))) ?></p>
+            <h1><?= e($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Detalle de complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : 'Facturas') : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))) ?></h1>
         </div>
         <?php if ($catalog && $action !== 'form'): ?>
             <a class="button primary" href="?catalog=<?= e($key) ?>&amp;action=form">+ Nuevo registro</a>
@@ -214,6 +326,8 @@ if ($catalog && $action === 'form' && $id) {
             <a class="button primary" href="?movement=traspasos&amp;action=form">+ Nuevo traspaso</a>
         <?php elseif ($invoiceView === 'list'): ?>
             <a class="button primary" href="?invoice=create">+ Nueva factura</a>
+        <?php elseif ($complementView === 'list'): ?>
+            <a class="button primary" href="?complement=create">+ Nuevo complemento</a>
         <?php endif; ?>
     </header>
 
@@ -227,7 +341,172 @@ if ($catalog && $action === 'form' && $id) {
         </div>
     <?php endif; ?>
 
-    <?php if ($invoiceModule): ?>
+    <?php if ($companyModule): ?>
+        <?php if ($companyError): ?>
+            <section class="panel"><div class="empty"><strong>No se pudo abrir el panel.</strong><br><?= e($companyError) ?><br><a href="?companies=list">Volver a empresas</a></div></section>
+        <?php elseif ($companyView === 'list'): ?>
+            <section class="report-intro"><p>Consulta cada empresa, sus cuentas bancarias, capturas importadas y movimientos conciliados.</p><span class="operation-badge">Vista operativa</span></section>
+            <section class="panel">
+                <div class="panel-heading list-tools">
+                    <div><p class="eyebrow">Empresas activas</p><h2>Directorio de empresas</h2><p class="panel-copy"><?= count($companyResult['rows'] ?? []) ?> resultados en esta página</p></div>
+                    <form method="get" class="search"><input type="hidden" name="companies" value="list"><input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="Razón social, RFC o ID…"><button class="button">Buscar</button></form>
+                </div>
+                <div class="company-grid">
+                    <?php foreach ($companyResult['rows'] ?? [] as $item): ?>
+                        <a class="company-card" href="?companies=detail&amp;id=<?= e($item['id']) ?>">
+                            <div class="company-card-media">
+                                <?php if (trim((string) ($item['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($item['logo'])) ?>" alt="" loading="lazy"><?php else: ?><span><?= e(mb_strtoupper(mb_substr((string) $item['razon'], 0, 2))) ?></span><?php endif; ?>
+                            </div>
+                            <div class="company-card-body"><small>Empresa #<?= e($item['id']) ?></small><strong><?= e($item['razon']) ?></strong><span><?= e($item['rfc'] ?: 'RFC no registrado') ?></span></div>
+                            <div class="company-card-footer"><span><?= e($item['cuentas']) ?> cuentas activas</span><b>Ver panel →</b></div>
+                        </a>
+                    <?php endforeach; ?>
+                    <?php if (($companyResult['rows'] ?? []) === []): ?><div class="empty">No se encontraron empresas con ese criterio.</div><?php endif; ?>
+                </div>
+                <?php $companyListQuery = ['companies' => 'list', 'q' => (string) ($_GET['q'] ?? '')]; ?>
+                <div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($companyListQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($companyListQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div>
+            </section>
+        <?php elseif ($companyView === 'detail'): ?>
+            <section class="company-identity panel">
+                <div class="company-identity-logo"><?php if (trim((string) ($companyData['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($companyData['logo'])) ?>" alt=""><?php else: ?><span><?= e(mb_strtoupper(mb_substr((string) $companyData['razon'], 0, 2))) ?></span><?php endif; ?></div>
+                <div><p class="eyebrow">Empresa #<?= e($companyData['id']) ?></p><h2><?= e($companyData['razon']) ?></h2><p><?= e($companyData['rfc'] ?: 'RFC no registrado') ?> · <?= e(trim(implode(' ', array_filter([$companyData['calle'], $companyData['numero'], $companyData['colonia'], $companyData['cp'], $companyData['estado']]))) ?: 'Domicilio no registrado') ?></p></div>
+                <a class="button" href="?companies=list">Todas las empresas</a>
+            </section>
+            <div class="company-summary-grid">
+                <article><span>Capturas</span><strong><?= number_format((int) ($companySummary['capturas'] ?? 0)) ?></strong><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Consultar</a></article>
+                <article><span>Movimientos</span><strong><?= number_format((int) ($companySummary['movimientos'] ?? 0)) ?></strong><a href="?companies=movements&amp;id=<?= e($companyData['id']) ?>">Consultar</a></article>
+                <article><span>Por facturar</span><strong><?= number_format((int) ($companySummary['pendientes'] ?? 0)) ?></strong><small>Movimientos no retirados</small></article>
+                <article><span>Depósitos sin facturar</span><strong><?= e(report_value($companySummary['sin_facturar'] ?? 0, 'money')) ?></strong><small>Importe acumulado</small></article>
+            </div>
+            <section class="panel">
+                <div class="panel-heading"><div><p class="eyebrow">Bancos</p><h2>Cuentas activas</h2><p class="panel-copy">Saldo calculado con los depósitos y retiros importados.</p></div><div class="panel-actions"><a class="button" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Capturas</a><a class="button" href="?companies=movements&amp;id=<?= e($companyData['id']) ?>">Movimientos</a></div></div>
+                <div class="company-account-grid">
+                    <?php foreach ($companyData['accounts'] as $account): ?>
+                        <article class="company-account-card" style="--account-color: <?= e(preg_match('/^#?[0-9a-f]{6}$/i', (string) $account['color']) ? '#' . ltrim((string) $account['color'], '#') : '#59657a') ?>">
+                            <div><span class="account-dot"></span><small><?= e($account['banco']) ?> · <?= e($account['moneda'] ?: 'MXN') ?></small></div><h3><?= e($account['nombre_corto'] ?: ('Cuenta #' . $account['id'])) ?></h3>
+                            <strong><?= e(report_value($account['saldo'], 'money')) ?></strong><p><?= e($account['numero_cuenta'] ?: 'Número no registrado') ?></p>
+                            <dl><div><dt>Capturas</dt><dd><?= number_format((int) $account['capturas']) ?></dd></div><div><dt>Última actividad</dt><dd><?= e($account['ultima_actividad'] ?: 'Sin movimientos') ?></dd></div></dl>
+                            <div class="company-account-actions"><a href="?companies=account&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>">Estado de cuenta</a><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>&amp;account=<?= e($account['id']) ?>">Capturas</a><a href="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>">Analizar captura</a></div>
+                        </article>
+                    <?php endforeach; ?>
+                    <?php if ($companyData['accounts'] === []): ?><div class="empty">Esta empresa no tiene cuentas bancarias activas.</div><?php endif; ?>
+                </div>
+            </section>
+        <?php elseif ($companyView === 'analyze'): ?>
+            <section class="report-intro"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · Analizar captura bancaria</p><span class="operation-badge"><?= e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) ?></span></section>
+            <section class="panel capture-analyzer-panel">
+                <div class="panel-heading"><div><p class="eyebrow">Paso previo a la carga</p><h2>Analizar movimientos</h2><p class="panel-copy">Pega la captura conservando su formato. El análisis no guarda información y verifica cada movimiento contra la tabla de claves cortas.</p></div><a class="button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>">Volver al panel</a></div>
+                <form id="captureAnalyzer" class="capture-analyzer" data-parser-url="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;data=parse" data-company-id="<?= e($companyData['id']) ?>" data-account-id="<?= e($companyResult['account']['id']) ?>">
+                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                    <label class="field"><span>Contenido de la captura *</span><div id="captureEditor" class="capture-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Pega aquí la tabla o captura copiada desde el portal bancario…"></div></label>
+                    <div class="capture-analyzer-actions"><button type="button" class="button" id="clearCaptureAnalysis">Limpiar</button><button type="submit" class="button primary" id="analyzeCapture">Analizar antes de cargar</button></div>
+                </form>
+            </section>
+            <section class="panel" id="captureAnalysisResult" hidden>
+                <div class="panel-heading"><div><p class="eyebrow">Resultado del análisis</p><h2>Movimientos detectados</h2><p class="panel-copy" id="captureAnalysisMessage"></p></div></div>
+                <div class="company-summary-grid capture-analysis-summary" id="captureAnalysisSummary"></div>
+                <div class="table-wrap"><table class="movement-table"><thead><tr><th>#</th><th>Fecha</th><th>Descripción / referencia</th><th>Tipo</th><th>Importe</th><th>Duplicado</th><th>Clave corta asociada</th></tr></thead><tbody id="captureAnalysisRows"></tbody></table></div>
+                <div class="capture-analysis-note"><strong>Revisión previa</strong><span>“Sin clave asociada” no impide revisar el movimiento, pero indica que no se encontró ninguna clave de <code>claves_cortas</code> dentro de su descripción o referencia.</span></div>
+            </section>
+        <?php elseif (in_array($companyView, ['captures', 'movements', 'account'], true)): ?>
+            <?php
+                $isCaptures = $companyView === 'captures';
+                $isAccount = $companyView === 'account';
+                $sectionLabel = $isCaptures ? 'Capturas bancarias' : ($isAccount ? 'Estado de cuenta' : 'Movimientos de la empresa');
+                $baseQuery = ['companies' => $companyView, 'id' => $companyData['id']];
+                if ($isAccount) { $baseQuery['account_id'] = (int) ($_GET['account_id'] ?? 0); }
+                foreach (['q', 'from', 'to', 'account'] as $filterKey) { if (isset($_GET[$filterKey]) && $_GET[$filterKey] !== '') { $baseQuery[$filterKey] = (string) $_GET[$filterKey]; } }
+            ?>
+            <section class="report-intro"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · <?= e($sectionLabel) ?></p><span class="operation-badge"><?= $isAccount ? e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) : 'Consulta histórica' ?></span></section>
+            <section class="panel">
+                <div class="panel-heading list-tools"><div><p class="eyebrow">Tesorería</p><h2><?= e($sectionLabel) ?></h2><p class="panel-copy"><?= count($companyResult['rows'] ?? []) ?> registros en esta página</p></div><a class="button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>">Volver al panel</a></div>
+                <form method="get" class="report-filters company-filters"><input type="hidden" name="companies" value="<?= e($companyView) ?>"><input type="hidden" name="id" value="<?= e($companyData['id']) ?>"><?php if ($isAccount): ?><input type="hidden" name="account_id" value="<?= e($_GET['account_id'] ?? '') ?>"><?php endif; ?><input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="ID, referencia, descripción…"><label>Desde<input type="date" name="from" value="<?= e($_GET['from'] ?? '') ?>"></label><label>Hasta<input type="date" name="to" value="<?= e($_GET['to'] ?? '') ?>"></label><?php if (!$isAccount): ?><label>Cuenta<select name="account"><option value="">Todas</option><?php foreach ($companyData['accounts'] as $account): ?><option value="<?= e($account['id']) ?>" <?= (string) ($_GET['account'] ?? '') === (string) $account['id'] ? 'selected' : '' ?>><?= e($account['banco'] . ' · ' . $account['nombre_corto']) ?></option><?php endforeach; ?></select></label><?php endif; ?><button class="button">Filtrar</button></form>
+                <div class="table-wrap"><table class="movement-table"><thead><tr>
+                    <?php if ($isCaptures): ?><th>Captura</th><th>Fecha</th><th>Cuenta</th><th>Movimientos</th><th>Depósitos</th><th>Retiros</th><th></th>
+                    <?php elseif ($isAccount): ?><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Captura</th>
+                    <?php else: ?><th>Movimiento</th><th>Fecha</th><th>Cliente / cuenta</th><th>Tipo / estado</th><th>Monto</th><th>Factura</th><th>Captura</th><?php endif; ?>
+                </tr></thead><tbody>
+                    <?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr>
+                        <?php if ($isCaptures): ?>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e(trim((string) ($row['fecha'] . ' ' . $row['hora']))) ?></td><td><span class="movement-cell-main"><?= e($row['nombre_corto'] ?: ('Cuenta #' . $row['cuenta_id'])) ?></span><span class="movement-cell-secondary"><?= e(($row['banco'] ?: 'Banco no identificado') . ' · ' . ($row['moneda'] ?: 'MXN')) ?></span></td><td><?= number_format((int) $row['movimientos']) ?></td><td><?= e(report_value($row['depositos'], 'money')) ?></td><td><?= e(report_value($row['retiros'], 'money')) ?></td><td><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id']) ?>">Ver detalle</a></td>
+                        <?php elseif ($isAccount): ?>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
+                        <?php else: ?>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e($row['fecha_banco'] ?: ($row['fecha_operacion'] ?: $row['fecha_captura'])) ?></td><td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['cuenta'] ?: 'Sin cuenta') ?></span></td><td><span class="movement-cell-main"><?= e($row['tipo_movimiento'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['status'] ?: 'Sin estado') ?></span></td><td><span class="movement-cell-main"><?= e(report_value($row['monto'], 'money')) ?></span><span class="movement-cell-secondary">Acreditable: <?= e(report_value($row['saldo_acreditable'], 'money')) ?></span></td><td><?= e($row['factura'] ?: '—') ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
+                        <?php endif; ?>
+                    </tr><?php endforeach; ?>
+                    <?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">No hay registros para los filtros seleccionados.</td></tr><?php endif; ?>
+                </tbody></table></div>
+                <div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($baseQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($baseQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div>
+            </section>
+        <?php elseif ($companyView === 'capture'): ?>
+            <?php $capturePageQuery = ['companies' => 'capture', 'id' => $companyData['id'], 'capture_id' => $companyCapture['id']]; ?>
+            <section class="report-intro"><p><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Capturas de <?= e($companyData['razon']) ?></a> · Captura #<?= e($companyCapture['id']) ?></p><span class="operation-badge"><?= e(($companyCapture['banco'] ?: 'Banco') . ' · ' . ($companyCapture['nombre_corto'] ?: ('Cuenta #' . $companyCapture['cuenta_id']))) ?></span></section>
+            <div class="company-summary-grid capture-summary"><article><span>Movimientos</span><strong><?= number_format((int) ($companyCapture['summary']['movimientos'] ?? 0)) ?></strong></article><article><span>Depósitos</span><strong><?= e(report_value($companyCapture['summary']['depositos'] ?? 0, 'money')) ?></strong></article><article><span>Retiros</span><strong><?= e(report_value($companyCapture['summary']['retiros'] ?? 0, 'money')) ?></strong></article><article><span>Fecha de captura</span><strong><?= e(trim((string) ($companyCapture['fecha'] . ' ' . $companyCapture['hora']))) ?></strong></article></div>
+            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Contenido importado</p><h2>Archivo bancario original</h2><p class="panel-copy"><?php if ((int) $companyCapture['captura_longitud'] > 50000): ?>Vista limitada a los primeros 50,000 caracteres de <?= number_format((int) $companyCapture['captura_longitud']) ?>.<?php else: ?>Contenido completo almacenado por el sistema legado.<?php endif; ?></p></div><a class="button" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Volver</a></div><pre class="capture-raw"><?= e($companyCapture['captura']) ?></pre></section>
+            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Desglose</p><h2>Movimientos de la captura</h2></div></div><div class="table-wrap"><table class="movement-table"><thead><tr><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Tipo</th></tr></thead><tbody><?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr><td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?= e($row['tipo_movimiento'] ?: '—') ?></td></tr><?php endforeach; ?><?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">La captura no contiene movimientos desglosados.</td></tr><?php endif; ?></tbody></table></div><div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div></section>
+        <?php endif; ?>
+    <?php elseif ($complementModule): ?>
+        <?php if ($complementView === 'create'): ?>
+            <?php $complementData = payment_complement_repository()->formData(); ?>
+            <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
+            <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_create">
+                <section class="panel invoice-form-panel">
+                    <div class="panel-heading"><div><p class="eyebrow">Datos del pago</p><h2>Emisor y receptor</h2></div><a class="button" href="?complement=list">Volver</a></div>
+                    <div class="form-grid invoice-header-grid">
+                        <label class="field"><span>Empresa emisora *</span><select name="company_id" id="complementCompany" required><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Cliente *</span><select name="client_id" id="complementClient" required><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Razón social *</span><select name="receiver_id" id="complementReceiver" required disabled><option value="">Selecciona primero un cliente…</option></select></label>
+                        <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e(date('Y-m-d')) ?>" required></label>
+                        <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
+                        <label class="field"><span>Movimiento de pago</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label>
+                    </div>
+                </section>
+                <section class="panel invoice-concepts-panel">
+                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID; el sistema consulta el saldo vigente antes de agregarlo.</p></div><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div>
+                    <div class="table-wrap"><table class="invoice-lines complement-lines"><thead><tr><th>UUID / factura</th><th>Saldo anterior</th><th>Monto pagado</th><th>Parcialidad</th><th>Saldo restante</th><th></th></tr></thead><tbody id="complementLines"></tbody></table></div>
+                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar complemento</button></div>
+                </section>
+            </form>
+        <?php elseif ($complementView === 'detail'): ?>
+            <?php $complement = payment_complement_repository()->find((int) ($id ?? 0)); ?>
+            <?php if (!$complement): ?>
+                <section class="panel"><div class="empty">No se encontró el complemento solicitado. <a href="?complement=list">Volver al listado</a></div></section>
+            <?php else: ?>
+                <section class="report-intro"><p>Relación fiscal y aplicación del pago a sus facturas PPD.</p><span class="operation-badge"><?= e(trim((string) ($complement['uuid'] ?? '')) !== '' ? 'Timbrado' : 'Pendiente de timbrado') ?></span></section>
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><a class="button" href="?complement=list">Volver</a></div>
+                    <dl class="complement-detail-grid">
+                        <div><dt>Empresa emisora</dt><dd><?= e($complement['empresa'] ?: '—') ?></dd></div><div><dt>Cliente</dt><dd><?= e($complement['cliente'] ?: '—') ?></dd></div>
+                        <div><dt>Receptor</dt><dd><?= e($complement['receptor'] ?: '—') ?><small><?= e($complement['rfc'] ?: '') ?></small></dd></div><div><dt>Forma de pago</dt><dd><?= e(trim((string) ($complement['forma_pago'] ?? '—'))) ?></dd></div>
+                        <div><dt>Fecha del pago</dt><dd><?= e(substr((string) $complement['fecha_pago'], 0, 10)) ?></dd></div><div><dt>Tratamiento</dt><dd><?= e($complement['cadena'] ?: 'T') ?></dd></div>
+                        <div><dt>Movimiento asociado</dt><dd><?= (int) ($complement['id_pago'] ?? 0) > 0 ? '#' . e($complement['id_pago']) : '—' ?></dd></div><div><dt>Total</dt><dd><?= e(report_value($complement['total_factura'], 'money')) ?></dd></div>
+                    </dl>
+                    <div class="table-wrap"><table class="movement-table"><thead><tr><th>Factura</th><th>UUID</th><th>Saldo anterior</th><th>Pago / parcialidad</th><th>Saldo restante</th></tr></thead><tbody><?php foreach ($complement['relations'] as $relation): ?><tr>
+                        <td><span class="movement-cell-main">#<?= e($relation['id_factura']) ?></span><span class="movement-cell-secondary"><?= e(($relation['serie'] ?? '') . ($relation['folio'] ?? '')) ?> · <?= e($relation['empresa'] ?? '') ?></span></td>
+                        <td><?= e($relation['uuid_rel']) ?></td><td><?= e(report_value($relation['saldo'], 'money')) ?></td>
+                        <td><span class="movement-cell-main"><?= e(report_value($relation['monto'], 'money')) ?></span><span class="movement-cell-secondary">Parcialidad <?= e($relation['num_pago']) ?></span></td><td><?= e(report_value($relation['restante'], 'money')) ?></td>
+                    </tr><?php endforeach; ?><?php if ($complement['relations'] === []): ?><tr><td colspan="5" class="empty">Este complemento no tiene facturas relacionadas.</td></tr><?php endif; ?></tbody></table></div>
+                </section>
+            <?php endif; ?>
+        <?php else: ?>
+            <?php $complementPage = max(1, (int) ($_GET['page'] ?? 1)); $complementSearch = trim((string) ($_GET['q'] ?? '')); $complementResult = payment_complement_repository()->paginate($complementSearch, $complementPage); ?>
+            <section class="report-intro"><p>Complementos de recepción de pagos, sus facturas relacionadas y estado fiscal.</p><span class="operation-badge">CFDI tipo P</span></section>
+            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Complementos de pago</h2><p class="panel-copy"><?= number_format(count($complementResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="search"><input type="hidden" name="complement" value="list"><input type="search" name="q" value="<?= e($complementSearch) ?>" placeholder="ID, UUID, RFC, cliente…"><button class="button">Buscar</button></form></div>
+                <div class="table-wrap"><table class="movement-table invoice-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado / acciones</th></tr></thead><tbody><?php foreach ($complementResult['rows'] as $row): ?><tr>
+                    <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? 'P') . ($row['folio_interno'] ?? $row['folio'] ?? '')) ?> · <?= e(substr((string) ($row['fecha_pago'] ?? ''), 0, 10)) ?></span></td>
+                    <td><span class="movement-cell-main"><?= e($row['empresa'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['facturas_relacionadas']) ?> factura(s)</span></td>
+                    <td><span class="movement-cell-main"><?= e($row['cliente'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['rfc'] ?: '') ?> · <?= e($row['receptor'] ?: '') ?></span></td>
+                    <td><span class="movement-cell-main"><?= e(trim((string) ($row['forma_pago'] ?? '—'))) ?></span><span class="movement-cell-secondary">Tratamiento <?= e($row['tipo_complemento'] ?: 'T') ?></span></td>
+                    <td><?= e(report_value($row['total_factura'], 'money')) ?></td>
+                    <td><span class="movement-cell-main"><?= e(trim((string) ($row['uuid'] ?? '')) !== '' ? 'Timbrado' : ($row['status'] ?: 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span><div class="complement-actions"><a href="?complement=detail&amp;id=<?= e($row['id']) ?>">Detalles</a><?php if (trim((string) ($row['uuid'] ?? '')) === ''): ?><form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" class="link-button danger-text">Eliminar</button></form><?php endif; ?></div></td>
+                </tr><?php endforeach; ?><?php if ($complementResult['rows'] === []): ?><tr><td colspan="6" class="empty">No hay complementos para mostrar.</td></tr><?php endif; ?></tbody></table></div>
+                <div class="pagination"><span>Página <?= $complementResult['page'] ?><?= $complementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($complementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['complement'=>'list','q'=>$complementSearch,'page'=>$complementResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($complementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['complement'=>'list','q'=>$complementSearch,'page'=>$complementResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
+            </section>
+        <?php endif; ?>
+    <?php elseif ($invoiceModule): ?>
         <?php if ($invoiceView === 'create'): ?>
             <?php $invoiceData = invoice_repository()->formData(); ?>
             <section class="report-intro"><p>Genera la factura usando los mismos catálogos de empresas, clientes, razones sociales, conceptos y claves fiscales del sistema anterior.</p><span class="operation-badge">Guardado transaccional</span></section>
@@ -621,7 +900,7 @@ if ($catalog && $action === 'form' && $id) {
     </section>
 </div>
 
-<script>
+<script nonce="<?= e(csp_nonce()) ?>">
 (() => {
     document.querySelectorAll('.toast-close').forEach((button) => {
         button.addEventListener('click', () => button.closest('.glass-toast')?.remove());
@@ -772,6 +1051,117 @@ if ($catalog && $action === 'form' && $id) {
         recalculateInvoice();
     });
 
+    const complementClient = document.getElementById('complementClient');
+    const complementCompany = document.getElementById('complementCompany');
+    const complementReceiver = document.getElementById('complementReceiver');
+    const complementLines = document.getElementById('complementLines');
+    const complementForm = document.getElementById('complementForm');
+    const addComplementInvoice = document.getElementById('addComplementInvoice');
+
+    const recalculateComplement = () => {
+        if (!complementLines) return;
+        const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
+        const total = rows.reduce((sum, row) => sum + (Number(row.querySelector('[name="amount[]"]').value) || 0), 0);
+        document.getElementById('complementCount').textContent = String(rows.filter((row) => row.dataset.validated === 'true').length);
+        document.getElementById('complementTotal').textContent = invoiceMoney.format(total);
+        rows.forEach((row) => {
+            const balance = Number(row.dataset.balance) || 0;
+            const amount = Number(row.querySelector('[name="amount[]"]').value) || 0;
+            row.querySelector('[data-complement-remaining]').textContent = invoiceMoney.format(Math.max(0, balance - amount));
+        });
+    };
+
+    const resetComplementLine = (row) => {
+        row.dataset.validated = 'false';
+        row.dataset.balance = '0';
+        row.querySelector('[data-complement-invoice]').textContent = 'UUID pendiente de consulta';
+        row.querySelector('[data-complement-balance]').textContent = '—';
+        row.querySelector('[data-complement-remaining]').textContent = '—';
+        const amount = row.querySelector('[name="amount[]"]');
+        amount.value = '';
+        amount.disabled = true;
+        recalculateComplement();
+    };
+
+    const lookupComplementInvoice = async (row) => {
+        const uuidInput = row.querySelector('[name="invoice_uuid[]"]');
+        const button = row.querySelector('[data-complement-lookup]');
+        const uuid = uuidInput.value.trim();
+        if (!uuid || !complementClient.value || !complementCompany.value || !complementReceiver.value) {
+            showToast('Selecciona emisor, cliente y razón social, y captura el UUID de la factura.');
+            return;
+        }
+        button.disabled = true;
+        button.textContent = 'Consultando…';
+        try {
+            const response = await fetch(`?complement=create&data=invoice&uuid=${encodeURIComponent(uuid)}`, {headers: {'Accept': 'application/json'}});
+            const result = await response.json();
+            if (!response.ok || !result.ok || !result.data) throw new Error('No se encontró una factura con ese UUID.');
+            const invoice = result.data;
+            if (Number(invoice.metodo_pago) !== 2) throw new Error('La factura encontrada no usa el método PPD.');
+            if (String(invoice.client_id) !== complementClient.value || String(invoice.company_id) !== complementCompany.value || String(invoice.receiver_id) !== complementReceiver.value) {
+                throw new Error('La factura no corresponde al cliente, emisor y razón social seleccionados.');
+            }
+            if (Number(invoice.saldo) <= 0) throw new Error('La factura ya no tiene saldo pendiente.');
+            const duplicate = Array.from(complementLines.querySelectorAll('[name="invoice_uuid[]"]')).some((item) => item !== uuidInput && item.value.trim().toUpperCase() === String(invoice.uuid).toUpperCase());
+            if (duplicate) throw new Error('Esta factura ya fue agregada al complemento.');
+            uuidInput.value = invoice.uuid;
+            row.dataset.validated = 'true';
+            row.dataset.balance = String(invoice.saldo);
+            row.querySelector('[data-complement-invoice]').textContent = `#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente}`;
+            row.querySelector('[data-complement-balance]').textContent = invoiceMoney.format(Number(invoice.saldo));
+            const amount = row.querySelector('[name="amount[]"]');
+            amount.disabled = false;
+            amount.max = String(invoice.saldo);
+            amount.value = String(invoice.saldo);
+            row.querySelector('[name="installment[]"]').value = String(invoice.siguiente_parcialidad || 1);
+            recalculateComplement();
+        } catch (error) {
+            resetComplementLine(row);
+            showToast(error instanceof Error ? error.message : 'No fue posible consultar la factura.');
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Consultar';
+        }
+    };
+
+    const addComplementLine = () => {
+        if (!complementLines) return;
+        const row = document.createElement('tr');
+        row.dataset.complementLine = 'true';
+        row.dataset.validated = 'false';
+        row.dataset.balance = '0';
+        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal" required><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="number" name="amount[]" min="0.01" step="0.01" required disabled></td><td><input type="number" name="installment[]" min="1" step="1" value="1" required></td><td data-complement-remaining>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
+        const uuid = row.querySelector('[name="invoice_uuid[]"]');
+        uuid.addEventListener('input', () => resetComplementLine(row));
+        row.querySelector('[data-complement-lookup]').addEventListener('click', () => lookupComplementInvoice(row));
+        row.querySelector('[name="amount[]"]').addEventListener('input', recalculateComplement);
+        row.querySelector('[data-complement-remove]').addEventListener('click', () => {
+            row.remove();
+            if (!complementLines.querySelector('tr[data-complement-line]')) addComplementLine();
+            recalculateComplement();
+        });
+        complementLines.appendChild(row);
+        recalculateComplement();
+    };
+
+    complementClient?.addEventListener('change', async () => {
+        if (!complementReceiver) return;
+        await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
+        complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
+    });
+    [complementCompany, complementReceiver].forEach((control) => control?.addEventListener('change', () => complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine)));
+    addComplementInvoice?.addEventListener('click', addComplementLine);
+    if (complementLines) addComplementLine();
+    complementForm?.addEventListener('submit', (event) => {
+        const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
+        if (rows.length === 0 || rows.some((row) => row.dataset.validated !== 'true')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            showToast('Consulta y valida todas las facturas antes de guardar el complemento.');
+        }
+    });
+
     const backdrop = document.getElementById('confirmationModal');
     const title = document.getElementById('confirmationTitle');
     const message = document.getElementById('confirmationMessage');
@@ -814,6 +1204,120 @@ if ($catalog && $action === 'form' && $id) {
         stack.appendChild(toast);
         window.setTimeout(() => toast.remove(), 6500);
     };
+
+    const captureAnalyzer = document.getElementById('captureAnalyzer');
+    const captureEditor = document.getElementById('captureEditor');
+    const captureResult = document.getElementById('captureAnalysisResult');
+    const captureRows = document.getElementById('captureAnalysisRows');
+    const captureSummary = document.getElementById('captureAnalysisSummary');
+    const captureMessage = document.getElementById('captureAnalysisMessage');
+    const analyzeCaptureButton = document.getElementById('analyzeCapture');
+
+    const appendCaptureSummary = (label, value, detail) => {
+        const card = document.createElement('article');
+        const labelNode = document.createElement('span');
+        const valueNode = document.createElement('strong');
+        const detailNode = document.createElement('small');
+        labelNode.textContent = label;
+        valueNode.textContent = String(value);
+        detailNode.textContent = detail;
+        card.append(labelNode, valueNode, detailNode);
+        captureSummary.appendChild(card);
+    };
+
+    captureAnalyzer?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const capture = captureEditor.innerHTML.trim();
+        if (capture === '' || capture === '<br>') {
+            showToast('Pega primero el contenido de la captura bancaria.');
+            captureEditor.focus();
+            return;
+        }
+        if (capture.length > 2_000_000) {
+            showToast('La captura supera el límite de 2 MB para el análisis.');
+            return;
+        }
+
+        analyzeCaptureButton.disabled = true;
+        analyzeCaptureButton.textContent = 'Analizando…';
+        captureResult.hidden = true;
+        try {
+            const parserPayload = new FormData();
+            parserPayload.set('csrf_token', captureAnalyzer.querySelector('[name="csrf_token"]').value);
+            parserPayload.set('capture', capture);
+            parserPayload.set('account_id', captureAnalyzer.dataset.accountId);
+            const parserResponse = await fetch(captureAnalyzer.dataset.parserUrl, {
+                method: 'POST', body: parserPayload, headers: {'Accept': 'application/json'}
+            });
+            const parserResult = await parserResponse.json();
+            if (!parserResponse.ok || !parserResult.ok) throw new Error(parserResult.message || 'No se detectaron movimientos válidos.');
+            const analysis = parserResult.analysis;
+
+            const movementCount = analysis.movements.length;
+            if (movementCount < 1) throw new Error('No se detectaron movimientos en la captura.');
+            const descriptions = analysis.movements.map((movement) => [
+                movement.description,
+                movement.detail,
+                movement.reference,
+            ].filter(Boolean).join(' '));
+
+            const keyPayload = new FormData();
+            keyPayload.set('csrf_token', captureAnalyzer.querySelector('[name="csrf_token"]').value);
+            keyPayload.set('account_id', captureAnalyzer.dataset.accountId);
+            keyPayload.set('descriptions', JSON.stringify(descriptions));
+            const keyResponse = await fetch(`?companies=analyze&id=${encodeURIComponent(captureAnalyzer.dataset.companyId)}&data=short_keys`, {
+                method: 'POST', body: keyPayload, headers: {'Accept': 'application/json'}
+            });
+            const keyResult = await keyResponse.json();
+            if (!keyResponse.ok || !keyResult.ok) throw new Error(keyResult.message || 'No fue posible consultar las claves cortas.');
+
+            captureRows.replaceChildren();
+            captureSummary.replaceChildren();
+            let associated = 0;
+            keyResult.matches.forEach((match, index) => {
+                if (match.associated) associated += 1;
+                const movement = analysis.movements[index];
+                const row = document.createElement('tr');
+                const cells = [
+                    String(index + 1),
+                    movement.date || '—',
+                    descriptions[index] || 'Sin descripción',
+                    movement.type || '—',
+                    invoiceMoney.format(Number(movement.amount) || 0),
+                    movement.duplicate ? 'Sí' : 'No',
+                    match.associated ? `Sí · ${match.key} · ${match.client}` : 'No · Sin clave asociada',
+                ];
+                cells.forEach((value, cellIndex) => {
+                    const cell = document.createElement('td');
+                    cell.textContent = value;
+                    if (cellIndex === 6) cell.className = match.associated ? 'short-key-found' : 'short-key-missing';
+                    row.appendChild(cell);
+                });
+                captureRows.appendChild(row);
+            });
+
+            appendCaptureSummary('Detectados', movementCount, 'Movimientos leídos');
+            appendCaptureSummary('Nuevos', Number(analysis.summary.new) || 0, 'No encontrados previamente');
+            appendCaptureSummary('Con clave corta', associated, 'Asociación encontrada');
+            appendCaptureSummary('Sin clave corta', movementCount - associated, 'Requieren revisión');
+            captureMessage.textContent = `${associated} de ${movementCount} movimientos tienen una clave corta asociada en la tabla claves_cortas.`;
+            captureResult.hidden = false;
+            captureResult.scrollIntoView({behavior: 'smooth', block: 'start'});
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'No fue posible analizar la captura.');
+        } finally {
+            analyzeCaptureButton.disabled = false;
+            analyzeCaptureButton.textContent = 'Analizar antes de cargar';
+        }
+    });
+
+    document.getElementById('clearCaptureAnalysis')?.addEventListener('click', () => {
+        captureEditor.replaceChildren();
+        captureRows?.replaceChildren();
+        captureSummary?.replaceChildren();
+        if (captureResult) captureResult.hidden = true;
+        captureEditor.focus();
+    });
 
     const openModal = () => {
         backdrop.hidden = false;
