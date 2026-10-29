@@ -110,16 +110,39 @@ try {
                 payment_complement_repository()->deletePending((int) ($_POST['id'] ?? 0));
                 flash('success', 'Complemento pendiente eliminado junto con sus relaciones.');
                 redirect('?complement=list');
+            } elseif ($postAction === 'complement_stamp') {
+                $message = fiscal_document_service()->stampComplement(
+                    (int) ($_POST['id'] ?? 0), (string) ($_POST['treatment'] ?? '')
+                );
+                flash('success', $message);
+                redirect('?complement=list');
+            } elseif ($postAction === 'complement_resend') {
+                $message = fiscal_document_service()->resendComplement((int) ($_POST['id'] ?? 0));
+                flash('success', $message);
+                redirect('?complement=list');
             } else {
                 throw new RuntimeException('Acción de complemento no permitida.');
             }
         } elseif ($invoiceModule) {
-            if ($postAction !== 'invoice_create') {
+            if ($postAction === 'invoice_create') {
+                $invoiceId = invoice_repository()->create($_POST, current_operator_id());
+                flash('success', 'Factura #' . $invoiceId . ' guardada con sus conceptos y relaciones. Quedó pendiente de timbrado.');
+                redirect('?invoice=list');
+            } elseif ($postAction === 'invoice_stamp') {
+                $message = fiscal_document_service()->stampInvoice((int) ($_POST['id'] ?? 0), current_operator_id());
+                flash('success', $message);
+                redirect('?invoice=list');
+            } elseif ($postAction === 'invoice_resend') {
+                $message = fiscal_document_service()->resendInvoice((int) ($_POST['id'] ?? 0));
+                flash('success', $message);
+                redirect('?invoice=list');
+            } elseif ($postAction === 'invoice_delete') {
+                invoice_repository()->deletePending((int) ($_POST['id'] ?? 0));
+                flash('success', 'Factura pendiente eliminada junto con sus conceptos.');
+                redirect('?invoice=list');
+            } else {
                 throw new RuntimeException('Acción de facturación no permitida.');
             }
-            $invoiceId = invoice_repository()->create($_POST, current_operator_id());
-            flash('success', 'Factura #' . $invoiceId . ' guardada con sus conceptos y relaciones. Quedó pendiente de timbrado.');
-            redirect('?invoice=list');
         } elseif ($movement) {
             $paymentId = (int) ($_POST['payment_id'] ?? 0);
             $operatorId = current_operator_id();
@@ -242,7 +265,7 @@ if ($companyModule) {
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
 </head>
-<body>
+<body class="<?= $companyModule ? 'company-module' : '' ?>">
 <aside class="sidebar">
     <a class="brand" href="./"><img src="assets/logo-s14.png" alt="Sistema 14"><strong>Sistema 14</strong></a>
     <nav class="main-nav">
@@ -346,7 +369,7 @@ if ($companyModule) {
             <section class="panel"><div class="empty"><strong>No se pudo abrir el panel.</strong><br><?= e($companyError) ?><br><a href="?companies=list">Volver a empresas</a></div></section>
         <?php elseif ($companyView === 'list'): ?>
             <section class="report-intro"><p>Consulta cada empresa, sus cuentas bancarias, capturas importadas y movimientos conciliados.</p><span class="operation-badge">Vista operativa</span></section>
-            <section class="panel">
+            <section class="panel company-directory-panel">
                 <div class="panel-heading list-tools">
                     <div><p class="eyebrow">Empresas activas</p><h2>Directorio de empresas</h2><p class="panel-copy"><?= count($companyResult['rows'] ?? []) ?> resultados en esta página</p></div>
                     <form method="get" class="search"><input type="hidden" name="companies" value="list"><input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="Razón social, RFC o ID…"><button class="button">Buscar</button></form>
@@ -477,7 +500,8 @@ if ($companyModule) {
             <?php else: ?>
                 <section class="report-intro"><p>Relación fiscal y aplicación del pago a sus facturas PPD.</p><span class="operation-badge"><?= e(trim((string) ($complement['uuid'] ?? '')) !== '' ? 'Timbrado' : 'Pendiente de timbrado') ?></span></section>
                 <section class="panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><a class="button" href="?complement=list">Volver</a></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><div class="panel-actions"><?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><button type="button" class="button primary" data-complement-stamp-trigger data-complement-id="<?= e($complement['id']) ?>">Timbrar complemento</button><?php endif; ?><a class="button" href="?complement=list">Volver</a></div></div>
+                    <?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><form method="post" id="complementStamp<?= e($complement['id']) ?>" class="complement-stamp-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($complement['id']) ?>"><input type="hidden" name="treatment" value="<?= e(in_array($complement['cadena'], ['T','T0','SV'], true) ? $complement['cadena'] : 'T') ?>"></form><?php endif; ?>
                     <dl class="complement-detail-grid">
                         <div><dt>Empresa emisora</dt><dd><?= e($complement['empresa'] ?: '—') ?></dd></div><div><dt>Cliente</dt><dd><?= e($complement['cliente'] ?: '—') ?></dd></div>
                         <div><dt>Receptor</dt><dd><?= e($complement['receptor'] ?: '—') ?><small><?= e($complement['rfc'] ?: '') ?></small></dd></div><div><dt>Forma de pago</dt><dd><?= e(trim((string) ($complement['forma_pago'] ?? '—'))) ?></dd></div>
@@ -495,13 +519,31 @@ if ($companyModule) {
             <?php $complementPage = max(1, (int) ($_GET['page'] ?? 1)); $complementSearch = trim((string) ($_GET['q'] ?? '')); $complementResult = payment_complement_repository()->paginate($complementSearch, $complementPage); ?>
             <section class="report-intro"><p>Complementos de recepción de pagos, sus facturas relacionadas y estado fiscal.</p><span class="operation-badge">CFDI tipo P</span></section>
             <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Complementos de pago</h2><p class="panel-copy"><?= number_format(count($complementResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="search"><input type="hidden" name="complement" value="list"><input type="search" name="q" value="<?= e($complementSearch) ?>" placeholder="ID, UUID, RFC, cliente…"><button class="button">Buscar</button></form></div>
-                <div class="table-wrap"><table class="movement-table invoice-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado / acciones</th></tr></thead><tbody><?php foreach ($complementResult['rows'] as $row): ?><tr>
+                <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado / acciones</th></tr></thead><tbody><?php foreach ($complementResult['rows'] as $row): ?><?php $complementStamped = trim((string) ($row['uuid'] ?? '')) !== ''; ?><tr data-record-row data-record-kind="complement" data-record-id="<?= e($row['id']) ?>">
                     <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? 'P') . ($row['folio_interno'] ?? $row['folio'] ?? '')) ?> · <?= e(substr((string) ($row['fecha_pago'] ?? ''), 0, 10)) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['facturas_relacionadas']) ?> factura(s)</span></td>
                     <td><span class="movement-cell-main"><?= e($row['cliente'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['rfc'] ?: '') ?> · <?= e($row['receptor'] ?: '') ?></span></td>
                     <td><span class="movement-cell-main"><?= e(trim((string) ($row['forma_pago'] ?? '—'))) ?></span><span class="movement-cell-secondary">Tratamiento <?= e($row['tipo_complemento'] ?: 'T') ?></span></td>
                     <td><?= e(report_value($row['total_factura'], 'money')) ?></td>
-                    <td><span class="movement-cell-main"><?= e(trim((string) ($row['uuid'] ?? '')) !== '' ? 'Timbrado' : ($row['status'] ?: 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span><div class="complement-actions"><a href="?complement=detail&amp;id=<?= e($row['id']) ?>">Detalles</a><?php if (trim((string) ($row['uuid'] ?? '')) === ''): ?><form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" class="link-button danger-text">Eliminar</button></form><?php endif; ?></div></td>
+                    <td><span class="movement-cell-main"><?= e($complementStamped ? 'Timbrado' : ($row['status'] ?: 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span>
+                        <div class="record-action-controls">
+                            <?php if (!$complementStamped): ?><button type="button" class="button primary compact" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>">Timbrar</button><?php endif; ?>
+                            <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del complemento #<?= e($row['id']) ?>">•••</button>
+                            <div class="record-action-source" hidden>
+                                <a data-record-action data-action-label="Ver detalles" data-action-icon="⌕" href="?complement=detail&amp;id=<?= e($row['id']) ?>">Detalles</a>
+                                <?php if (!$complementStamped): ?>
+                                    <button type="button" data-record-action data-action-label="Timbrar complemento" data-action-icon="✓" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>">Timbrar</button>
+                                    <a data-record-action data-action-label="Vista PDF" data-action-icon="▧" href="https://old.sistema14.com/gen_fact_complemento_pdf.php?id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
+                                    <form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
+                                <?php else: ?>
+                                    <form method="post" data-confirm="¿Reenviar por correo este complemento timbrado?" data-confirm-title="Reenviar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
+                                    <a data-record-action data-action-label="Descargar PDF" data-action-icon="▧" href="https://old.sistema14.com/gen_fact_complemento_pdf.php?id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
+                                    <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/firmados-comp/XML-complemento-<?= e($row['id']) ?>-<?= e(rawurlencode((string) $row['uuid'])) ?>.xml" target="_blank" rel="noopener">XML</a>
+                                <?php endif; ?>
+                            </div>
+                            <?php if (!$complementStamped): ?><form method="post" id="complementStamp<?= e($row['id']) ?>" class="complement-stamp-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><input type="hidden" name="treatment" value="<?= e(in_array($row['tipo_complemento'], ['T','T0','SV'], true) ? $row['tipo_complemento'] : 'T') ?>"></form><?php endif; ?>
+                        </div>
+                    </td>
                 </tr><?php endforeach; ?><?php if ($complementResult['rows'] === []): ?><tr><td colspan="6" class="empty">No hay complementos para mostrar.</td></tr><?php endif; ?></tbody></table></div>
                 <div class="pagination"><span>Página <?= $complementResult['page'] ?><?= $complementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($complementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['complement'=>'list','q'=>$complementSearch,'page'=>$complementResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($complementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['complement'=>'list','q'=>$complementSearch,'page'=>$complementResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
             </section>
@@ -538,13 +580,30 @@ if ($companyModule) {
             <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage); ?>
             <section class="report-intro"><p>Facturas guardadas en la tabla original, con emisor, receptor, relación de pago y estado fiscal.</p></section>
             <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Facturas</h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="search"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente…"><button class="button">Buscar</button></form></div>
-                <div class="table-wrap"><table class="movement-table invoice-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado fiscal</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><tr>
+                <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado fiscal / acciones</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><?php $invoiceStamped = trim((string) ($row['uuid'] ?? '')) !== ''; ?><tr data-record-row data-record-kind="invoice" data-record-id="<?= e($row['id']) ?>">
                     <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? '') . ($row['folio'] ?? '')) ?> · <?= e($row['fecha']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa']) ?></span><span class="movement-cell-secondary"><?= e($row['usuario']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['rfc']) ?> · <?= e($row['receptor']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['metodo_pago']) ?></span><span class="movement-cell-secondary"><?= e($row['forma_pago']) ?> · <?= e($row['status_pago']) ?><?= $row['id_pago'] ? ' · Pago #' . e($row['id_pago']) : '' ?></span></td>
                     <td><?= e(report_value($row['total_iva'], 'money')) ?></td>
-                    <td><span class="movement-cell-main"><?= e($row['status'] ?: (($row['uuid'] ?? '') ? 'Timbrada' : 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span></td>
+                    <td><span class="movement-cell-main"><?= e($row['status'] ?: ($invoiceStamped ? 'Timbrada' : 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span>
+                        <div class="record-action-controls">
+                            <?php if (!$invoiceStamped): ?><button type="button" class="button primary compact" data-proxy-action="invoiceStamp<?= e($row['id']) ?>">Timbrar</button><?php endif; ?>
+                            <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones de la factura #<?= e($row['id']) ?>">•••</button>
+                            <div class="record-action-source" hidden>
+                                <?php if (!$invoiceStamped): ?>
+                                    <form method="post" data-confirm="¿Timbrar fiscalmente la factura #<?= e($row['id']) ?>? Esta operación emitirá el CFDI." data-confirm-title="Timbrar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button id="invoiceStamp<?= e($row['id']) ?>" type="submit" data-record-action data-action-label="Timbrar factura" data-action-icon="✓">Timbrar</button></form>
+                                    <a data-record-action data-action-label="Ver PDF previo" data-action-icon="▧" href="https://ultra.sistema14.com/api/genera_factura.php?token=<?= e(rawurlencode((string) $row['token'])) ?>&amp;per=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
+                                    <a data-record-action data-action-label="Descargar PRE XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/sinfirma/XML-factura-<?= e($row['id']) ?>.xml" target="_blank" rel="noopener">PRE XML</a>
+                                    <form method="post" data-confirm="¿Eliminar esta factura pendiente y todos sus conceptos?" data-confirm-title="Eliminar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
+                                <?php else: ?>
+                                    <a data-record-action data-action-label="Ver PDF" data-action-icon="▧" href="https://ultra.sistema14.com/api/genera_factura.php?token=<?= e(rawurlencode((string) $row['token'])) ?>&amp;per=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
+                                    <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/gateWayFactura.php?factura=<?= e($row['id']) ?>" target="_blank" rel="noopener">XML</a>
+                                    <form method="post" data-confirm="¿Reenviar por correo esta factura timbrada?" data-confirm-title="Reenviar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </td>
                 </tr><?php endforeach; ?><?php if ($invoiceResult['rows'] === []): ?><tr><td colspan="6" class="empty">No hay facturas para mostrar.</td></tr><?php endif; ?></tbody></table></div>
                 <div class="pagination"><span>Página <?= $invoiceResult['page'] ?><?= $invoiceResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($invoiceResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($invoiceResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
             </section>
@@ -601,7 +660,7 @@ if ($companyModule) {
                 </form>
             </div>
             <?php if (in_array($movementAction, ['assign', 'reassign'], true)): ?>
-                <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
+                <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></template>
             <?php endif; ?>
             <div class="table-wrap">
                 <table class="movement-table<?= $movementAction ? ' has-actions' : '' ?>">
@@ -900,6 +959,22 @@ if ($companyModule) {
     </section>
 </div>
 
+<div class="record-context-menu" id="recordContextMenu" role="menu" aria-label="Acciones del registro" hidden></div>
+
+<div class="glass-modal-backdrop" id="complementStampModal" hidden>
+    <section class="glass-modal fiscal-treatment-modal" role="dialog" aria-modal="true" aria-labelledby="complementStampTitle">
+        <div class="glass-modal-icon">✓</div>
+        <div class="glass-modal-copy"><p class="eyebrow">Emisión fiscal</p><h2 id="complementStampTitle">Timbrar complemento</h2><p>Selecciona el tratamiento con el que se emitirá el CFDI de pago.</p></div>
+        <div class="fiscal-treatment-options">
+            <button type="button" data-stamp-treatment="T"><strong>Típico</strong><span>IVA 16%</span></button>
+            <button type="button" data-stamp-treatment="T0"><strong>Tasa 0</strong><span>IVA 0%</span></button>
+            <button type="button" data-stamp-treatment="SV"><strong>Sin IVA</strong><span>Operación no gravada</span></button>
+            <button type="button" disabled title="El sistema fiscal anterior no implementa este timbrado"><strong>Retención 4%</strong><span>No disponible</span></button>
+        </div>
+        <div class="glass-modal-actions"><button type="button" class="button" id="complementStampCancel">Cancelar</button></div>
+    </section>
+</div>
+
 <script nonce="<?= e(csp_nonce()) ?>">
 (() => {
     document.querySelectorAll('.toast-close').forEach((button) => {
@@ -912,6 +987,100 @@ if ($companyModule) {
             window.setTimeout(() => toast.remove(), 240);
         }, 5200);
     });
+
+    const recordContextMenu = document.getElementById('recordContextMenu');
+    let activeRecordRow = null;
+    const closeRecordMenu = () => {
+        recordContextMenu.hidden = true;
+        recordContextMenu.replaceChildren();
+        activeRecordRow?.classList.remove('has-open-menu');
+        activeRecordRow = null;
+    };
+    const openRecordMenu = (row, x, y) => {
+        closeRecordMenu();
+        const actions = Array.from(row.querySelectorAll('.record-action-source [data-record-action]'));
+        if (actions.length === 0) return;
+        actions.forEach((original) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'record-context-item';
+            if (original.hasAttribute('data-action-danger')) item.classList.add('is-danger');
+            const icon = document.createElement('span');
+            icon.textContent = original.dataset.actionIcon || '•';
+            const label = document.createElement('span');
+            label.textContent = original.dataset.actionLabel || original.textContent.trim();
+            item.append(icon, label);
+            item.addEventListener('click', () => {
+                closeRecordMenu();
+                original.click();
+            });
+            recordContextMenu.appendChild(item);
+        });
+        recordContextMenu.hidden = false;
+        row.classList.add('has-open-menu');
+        activeRecordRow = row;
+        const width = Math.max(220, recordContextMenu.offsetWidth);
+        const height = recordContextMenu.offsetHeight;
+        recordContextMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - width - 8, x))}px`;
+        recordContextMenu.style.top = `${Math.max(8, Math.min(window.innerHeight - height - 8, y))}px`;
+        recordContextMenu.querySelector('button')?.focus();
+    };
+    document.querySelectorAll('[data-record-row]').forEach((row) => {
+        row.addEventListener('contextmenu', (event) => {
+            if (event.target.closest('a, button, input, select, textarea')) return;
+            event.preventDefault();
+            openRecordMenu(row, event.clientX, event.clientY);
+        });
+        row.querySelector('[data-record-menu-trigger]')?.addEventListener('click', (event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            openRecordMenu(row, rect.right - 220, rect.bottom + 6);
+        });
+    });
+    document.addEventListener('pointerdown', (event) => {
+        if (!recordContextMenu.hidden && !recordContextMenu.contains(event.target)
+            && !event.target.closest('[data-record-menu-trigger]')) closeRecordMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !recordContextMenu.hidden) closeRecordMenu();
+    });
+    window.addEventListener('resize', closeRecordMenu);
+    document.addEventListener('scroll', closeRecordMenu, true);
+
+    document.querySelectorAll('[data-proxy-action]').forEach((button) => {
+        button.addEventListener('click', () => document.getElementById(button.dataset.proxyAction)?.click());
+    });
+
+    const stampModal = document.getElementById('complementStampModal');
+    const stampCancel = document.getElementById('complementStampCancel');
+    let pendingComplementStamp = null;
+    const closeStampModal = () => {
+        stampModal.classList.remove('is-visible');
+        window.setTimeout(() => { stampModal.hidden = true; }, 160);
+        pendingComplementStamp = null;
+    };
+    document.querySelectorAll('[data-complement-stamp-trigger]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const form = document.getElementById(`complementStamp${button.dataset.complementId}`);
+            if (!form) return;
+            pendingComplementStamp = form;
+            stampModal.hidden = false;
+            window.requestAnimationFrame(() => stampModal.classList.add('is-visible'));
+            stampModal.querySelector(`[data-stamp-treatment="${form.querySelector('[name="treatment"]').value}"]`)?.focus();
+        });
+    });
+    stampModal.querySelectorAll('[data-stamp-treatment]').forEach((button) => {
+        button.addEventListener('click', () => {
+            if (!pendingComplementStamp) return;
+            const form = pendingComplementStamp;
+            form.querySelector('[name="treatment"]').value = button.dataset.stampTreatment;
+            pendingComplementStamp = null;
+            stampModal.classList.remove('is-visible');
+            stampModal.hidden = true;
+            form.requestSubmit();
+        });
+    });
+    stampCancel.addEventListener('click', closeStampModal);
+    stampModal.addEventListener('click', (event) => { if (event.target === stampModal) closeStampModal(); });
 
     const invoiceCompany = document.getElementById('invoiceCompany');
     const invoiceClient = document.getElementById('invoiceClient');
@@ -927,6 +1096,142 @@ if ($companyModule) {
             select.appendChild(movementClientOptions.content.cloneNode(true));
         });
     }
+
+    const normalizeSearchText = (value) => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    let openSearchSelect = null;
+    const closeSearchSelect = () => {
+        if (!openSearchSelect) return;
+        openSearchSelect.wrapper.classList.remove('is-open');
+        openSearchSelect.button.setAttribute('aria-expanded', 'false');
+        openSearchSelect.menu.remove();
+        openSearchSelect = null;
+    };
+
+    document.querySelectorAll('select[data-client-picker]').forEach((select, selectIndex) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'search-select';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'search-select-trigger';
+        button.setAttribute('aria-haspopup', 'listbox');
+        button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-label', select.getAttribute('aria-label') || 'Seleccionar cartera');
+        const buttonLabel = document.createElement('span');
+        const chevron = document.createElement('span');
+        chevron.className = 'search-select-chevron';
+        chevron.textContent = '⌄';
+        button.append(buttonLabel, chevron);
+        select.classList.add('search-select-native');
+        select.insertAdjacentElement('afterend', wrapper);
+        wrapper.append(select, button);
+
+        const options = Array.from(select.options).map((option) => ({
+            value: option.value,
+            label: option.textContent.trim(),
+            disabled: option.disabled,
+            search: normalizeSearchText(option.textContent),
+        }));
+        const refreshLabel = () => {
+            const selected = select.options[select.selectedIndex];
+            buttonLabel.textContent = selected?.textContent.trim() || 'Seleccionar cartera…';
+            button.classList.toggle('has-value', Boolean(select.value));
+        };
+        refreshLabel();
+        select.addEventListener('change', () => {
+            button.classList.remove('is-invalid');
+            refreshLabel();
+        });
+        select.addEventListener('invalid', (event) => {
+            event.preventDefault();
+            button.classList.add('is-invalid');
+            button.focus();
+        });
+
+        button.addEventListener('click', () => {
+            if (openSearchSelect?.select === select) {
+                closeSearchSelect();
+                return;
+            }
+            closeSearchSelect();
+            const menu = document.createElement('div');
+            menu.className = 'search-select-menu';
+            menu.setAttribute('role', 'dialog');
+            menu.setAttribute('aria-label', 'Buscar y seleccionar cartera');
+            const search = document.createElement('input');
+            search.type = 'search';
+            search.className = 'search-select-input';
+            search.placeholder = 'Buscar cartera por nombre o ID…';
+            search.setAttribute('aria-label', 'Buscar cartera');
+            const list = document.createElement('div');
+            list.className = 'search-select-options';
+            list.setAttribute('role', 'listbox');
+            const status = document.createElement('p');
+            status.className = 'search-select-status';
+
+            const renderOptions = () => {
+                const term = normalizeSearchText(search.value.trim());
+                const filtered = options.filter((option) => option.value !== '' && !option.disabled && option.search.includes(term));
+                list.replaceChildren();
+                filtered.slice(0, 150).forEach((option) => {
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'search-select-option';
+                    item.setAttribute('role', 'option');
+                    item.setAttribute('aria-selected', String(select.value === option.value));
+                    item.textContent = option.label;
+                    item.addEventListener('click', () => {
+                        select.value = option.value;
+                        select.dispatchEvent(new Event('change', {bubbles: true}));
+                        refreshLabel();
+                        closeSearchSelect();
+                        button.focus();
+                    });
+                    list.appendChild(item);
+                });
+                status.textContent = filtered.length === 0
+                    ? 'No se encontraron carteras.'
+                    : `${filtered.length} cartera${filtered.length === 1 ? '' : 's'} encontrada${filtered.length === 1 ? '' : 's'}${filtered.length > 150 ? ' · mostrando las primeras 150' : ''}`;
+            };
+            search.addEventListener('input', renderOptions);
+            search.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') { closeSearchSelect(); button.focus(); }
+                if (event.key === 'Enter') { event.preventDefault(); list.querySelector('.search-select-option')?.click(); }
+                if (event.key === 'ArrowDown') { event.preventDefault(); list.querySelector('.search-select-option')?.focus(); }
+            });
+            list.addEventListener('keydown', (event) => {
+                const items = Array.from(list.querySelectorAll('.search-select-option'));
+                const current = items.indexOf(document.activeElement);
+                if (event.key === 'ArrowDown') { event.preventDefault(); items[Math.min(items.length - 1, current + 1)]?.focus(); }
+                if (event.key === 'ArrowUp') { event.preventDefault(); current <= 0 ? search.focus() : items[current - 1]?.focus(); }
+                if (event.key === 'Escape') { closeSearchSelect(); button.focus(); }
+            });
+            menu.append(search, list, status);
+            document.body.appendChild(menu);
+            const rect = button.getBoundingClientRect();
+            const menuWidth = Math.max(290, Math.min(390, rect.width));
+            const spaceBelow = window.innerHeight - rect.bottom;
+            menu.style.width = `${menuWidth}px`;
+            menu.style.left = `${Math.max(10, Math.min(window.innerWidth - menuWidth - 10, rect.left))}px`;
+            if (spaceBelow >= 330 || rect.top < spaceBelow) {
+                menu.style.top = `${rect.bottom + 6}px`;
+            } else {
+                menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+            }
+            wrapper.classList.add('is-open');
+            button.setAttribute('aria-expanded', 'true');
+            openSearchSelect = {select, wrapper, button, menu, id: selectIndex};
+            renderOptions();
+            search.focus();
+        });
+    });
+
+    document.addEventListener('pointerdown', (event) => {
+        if (openSearchSelect && !openSearchSelect.menu.contains(event.target) && !openSearchSelect.wrapper.contains(event.target)) closeSearchSelect();
+    });
+    window.addEventListener('resize', closeSearchSelect);
+    document.addEventListener('scroll', (event) => {
+        if (openSearchSelect && !openSearchSelect.menu.contains(event.target)) closeSearchSelect();
+    }, true);
 
     const recalculateInvoice = () => {
         if (!invoiceLines) return;

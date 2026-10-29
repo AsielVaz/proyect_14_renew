@@ -4,14 +4,14 @@ La navegación y columnas de las vistas están en `src/Movements.php`. Las consu
 
 ## Flujos integrados
 
-- Movimientos sin asignar: consulta, selección opcional de cartera por fila, previsualización de comisiones y asignación conjunta únicamente de los movimientos seleccionados.
+- Movimientos sin asignar: consulta, selector de cartera buscable por cualquier fragmento del nombre o ID, previsualización de comisiones y asignación conjunta únicamente de los movimientos seleccionados.
 - Movimientos asignados: consulta y desasignación.
 - Reasignación: reversión de comisiones anteriores y cálculo completo para la cartera nueva.
 - Ingreso de pagos: consulta general equivalente a la pantalla anterior.
 - Traspasos: creación y eliminación conjunta de la entrada y la salida.
 - Movimientos STP: consulta paginada.
 
-Cada operación de escritura valida CSRF y se ejecuta dentro de una transacción de base de datos. Mientras se integra el login, el operador se obtiene de `current_operator_id()` y está fijado temporalmente en el usuario `1`. Esa función es el único punto que deberá sustituirse por la cookie o sesión autenticada.
+Cada operación de escritura valida CSRF y se ejecuta dentro de una transacción de base de datos. El operador se obtiene de la sesión autenticada mediante `current_operator_id()`.
 
 La asignación se guarda por lote mediante un único botón. Las filas sin cartera se omiten y permanecen sin asignar. Antes de escribir, el servidor calcula y devuelve al modal el saldo acreditable, el esquema utilizado, cada comisión, su porcentaje, la cartera receptora y los totales repartidos. Al aceptar, el lote seleccionado se vuelve a validar y se ejecuta en una sola transacción: si un movimiento fue modificado o falla, se revierte todo el lote.
 

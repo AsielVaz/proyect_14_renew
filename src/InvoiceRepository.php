@@ -32,7 +32,7 @@ final class InvoiceRepository
         $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
         $fetchLimit = $perPage + 1;
-        $query = $this->pdo->prepare('SELECT f.id, f.fecha, f.serie, f.folio, f.total_iva, f.uuid,
+        $query = $this->pdo->prepare('SELECT f.id, f.fecha, f.serie, f.folio, f.total_iva, f.uuid, f.token,
             f.status, f.status_error, f.status_pago, f.id_pago, c.nombre AS cliente,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
             fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
@@ -197,6 +197,37 @@ final class InvoiceRepository
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
+            throw $exception;
+        }
+    }
+
+    public function deletePending(int $id): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $query = $this->pdo->prepare('SELECT id, uuid FROM facturas WHERE id = :id FOR UPDATE');
+            $query->execute(['id' => $id]);
+            $invoice = $query->fetch();
+            if (!$invoice) throw new RuntimeException('La factura solicitada no existe.');
+            if (trim((string) ($invoice['uuid'] ?? '')) !== '') {
+                throw new RuntimeException('Una factura timbrada no puede eliminarse desde este módulo.');
+            }
+            $relations = $this->pdo->prepare('SELECT COUNT(*) FROM facturar_rel_complementos WHERE id_factura = :id');
+            $relations->execute(['id' => $id]);
+            if ((int) $relations->fetchColumn() > 0) {
+                throw new RuntimeException('La factura está relacionada con un complemento de pago y no puede eliminarse.');
+            }
+            $this->pdo->prepare('UPDATE pagos SET id_factura = NULL WHERE id_factura = :id')->execute(['id' => $id]);
+            $this->pdo->prepare('DELETE FROM detalle_factura WHERE id_factura = :id')->execute(['id' => $id]);
+            $favoriteTable = $this->pdo->query("SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = 'facturas_fav'")->fetchColumn();
+            if ((int) $favoriteTable > 0) {
+                $this->pdo->prepare('DELETE FROM facturas_fav WHERE id_factura = :id')->execute(['id' => $id]);
+            }
+            $this->pdo->prepare('DELETE FROM facturas WHERE id = :id')->execute(['id' => $id]);
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
             throw $exception;
         }
     }

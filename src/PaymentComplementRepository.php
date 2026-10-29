@@ -24,9 +24,8 @@ final class PaymentComplementRepository
         $where = '';
         $params = [];
         if ($search !== '') {
-            $where = ' WHERE CAST(fc.id AS CHAR) LIKE :search OR fc.uuid LIKE :search
-                OR c.nombre LIKE :search OR e.razon LIKE :search OR cc.rfc LIKE :search
-                OR CAST(fc.folio AS CHAR) LIKE :search';
+            $where = " WHERE CONCAT_WS(' ', CAST(fc.id AS CHAR), fc.uuid, c.nombre,
+                e.razon, cc.rfc, CAST(fc.folio AS CHAR)) LIKE :search";
             $params['search'] = '%' . $search . '%';
         }
 

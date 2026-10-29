@@ -29,7 +29,7 @@ Para producción, usar HTTPS, cambiar `APP_URL`, generar un `APP_KEY` aleatorio 
 - Listados con paginación rápida sin ejecutar conteos globales en cada solicitud, pensados para PHP y MariaDB alojados en servicios separados.
 - PDO con parámetros preparados, escape HTML, protección CSRF y encabezados de seguridad del navegador.
 - No modifica el esquema de la base ni copia información.
-- El guardado de facturas y sus conceptos está integrado. El timbrado fiscal, reenvío y cancelación permanecen separados para evitar emitir o alterar CFDI reales durante pruebas.
+- El guardado de facturas y sus conceptos, el timbrado manual y el reenvío están integrados. Las acciones fiscales sólo se ejecutan tras confirmación; la cancelación permanece fuera del sistema renovado porque el módulo legado no tenía una operación funcional que replicar.
 
 Antes de usarlo en producción debe crearse un usuario de base de datos con permisos mínimos y retirarse la cuenta `root` de la configuración de la aplicación.
 

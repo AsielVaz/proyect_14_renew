@@ -27,6 +27,8 @@ Antes de enviar, un modal muestra el número de conceptos, subtotal, IVA, total 
 
 ## Timbrado fiscal
 
-El sistema anterior intentaba timbrar automáticamente después del alta mediante el servicio externo Iofacturo y credenciales fiscales almacenadas por empresa. En esta fase el registro queda con estado `Pendiente`: no se llama al PAC automáticamente desde un entorno sin login ni se realizan pruebas que puedan generar un CFDI real.
+El alta conserva el estado `Pendiente` y no emite automáticamente. Desde el listado, el botón **Timbrar** solicita confirmación explícita y envía la factura al servicio fiscal utilizado por el sistema anterior. El servidor vuelve a comprobar que la factura exista y no tenga UUID antes de llamar al servicio.
 
-La migración del timbrado debe incorporar una acción explícita protegida por permisos, ambiente sandbox/producción configurable, registro de respuesta del PAC e idempotencia. Hasta entonces, guardar una factura no la convierte en CFDI timbrado.
+Cada fila ofrece un menú contextual con clic derecho y un botón visible de acciones. Para pendientes contiene timbrado, PDF previo, PRE XML y eliminación; para timbradas contiene PDF, XML y reenvío por correo. Todas las escrituras usan sesión, CSRF y confirmación. La cancelación no se presenta como acción porque el botón legado no ejecutaba un proceso fiscal real.
+
+Las pruebas automáticas nunca invocan el timbrado o el reenvío, ya que producirían efectos fiscales o comunicaciones reales.

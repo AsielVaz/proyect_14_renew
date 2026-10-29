@@ -10,6 +10,7 @@ use App\DashboardRepository;
 use App\PaymentComplementRepository;
 use App\CompanyPanelRepository;
 use App\CaptureAnalysisService;
+use App\FiscalDocumentService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -201,6 +202,12 @@ function capture_analysis_service(): CaptureAnalysisService
 {
     static $service;
     return $service ??= new CaptureAnalysisService(db(), company_panel_repository());
+}
+
+function fiscal_document_service(): FiscalDocumentService
+{
+    static $service;
+    return $service ??= new FiscalDocumentService(db());
 }
 
 function dashboard_repository(): DashboardRepository

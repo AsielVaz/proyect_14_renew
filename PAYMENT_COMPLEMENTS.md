@@ -19,7 +19,9 @@ El total del complemento se deriva de la suma de sus documentos relacionados; no
 
 ## Estado fiscal
 
-Los registros nuevos quedan con estado `Pendiente` y sin UUID. La emisión fiscal real, el reenvío por correo, PDF/XML y la cancelación ante el PAC no se ejecutan desde este módulo para evitar efectos fiscales durante la transición. Un registro pendiente puede eliminarse junto con sus relaciones; uno timbrado no puede borrarse y debe seguir el proceso de cancelación fiscal correspondiente.
+Los registros nuevos quedan con estado `Pendiente` y sin UUID. El botón **Timbrar** abre la selección explícita del tratamiento fiscal y sólo después envía el complemento al servicio fiscal legado. Antes de hacerlo, el servidor comprueba que el registro exista y continúe sin UUID. Un registro pendiente puede eliminarse junto con sus relaciones; uno timbrado no puede borrarse y debe seguir el proceso de cancelación fiscal correspondiente.
+
+Cada fila dispone de menú contextual con clic derecho y botón accesible de acciones. Los pendientes ofrecen timbrado, detalle, PDF y eliminación; los timbrados ofrecen detalle, reenvío, PDF y XML. Las pruebas no ejecutan acciones fiscales ni envíos de correo reales.
 
 El tratamiento legado se conserva en `facturas_complementos.cadena`:
 
@@ -27,3 +29,5 @@ El tratamiento legado se conserva en `facturas_complementos.cadena`:
 - `T0`: tasa 0%.
 - `SV`: sin IVA.
 - `4`: retención 4%.
+
+El tratamiento `4` se conserva en datos, pero se muestra deshabilitado al timbrar porque el flujo anterior presentaba el botón sin implementar ninguna llamada fiscal para esa opción.
