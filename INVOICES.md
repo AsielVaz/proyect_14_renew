@@ -31,4 +31,6 @@ El alta conserva el estado `Pendiente` y no emite automáticamente. Desde el lis
 
 Cada fila ofrece un menú contextual con clic derecho y un botón visible de acciones. Para pendientes contiene timbrado, PDF previo, PRE XML y eliminación; para timbradas contiene PDF, XML y reenvío por correo. Todas las escrituras usan sesión, CSRF y confirmación. La cancelación no se presenta como acción porque el botón legado no ejecutaba un proceso fiscal real.
 
+Las facturas PPD incluyen la acción **Hacer complemento de pago**. La acción abre el alta de complementos con empresa, cliente y clave corta precargados y bloqueados, y relaciona la factura con su saldo pendiente vigente.
+
 Las pruebas automáticas nunca invocan el timbrado o el reenvío, ya que producirían efectos fiscales o comunicaciones reales.

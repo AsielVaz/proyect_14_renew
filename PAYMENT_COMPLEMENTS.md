@@ -15,6 +15,8 @@ El módulo `?complement=list` replica la captura y consulta de complementos de r
 4. Se valida que sean PPD, pertenezcan al mismo emisor y receptor, no estén repetidas y que ningún importe exceda el saldo.
 5. El encabezado y todas sus relaciones se insertan atómicamente usando `lastInsertId()`.
 
+El alta también puede iniciarse desde el menú contextual de una factura PPD. En ese flujo se valida la factura por su ID en el servidor, se bloquean emisor, cliente y clave corta, y se precarga el UUID con el saldo pendiente completo y la siguiente parcialidad.
+
 El total del complemento se deriva de la suma de sus documentos relacionados; no se acepta un total independiente enviado por el navegador.
 
 ## Estado fiscal

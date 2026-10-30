@@ -33,7 +33,11 @@ final class InvoiceRepository
         $offset = ($page - 1) * $perPage;
         $fetchLimit = $perPage + 1;
         $query = $this->pdo->prepare('SELECT f.id, f.fecha, f.serie, f.folio, f.total_iva, f.uuid, f.token,
-            f.status, f.status_error, f.status_pago, f.id_pago, c.nombre AS cliente,
+            f.status, f.status_error, f.status_pago, f.id_pago, f.metodo_pago AS method_id,
+            f.nombre AS client_id, f.razon AS company_id, f.id_clave_corta AS receiver_id,
+            GREATEST(0, f.total_iva - COALESCE((SELECT SUM(rel.monto)
+                FROM facturar_rel_complementos rel WHERE rel.id_factura = f.id), 0)) AS saldo_pendiente,
+            c.nombre AS cliente,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
             fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
             $joins . $where . " ORDER BY f.id DESC LIMIT {$fetchLimit} OFFSET {$offset}");

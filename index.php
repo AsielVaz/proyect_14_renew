@@ -206,6 +206,25 @@ try {
 }
 
 $flash = take_flash();
+$complementPrefill = null;
+if ($complementView === 'create' && isset($_GET['invoice_id'])) {
+    try {
+        $sourceInvoiceId = filter_var($_GET['invoice_id'], FILTER_VALIDATE_INT) ?: 0;
+        $complementPrefill = payment_complement_repository()->invoiceById($sourceInvoiceId);
+        if (!$complementPrefill || (int) $complementPrefill['metodo_pago'] !== 2) {
+            throw new RuntimeException('La factura seleccionada no existe o no usa el método PPD.');
+        }
+        if (trim((string) $complementPrefill['uuid']) === '') {
+            throw new RuntimeException('La factura PPD debe estar timbrada antes de crear su complemento de pago.');
+        }
+        if ((float) $complementPrefill['saldo'] <= 0) {
+            throw new RuntimeException('La factura seleccionada ya no tiene saldo pendiente.');
+        }
+    } catch (Throwable $exception) {
+        flash('error', $exception->getMessage());
+        redirect('?invoice=list');
+    }
+}
 $record = null;
 if ($catalog && $action === 'form' && $id) {
     $record = repository()->find($catalog, $id);
@@ -471,16 +490,17 @@ if ($companyModule) {
         <?php endif; ?>
     <?php elseif ($complementModule): ?>
         <?php if ($complementView === 'create'): ?>
-            <?php $complementData = payment_complement_repository()->formData(); ?>
+            <?php $complementData = payment_complement_repository()->formData(); $lockedComplementContext = $complementPrefill !== null; ?>
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
-            <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento">
+            <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $lockedComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_create">
+                <?php if ($lockedComplementContext): ?><input type="hidden" name="company_id" value="<?= e($complementPrefill['company_id']) ?>"><input type="hidden" name="client_id" value="<?= e($complementPrefill['client_id']) ?>"><input type="hidden" name="receiver_id" value="<?= e($complementPrefill['receiver_id']) ?>"><input type="hidden" name="source_invoice_id" value="<?= e($complementPrefill['id']) ?>"><?php endif; ?>
                 <section class="panel invoice-form-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Datos del pago</p><h2>Emisor y receptor</h2></div><a class="button" href="?complement=list">Volver</a></div>
                     <div class="form-grid invoice-header-grid">
-                        <label class="field"><span>Empresa emisora *</span><select name="company_id" id="complementCompany" required><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Cliente *</span><select name="client_id" id="complementClient" required><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Razón social *</span><select name="receiver_id" id="complementReceiver" required disabled><option value="">Selecciona primero un cliente…</option></select></label>
+                        <label class="field"><span>Empresa emisora *</span><select <?= $lockedComplementContext ? '' : 'name="company_id" ' ?>id="complementCompany" required<?= $lockedComplementContext ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedComplementContext): ?><option value="<?= e($complementPrefill['company_id']) ?>" selected><?= e($complementPrefill['empresa']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
+                        <label class="field"><span>Cliente *</span><select <?= $lockedComplementContext ? '' : 'name="client_id" ' ?>id="complementClient" required<?= $lockedComplementContext ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedComplementContext): ?><option value="<?= e($complementPrefill['client_id']) ?>" selected><?= e($complementPrefill['cliente']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
+                        <label class="field"><span>Razón social / clave corta *</span><select <?= $lockedComplementContext ? '' : 'name="receiver_id" ' ?>id="complementReceiver" required<?= $lockedComplementContext ? ' disabled aria-disabled="true"' : ' disabled' ?>><?php if ($lockedComplementContext): ?><option value="<?= e($complementPrefill['receiver_id']) ?>" selected><?= e($complementPrefill['clave_corta'] . ' · ' . $complementPrefill['receptor']) ?></option><?php else: ?><option value="">Selecciona primero un cliente…</option><?php endif; ?></select></label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e(date('Y-m-d')) ?>" required></label>
                         <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
@@ -591,6 +611,9 @@ if ($companyModule) {
                             <?php if (!$invoiceStamped): ?><button type="button" class="button primary compact" data-proxy-action="invoiceStamp<?= e($row['id']) ?>">Timbrar</button><?php endif; ?>
                             <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones de la factura #<?= e($row['id']) ?>">•••</button>
                             <div class="record-action-source" hidden>
+                                <?php if ((int) $row['method_id'] === 2): ?>
+                                    <a data-record-action data-action-label="Hacer complemento de pago" data-action-icon="$" href="?complement=create&amp;invoice_id=<?= e($row['id']) ?>">Hacer complemento de pago</a>
+                                <?php endif; ?>
                                 <?php if (!$invoiceStamped): ?>
                                     <form method="post" data-confirm="¿Timbrar fiscalmente la factura #<?= e($row['id']) ?>? Esta operación emitirá el CFDI." data-confirm-title="Timbrar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button id="invoiceStamp<?= e($row['id']) ?>" type="submit" data-record-action data-action-label="Timbrar factura" data-action-icon="✓">Timbrar</button></form>
                                     <a data-record-action data-action-label="Ver PDF previo" data-action-icon="▧" href="https://ultra.sistema14.com/api/genera_factura.php?token=<?= e(rawurlencode((string) $row['token'])) ?>&amp;per=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
@@ -1457,7 +1480,22 @@ if ($companyModule) {
     });
     [complementCompany, complementReceiver].forEach((control) => control?.addEventListener('change', () => complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine)));
     addComplementInvoice?.addEventListener('click', addComplementLine);
-    if (complementLines) addComplementLine();
+    if (complementLines) {
+        addComplementLine();
+        const prefillUuid = complementForm?.dataset.prefillInvoiceUuid;
+        if (prefillUuid) {
+            const row = complementLines.querySelector('tr[data-complement-line]');
+            const uuid = row.querySelector('[name="invoice_uuid[]"]');
+            uuid.value = prefillUuid;
+            uuid.readOnly = true;
+            row.querySelector('[data-complement-remove]').disabled = true;
+            lookupComplementInvoice(row).then(() => {
+                if (row.dataset.validated === 'true') {
+                    row.querySelector('[data-complement-lookup]').hidden = true;
+                }
+            });
+        }
+    }
     complementForm?.addEventListener('submit', (event) => {
         const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
         if (rows.length === 0 || rows.some((row) => row.dataset.validated !== 'true')) {

@@ -75,20 +75,34 @@ final class PaymentComplementRepository
         if ($uuid === '') {
             return null;
         }
+        return $this->findInvoice('UPPER(f.uuid) = :value', $uuid);
+    }
+
+    public function invoiceById(int $id): ?array
+    {
+        if ($id <= 0) {
+            return null;
+        }
+        return $this->findInvoice('f.id = :value', $id);
+    }
+
+    private function findInvoice(string $condition, string|int $value): ?array
+    {
         $query = $this->pdo->prepare('SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
             f.nombre AS client_id, f.razon AS company_id, f.id_clave_corta AS receiver_id,
-            f.metodo_pago, c.nombre AS cliente, e.razon AS empresa, cc.razon_social AS receptor,
+            f.metodo_pago, c.nombre AS cliente, e.razon AS empresa, cc.clave_corta,
+            cc.razon_social AS receptor,
             COALESCE(SUM(rel.monto), 0) AS pagado, COALESCE(MAX(rel.num_pago), 0) + 1 AS siguiente_parcialidad
             FROM facturas f
             INNER JOIN clientes c ON c.id = f.nombre
             INNER JOIN empresas e ON e.id = f.razon
             INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta
             LEFT JOIN facturar_rel_complementos rel ON rel.id_factura = f.id
-            WHERE UPPER(f.uuid) = :uuid
+            WHERE ' . $condition . '
             GROUP BY f.id, f.uuid, f.serie, f.folio, f.total_iva, f.nombre, f.razon,
-                f.id_clave_corta, f.metodo_pago, c.nombre, e.razon, cc.razon_social
+                f.id_clave_corta, f.metodo_pago, c.nombre, e.razon, cc.clave_corta, cc.razon_social
             ORDER BY f.id DESC LIMIT 1');
-        $query->execute(['uuid' => $uuid]);
+        $query->execute(['value' => $value]);
         $row = $query->fetch();
         if (!$row) {
             return null;
@@ -135,6 +149,7 @@ final class PaymentComplementRepository
         $uuids = (array) ($input['invoice_uuid'] ?? []);
         $amounts = (array) ($input['amount'] ?? []);
         $installments = (array) ($input['installment'] ?? []);
+        $sourceInvoiceId = (int) ($input['source_invoice_id'] ?? 0);
 
         if ($clientId <= 0 || $receiverId <= 0 || $companyId <= 0 || $formId <= 0) {
             throw new RuntimeException('Selecciona cliente, razón social, empresa emisora y forma de pago.');
@@ -174,6 +189,7 @@ final class PaymentComplementRepository
             $paidQuery = $this->pdo->prepare('SELECT COALESCE(SUM(monto), 0) FROM facturar_rel_complementos WHERE id_factura = :invoice');
             $relations = [];
             $seen = [];
+            $sourceInvoiceIncluded = $sourceInvoiceId <= 0;
             $total = 0.0;
             foreach ($uuids as $index => $rawUuid) {
                 $uuid = strtoupper(trim((string) $rawUuid));
@@ -206,8 +222,14 @@ final class PaymentComplementRepository
                 $relations[] = ['invoice' => $invoice, 'amount' => $amount,
                     'installment' => $installment, 'balance' => $balance,
                     'remaining' => round($balance - $amount, 2)];
+                if ((int) $invoice['id'] === $sourceInvoiceId) {
+                    $sourceInvoiceIncluded = true;
+                }
                 $seen[$uuid] = true;
                 $total += $amount;
+            }
+            if (!$sourceInvoiceIncluded) {
+                throw new RuntimeException('La factura PPD que originó el complemento debe permanecer relacionada.');
             }
 
             $token = bin2hex(random_bytes(20));
