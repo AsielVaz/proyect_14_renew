@@ -23,6 +23,8 @@ El total del complemento se deriva de la suma de sus documentos relacionados; no
 
 Los registros nuevos quedan con estado `Pendiente` y sin UUID. El botón **Timbrar** abre la selección explícita del tratamiento fiscal y sólo después envía el complemento al servicio fiscal legado. Antes de hacerlo, el servidor comprueba que el registro exista y continúe sin UUID. Un registro pendiente puede eliminarse junto con sus relaciones; uno timbrado no puede borrarse y debe seguir el proceso de cancelación fiscal correspondiente.
 
+La respuesta del servicio legado puede mezclar el JSON de éxito o el UUID con cálculos, SQL y errores producidos por tareas secundarias como la generación del PDF. El cliente fiscal extrae el resultado útil y considera exitoso el timbrado cuando encuentra `Respuesta: true` o un UUID válido; las respuestas explícitamente negativas sin evidencia fiscal continúan tratándose como error.
+
 Cada fila dispone de menú contextual con clic derecho y botón accesible de acciones. Los pendientes ofrecen timbrado, detalle, PDF y eliminación; los timbrados ofrecen detalle, reenvío, PDF y XML. Las pruebas no ejecutan acciones fiscales ni envíos de correo reales.
 
 La opción **Ver facturas asociadas** abre el detalle del complemento y consulta las relaciones por su ID, por lo que sólo presenta las facturas pagadas mediante ese complemento.

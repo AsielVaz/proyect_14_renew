@@ -103,22 +103,90 @@ final class FiscalDocumentService
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         curl_close($handle);
         $body = trim((string) $body);
-        $data = json_decode($body, true);
-        if (!is_array($data)) {
-            $start = strrpos($body, '{');
-            $data = $start === false ? null : json_decode(substr($body, $start), true);
+        $data = $this->extractRemoteResult($body);
+        if (($status < 200 || $status >= 300) && !($data['useful_result'] ?? false)) {
+            throw new RuntimeException('El servicio fiscal devolvió una respuesta no válida.');
         }
-        if ($status < 200 || $status >= 300 || !is_array($data)) {
+        if (!is_array($data)) {
             throw new RuntimeException('El servicio fiscal devolvió una respuesta no válida.');
         }
         return $data;
+    }
+
+    private function extractRemoteResult(string $body): ?array
+    {
+        $decoded = json_decode($body, true);
+        if (is_array($decoded)) {
+            return $this->normalizeRemoteResult($decoded);
+        }
+
+        // Algunas respuestas del sistema legado mezclan cálculos, URLs, SQL y hasta
+        // errores PHP después de un JSON válido. Se extraen objetos JSON completos
+        // sin depender de que estén al inicio o al final de la respuesta.
+        $failure = null;
+        if (preg_match_all('/\{(?:[^{}"]|"(?:\\\\.|[^"\\\\])*")*\}/s', $body, $matches)) {
+            foreach ($matches[0] as $candidate) {
+                $decoded = json_decode($candidate, true);
+                if (is_array($decoded) && $this->hasRemoteSignal($decoded)) {
+                    $normalized = $this->normalizeRemoteResult($decoded);
+                    if (($normalized['status'] ?? '') !== 'error') {
+                        return $normalized;
+                    }
+                    $failure = $normalized;
+                }
+            }
+        }
+
+        // El timbrado puede haber terminado y actualizado la factura antes de que
+        // falle una tarea secundaria, como la generación del PDF. Un UUID fiscal
+        // explícito es evidencia suficiente para no reportar un falso negativo.
+        if (preg_match('/\buuid\s*=\s*["\']([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})["\']/i', $body, $match)
+            || preg_match('/"DatoAdicional"\s*:\s*"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})"/i', $body, $match)) {
+            return [
+                'status' => 'success',
+                'uuid' => strtoupper($match[1]),
+                'useful_result' => true,
+                'message' => 'El documento fue timbrado correctamente. UUID: ' . strtoupper($match[1]),
+            ];
+        }
+        return $failure;
+    }
+
+    private function hasRemoteSignal(array $response): bool
+    {
+        return array_key_exists('Respuesta', $response)
+            || array_key_exists('respuesta', $response)
+            || array_key_exists('status', $response)
+            || array_key_exists('estatus', $response)
+            || array_key_exists('uuid', $response)
+            || array_key_exists('DatoAdicional', $response)
+            || array_key_exists('datoAdicional', $response);
+    }
+
+    private function normalizeRemoteResult(array $response): array
+    {
+        $answer = $response['Respuesta'] ?? $response['respuesta'] ?? null;
+        $additional = trim((string) ($response['DatoAdicional'] ?? $response['datoAdicional'] ?? ''));
+        $uuid = preg_match('/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i', $additional)
+            ? strtoupper($additional)
+            : trim((string) ($response['uuid'] ?? ''));
+        if ($answer === true || $answer === 1 || $answer === '1' || strtolower((string) $answer) === 'true' || $uuid !== '') {
+            $response['status'] = 'success';
+            $response['useful_result'] = true;
+            if ($uuid !== '') {
+                $response['uuid'] = $uuid;
+            }
+        } elseif ($answer === false || $answer === 0 || $answer === '0' || strtolower((string) $answer) === 'false') {
+            $response['status'] = 'error';
+        }
+        return $response;
     }
 
     private function assertRemoteSuccess(array $response, string $fallback): void
     {
         $status = strtolower((string) ($response['status'] ?? $response['estatus'] ?? 'success'));
         if (in_array($status, ['error', 'failed', 'failure'], true)) {
-            throw new RuntimeException((string) ($response['message'] ?? $response['mensaje'] ?? $fallback));
+            throw new RuntimeException(trim((string) ($response['message'] ?? $response['mensaje'] ?? $response['Mensaje'] ?? '')) ?: $fallback);
         }
     }
 }

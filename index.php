@@ -1005,6 +1005,13 @@ if ($companyModule) {
     </section>
 </div>
 
+<div class="third-party-loader" id="thirdPartyLoader" role="status" aria-live="polite" aria-busy="true" hidden>
+    <div class="third-party-loader-card">
+        <span class="third-party-loader-spinner" aria-hidden="true"></span>
+        <div><strong id="thirdPartyLoaderTitle">Procesando solicitud</strong><p id="thirdPartyLoaderMessage">Conectando con el servicio externo…</p></div>
+    </div>
+</div>
+
 <div class="record-context-menu" id="recordContextMenu" role="menu" aria-label="Acciones del registro" hidden></div>
 
 <div class="glass-modal-backdrop" id="complementStampModal" hidden>
@@ -1023,6 +1030,57 @@ if ($companyModule) {
 
 <script nonce="<?= e(csp_nonce()) ?>">
 (() => {
+    const thirdPartyLoader = document.getElementById('thirdPartyLoader');
+    const thirdPartyLoaderTitle = document.getElementById('thirdPartyLoaderTitle');
+    const thirdPartyLoaderMessage = document.getElementById('thirdPartyLoaderMessage');
+    let thirdPartyLoaderTimer = null;
+    const hideThirdPartyLoader = () => {
+        window.clearTimeout(thirdPartyLoaderTimer);
+        thirdPartyLoader.classList.remove('is-visible');
+        thirdPartyLoader.hidden = true;
+        document.body.classList.remove('has-third-party-loader');
+    };
+    const showThirdPartyLoader = (title, message, autoHide = 0) => {
+        window.clearTimeout(thirdPartyLoaderTimer);
+        thirdPartyLoaderTitle.textContent = title;
+        thirdPartyLoaderMessage.textContent = message;
+        thirdPartyLoader.hidden = false;
+        document.body.classList.add('has-third-party-loader');
+        window.requestAnimationFrame(() => thirdPartyLoader.classList.add('is-visible'));
+        if (autoHide > 0) {
+            thirdPartyLoaderTimer = window.setTimeout(() => {
+                thirdPartyLoader.classList.remove('is-visible');
+                document.body.classList.remove('has-third-party-loader');
+                window.setTimeout(() => { thirdPartyLoader.hidden = true; }, 180);
+            }, autoHide);
+        }
+    };
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) hideThirdPartyLoader();
+    });
+
+    const thirdPartyOperations = {
+        invoice_stamp: ['Timbrando factura', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
+        invoice_resend: ['Reenviando factura', 'Solicitando el reenvío al servicio de Ultra Sistema 14…'],
+        complement_stamp: ['Timbrando complemento', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
+        complement_resend: ['Reenviando complemento', 'Solicitando el reenvío al servicio de Ultra Sistema 14…'],
+    };
+
+    document.addEventListener('submit', (event) => {
+        if (event.defaultPrevented) return;
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        const action = form.querySelector('[name="action"]')?.value || '';
+        const operation = thirdPartyOperations[action];
+        if (operation) showThirdPartyLoader(operation[0], operation[1]);
+    });
+
+    document.querySelectorAll('a[href*="ultra.sistema14.com"], a[href*="old.sistema14.com"]').forEach((link) => {
+        link.addEventListener('click', () => {
+            showThirdPartyLoader('Abriendo documento', 'Solicitando el archivo a Sistema 14…', 1200);
+        });
+    });
+
     document.querySelectorAll('.toast-close').forEach((button) => {
         button.addEventListener('click', () => button.closest('.glass-toast')?.remove());
     });
