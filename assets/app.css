@@ -430,29 +430,27 @@ textarea:focus {
     margin-bottom: 20px;
 }
 
-.dashboard-calculator-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-    padding: 22px 24px 24px;
+.calculator-launcher-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }
 
-.dashboard-calculator-card {
+.calculator-launcher-actions {
     display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 18px;
-    padding: 18px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-card);
-    background: var(--color-surface);
-    box-shadow: var(--shadow-card);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 9px;
 }
 
-.dashboard-calculator-card > header {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
+.calculator-launcher-actions .button {
+    min-width: 112px;
+}
+
+.calculator-launcher-actions .button span {
+    color: var(--color-primary-dark);
+    font-size: 16px;
+    font-weight: 850;
 }
 
 .calculator-icon {
@@ -465,22 +463,6 @@ textarea:focus {
     color: var(--color-primary-dark);
     font-size: 18px;
     font-weight: 850;
-}
-
-.dashboard-calculator-card h3,
-.dashboard-calculator-card p {
-    margin: 0;
-}
-
-.dashboard-calculator-card h3 {
-    font-size: 16px;
-}
-
-.dashboard-calculator-card p {
-    margin-top: 4px;
-    color: var(--color-muted);
-    font-size: 12px;
-    line-height: 1.45;
 }
 
 .calculator-form {
@@ -575,6 +557,56 @@ textarea:focus {
 .calculator-child-row td:first-child {
     padding-left: 24px;
     color: var(--color-muted);
+}
+
+.dashboard-calculator-modal {
+    overflow-y: auto;
+}
+
+.calculator-modal-card {
+    grid-template-columns: 1fr;
+    width: min(540px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow: auto;
+}
+
+.calculator-modal-card.calculator-modal-wide {
+    width: min(850px, 100%);
+}
+
+.calculator-modal-card > header {
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+}
+
+.calculator-modal-card > header h2,
+.calculator-modal-card > header p {
+    margin: 0;
+}
+
+.calculator-modal-card > header h2 {
+    font-size: 20px;
+}
+
+.calculator-modal-card > header p:last-child {
+    margin-top: 4px;
+    color: var(--color-muted);
+    font-size: 13px;
+}
+
+.calculator-modal-content {
+    display: grid;
+    gap: 16px;
+}
+
+.calculator-modal-wide .calculator-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+}
+
+.has-calculator-modal {
+    overflow: hidden;
 }
 
 .wallet-panel .panel-heading {
@@ -2282,10 +2314,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 1050px) {
-    .dashboard-calculator-grid {
-        grid-template-columns: 1fr;
-    }
-
     .company-grid,
     .company-account-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2297,6 +2325,19 @@ tbody tr:hover {
 }
 
 @media (max-width: 850px) {
+    .calculator-launcher-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .calculator-launcher-actions {
+        justify-content: flex-start;
+    }
+
+    .calculator-modal-wide .calculator-form {
+        grid-template-columns: 1fr;
+    }
+
     .company-identity {
         grid-template-columns: 90px minmax(0, 1fr);
     }
@@ -2369,6 +2410,11 @@ tbody tr:hover {
 }
 
 @media (max-width: 520px) {
+    .calculator-launcher-actions,
+    .calculator-launcher-actions .button {
+        width: 100%;
+    }
+
     .company-grid,
     .company-account-grid,
     .company-summary-grid {

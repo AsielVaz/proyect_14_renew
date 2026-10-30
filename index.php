@@ -897,10 +897,13 @@ if ($companyModule) {
         </section>
 
         <section class="panel dashboard-calculators-panel">
-            <div class="panel-heading"><div><p class="eyebrow">Herramientas operativas</p><h2>Calculadoras</h2><p class="panel-copy">Funciones trasladadas del panel anterior con sus fórmulas y variaciones originales.</p></div></div>
-            <div class="dashboard-calculator-grid">
-                <article class="dashboard-calculator-card">
-                    <header><span class="calculator-icon">$</span><div><h3>Calculadora de saldos</h3><p>Calcula cuánto necesitas o cuánto queda según las comisiones de la cartera.</p></div></header>
+            <div class="panel-heading calculator-launcher-heading"><div><p class="eyebrow">Herramientas operativas</p><h2>Calculadoras</h2><p class="panel-copy">Abre una herramienta para realizar el cálculo sin abandonar el panel.</p></div><div class="calculator-launcher-actions"><button type="button" class="button" data-calculator-open="balance"><span>$</span> Saldos</button><button type="button" class="button" data-calculator-open="banking"><span>%</span> Banking</button><button type="button" class="button" data-calculator-open="dispersal"><span>⇄</span> Dispersor</button></div></div>
+        </section>
+
+        <div class="glass-modal-backdrop dashboard-calculator-modal" data-calculator-modal="balance" hidden>
+            <section class="glass-modal calculator-modal-card" role="dialog" aria-modal="true" aria-labelledby="balanceCalculatorTitle">
+                <header><span class="calculator-icon">$</span><div><p class="eyebrow">Herramienta operativa</p><h2 id="balanceCalculatorTitle">Calculadora de saldos</h2><p>Calcula cuánto necesitas o cuánto queda según las comisiones de la cartera.</p></div></header>
+                <div class="calculator-modal-content">
                     <form data-dashboard-calculator="balance" class="calculator-form">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <label><span>Operación</span><select name="mode" required><option value="necesito">Dinero que necesito</option><option value="queda">Dinero que me queda</option></select></label>
@@ -909,10 +912,15 @@ if ($companyModule) {
                         <button type="submit" class="button primary">Calcular</button>
                     </form>
                     <div class="calculator-result balance-calculator-result" data-calculator-result hidden><span>Resultado</span><strong data-balance-result>$0.00</strong><small data-balance-detail></small></div>
-                </article>
+                </div>
+                <div class="glass-modal-actions"><button type="button" class="button" data-calculator-close>Cerrar</button></div>
+            </section>
+        </div>
 
-                <article class="dashboard-calculator-card">
-                    <header><span class="calculator-icon">%</span><div><h3>Banking</h3><p>Distribuye el monto entre proveedores según los porcentajes configurados.</p></div></header>
+        <div class="glass-modal-backdrop dashboard-calculator-modal" data-calculator-modal="banking" hidden>
+            <section class="glass-modal calculator-modal-card calculator-modal-wide" role="dialog" aria-modal="true" aria-labelledby="bankingCalculatorTitle">
+                <header><span class="calculator-icon">%</span><div><p class="eyebrow">Herramienta operativa</p><h2 id="bankingCalculatorTitle">Calculadora de banking</h2><p>Distribuye el monto entre proveedores según los porcentajes configurados.</p></div></header>
+                <div class="calculator-modal-content">
                     <form data-dashboard-calculator="banking" class="calculator-form">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <label><span>Empresa</span><select name="company_id" required><option value="">Seleccionar…</option><?php foreach ($dashboardCalculators['companies'] as $company): ?><option value="<?= e($company['id']) ?>"><?= e($company['razon']) ?></option><?php endforeach; ?></select></label>
@@ -920,10 +928,15 @@ if ($companyModule) {
                         <button type="submit" class="button primary">Calcular</button>
                     </form>
                     <div class="calculator-table" data-calculator-result hidden><table><thead><tr><th>Proveedor</th><th>Monto</th><th>% calc.</th><th>% config.</th></tr></thead><tbody data-banking-rows></tbody><tfoot><tr><th>Total</th><th data-banking-total></th><th colspan="2"></th></tr></tfoot></table></div>
-                </article>
+                </div>
+                <div class="glass-modal-actions"><button type="button" class="button" data-calculator-close>Cerrar</button></div>
+            </section>
+        </div>
 
-                <article class="dashboard-calculator-card">
-                    <header><span class="calculator-icon">⇄</span><div><h3>Dispersor</h3><p>Divide un monto entre bancas y vuelve a distribuirlo entre cuentas.</p></div></header>
+        <div class="glass-modal-backdrop dashboard-calculator-modal" data-calculator-modal="dispersal" hidden>
+            <section class="glass-modal calculator-modal-card calculator-modal-wide" role="dialog" aria-modal="true" aria-labelledby="dispersalCalculatorTitle">
+                <header><span class="calculator-icon">⇄</span><div><p class="eyebrow">Herramienta operativa</p><h2 id="dispersalCalculatorTitle">Dispersor</h2><p>Divide un monto entre bancas y vuelve a distribuirlo entre cuentas.</p></div></header>
+                <div class="calculator-modal-content">
                     <form data-dashboard-calculator="dispersal" class="calculator-form">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <label><span>Cantidad de bancas</span><select name="units" required><option value="">Seleccionar…</option><?php for ($units = 1; $units <= 5; $units++): ?><option value="<?= $units ?>"><?= $units ?> banca<?= $units === 1 ? '' : 's' ?></option><?php endfor; ?></select></label>
@@ -932,9 +945,10 @@ if ($companyModule) {
                         <button type="submit" class="button primary">Calcular</button>
                     </form>
                     <div class="calculator-table" data-calculator-result hidden><table><thead><tr><th>Salida / cuenta</th><th>Monto</th></tr></thead><tbody data-dispersal-rows></tbody><tfoot><tr><th>Total</th><th data-dispersal-total></th></tr></tfoot></table></div>
-                </article>
-            </div>
-        </section>
+                </div>
+                <div class="glass-modal-actions"><button type="button" class="button" data-calculator-close>Cerrar</button></div>
+            </section>
+        </div>
 
         <section class="panel wallet-panel">
             <div class="panel-heading list-tools">
@@ -1732,6 +1746,45 @@ if ($companyModule) {
         row.appendChild(cell);
         return cell;
     };
+
+    let activeCalculatorModal = null;
+    const closeCalculatorModal = (modal = activeCalculatorModal) => {
+        if (!modal) return;
+        modal.classList.remove('is-visible');
+        if (activeCalculatorModal === modal) activeCalculatorModal = null;
+        document.body.classList.remove('has-calculator-modal');
+        window.setTimeout(() => {
+            if (!modal.classList.contains('is-visible')) modal.hidden = true;
+        }, 180);
+    };
+
+    document.querySelectorAll('[data-calculator-open]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const modal = document.querySelector(`[data-calculator-modal="${button.dataset.calculatorOpen}"]`);
+            if (!modal) return;
+            if (activeCalculatorModal && activeCalculatorModal !== modal) closeCalculatorModal(activeCalculatorModal);
+            activeCalculatorModal = modal;
+            modal.hidden = false;
+            document.body.classList.add('has-calculator-modal');
+            window.requestAnimationFrame(() => {
+                modal.classList.add('is-visible');
+                modal.querySelector('select, input, button')?.focus();
+            });
+        });
+    });
+
+    document.querySelectorAll('[data-calculator-modal]').forEach((modal) => {
+        modal.querySelectorAll('[data-calculator-close]').forEach((button) => {
+            button.addEventListener('click', () => closeCalculatorModal(modal));
+        });
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) closeCalculatorModal(modal);
+        });
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && activeCalculatorModal) closeCalculatorModal();
+    });
 
     document.querySelectorAll('[data-dashboard-calculator]').forEach((form) => {
         form.addEventListener('submit', async (event) => {
