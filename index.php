@@ -31,6 +31,31 @@ $companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture'
 $action = (string) ($_GET['action'] ?? 'list');
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
+if (!$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule
+    && isset($_GET['calculator']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=UTF-8');
+    try {
+        verify_csrf();
+        $calculator = (string) $_GET['calculator'];
+        $amount = (float) str_replace([',', '$', ' '], '', (string) ($_POST['amount'] ?? '0'));
+        $data = match ($calculator) {
+            'balance' => dashboard_repository()->calculateBalance(
+                (int) ($_POST['client_id'] ?? 0), (string) ($_POST['mode'] ?? ''), $amount, current_operator_id()
+            ),
+            'banking' => dashboard_repository()->calculateBanking((int) ($_POST['company_id'] ?? 0), $amount),
+            'dispersal' => dashboard_repository()->calculateDispersal(
+                $amount, (int) ($_POST['units'] ?? 0), (string) ($_POST['accounts'] ?? '')
+            ),
+            default => throw new RuntimeException('Calculadora desconocida.'),
+        };
+        echo json_encode(['ok' => true, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    } catch (Throwable $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
+
 if ($companyView === 'analyze' && in_array((string) ($_GET['data'] ?? ''), ['parse', 'short_keys'], true)
     && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=UTF-8');
@@ -863,13 +888,52 @@ if ($companyModule) {
         $dashboardPage = max(1, (int) ($_GET['page'] ?? 1));
         $dashboardOverview = dashboard_overview(current_operator_id());
         $dashboardWallets = dashboard_repository()->wallets($dashboardSearch, $dashboardPage, current_operator_id());
+        $dashboardCalculators = dashboard_repository()->calculatorData(current_operator_id());
         ?>
         <section class="dashboard-summary">
-            <article><span>Carteras visibles</span><strong><?= number_format($dashboardOverview['wallets']) ?></strong><small>Clientes activos</small></article>
-            <article><span>Saldo de carteras</span><strong><?= e(report_value($dashboardOverview['walletBalance'], 'money')) ?></strong><small>Saldo calculado más reciente</small></article>
             <article><span>Saldos internos</span><strong><?= e(report_value($dashboardOverview['internalBalance'], 'money')) ?></strong><small>Cartera interna #13</small></article>
             <article><span>Movimientos pendientes</span><strong><?= e(report_value($dashboardOverview['pendingBalance'], 'money')) ?></strong><small><?= number_format($dashboardOverview['pendingCount']) ?> movimientos</small></article>
             <article class="<?= abs($dashboardOverview['balanceDifference']) > 0.01 ? 'is-warning' : '' ?>"><span>Diferencia de saldos</span><strong><?= e(report_value($dashboardOverview['balanceDifference'], 'money')) ?></strong><small>Estados de cuenta contra pagos</small></article>
+        </section>
+
+        <section class="panel dashboard-calculators-panel">
+            <div class="panel-heading"><div><p class="eyebrow">Herramientas operativas</p><h2>Calculadoras</h2><p class="panel-copy">Funciones trasladadas del panel anterior con sus fórmulas y variaciones originales.</p></div></div>
+            <div class="dashboard-calculator-grid">
+                <article class="dashboard-calculator-card">
+                    <header><span class="calculator-icon">$</span><div><h3>Calculadora de saldos</h3><p>Calcula cuánto necesitas o cuánto queda según las comisiones de la cartera.</p></div></header>
+                    <form data-dashboard-calculator="balance" class="calculator-form">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <label><span>Operación</span><select name="mode" required><option value="necesito">Dinero que necesito</option><option value="queda">Dinero que me queda</option></select></label>
+                        <label><span>Cartera</span><select name="client_id" required><option value="">Seleccionar…</option><?php foreach ($dashboardCalculators['clients'] as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></select></label>
+                        <label><span>Monto</span><input type="number" name="amount" min="0.01" step="0.01" placeholder="0.00" required></label>
+                        <button type="submit" class="button primary">Calcular</button>
+                    </form>
+                    <div class="calculator-result balance-calculator-result" data-calculator-result hidden><span>Resultado</span><strong data-balance-result>$0.00</strong><small data-balance-detail></small></div>
+                </article>
+
+                <article class="dashboard-calculator-card">
+                    <header><span class="calculator-icon">%</span><div><h3>Banking</h3><p>Distribuye el monto entre proveedores según los porcentajes configurados.</p></div></header>
+                    <form data-dashboard-calculator="banking" class="calculator-form">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <label><span>Empresa</span><select name="company_id" required><option value="">Seleccionar…</option><?php foreach ($dashboardCalculators['companies'] as $company): ?><option value="<?= e($company['id']) ?>"><?= e($company['razon']) ?></option><?php endforeach; ?></select></label>
+                        <label><span>Monto</span><input type="number" name="amount" min="0.01" step="0.01" placeholder="0.00" required></label>
+                        <button type="submit" class="button primary">Calcular</button>
+                    </form>
+                    <div class="calculator-table" data-calculator-result hidden><table><thead><tr><th>Proveedor</th><th>Monto</th><th>% calc.</th><th>% config.</th></tr></thead><tbody data-banking-rows></tbody><tfoot><tr><th>Total</th><th data-banking-total></th><th colspan="2"></th></tr></tfoot></table></div>
+                </article>
+
+                <article class="dashboard-calculator-card">
+                    <header><span class="calculator-icon">⇄</span><div><h3>Dispersor</h3><p>Divide un monto entre bancas y vuelve a distribuirlo entre cuentas.</p></div></header>
+                    <form data-dashboard-calculator="dispersal" class="calculator-form">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                        <label><span>Cantidad de bancas</span><select name="units" required><option value="">Seleccionar…</option><?php for ($units = 1; $units <= 5; $units++): ?><option value="<?= $units ?>"><?= $units ?> banca<?= $units === 1 ? '' : 's' ?></option><?php endfor; ?></select></label>
+                        <label><span>Monto</span><input type="number" name="amount" min="0.01" step="0.01" placeholder="0.00" required></label>
+                        <label><span>Cuentas</span><input type="text" name="accounts" placeholder="Cuenta 1, Cuenta 2…" required></label>
+                        <button type="submit" class="button primary">Calcular</button>
+                    </form>
+                    <div class="calculator-table" data-calculator-result hidden><table><thead><tr><th>Salida / cuenta</th><th>Monto</th></tr></thead><tbody data-dispersal-rows></tbody><tfoot><tr><th>Total</th><th data-dispersal-total></th></tr></tfoot></table></div>
+                </article>
+            </div>
         </section>
 
         <section class="panel wallet-panel">
@@ -1660,6 +1724,73 @@ if ($companyModule) {
         stack.appendChild(toast);
         window.setTimeout(() => toast.remove(), 6500);
     };
+
+    const appendCalculatorCell = (row, text, tag = 'td', className = '') => {
+        const cell = document.createElement(tag);
+        cell.textContent = text;
+        if (className) cell.className = className;
+        row.appendChild(cell);
+        return cell;
+    };
+
+    document.querySelectorAll('[data-dashboard-calculator]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const type = form.dataset.dashboardCalculator;
+            const button = form.querySelector('button[type="submit"]');
+            const originalLabel = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Calculando…';
+            try {
+                const response = await fetch(`?calculator=${encodeURIComponent(type)}`, {
+                    method: 'POST', body: new FormData(form), headers: {'Accept': 'application/json'},
+                });
+                const result = await response.json();
+                if (!response.ok || !result.ok) throw new Error(result.message || 'No fue posible realizar el cálculo.');
+                const output = form.parentElement.querySelector('[data-calculator-result]');
+                output.hidden = false;
+                if (type === 'balance') {
+                    output.querySelector('[data-balance-result]').textContent = invoiceMoney.format(Number(result.data.result));
+                    output.querySelector('[data-balance-detail]').textContent = `${result.data.scheme} · Comisión total ${Number(result.data.percentage).toFixed(2)}%`;
+                } else if (type === 'banking') {
+                    const body = output.querySelector('[data-banking-rows]');
+                    body.replaceChildren();
+                    result.data.rows.forEach((item) => {
+                        const row = document.createElement('tr');
+                        appendCalculatorCell(row, item.provider);
+                        appendCalculatorCell(row, invoiceMoney.format(Number(item.amount)));
+                        appendCalculatorCell(row, `${Number(item.calculated_percentage).toFixed(4)}%`);
+                        appendCalculatorCell(row, `${Number(item.suggested_percentage).toFixed(2)}%`);
+                        body.appendChild(row);
+                    });
+                    output.querySelector('[data-banking-total]').textContent = invoiceMoney.format(Number(result.data.total));
+                } else if (type === 'dispersal') {
+                    const body = output.querySelector('[data-dispersal-rows]');
+                    body.replaceChildren();
+                    result.data.rows.forEach((item) => {
+                        const parent = document.createElement('tr');
+                        parent.className = 'calculator-parent-row';
+                        appendCalculatorCell(parent, `Banca ${item.name}`);
+                        appendCalculatorCell(parent, invoiceMoney.format(Number(item.amount)));
+                        body.appendChild(parent);
+                        item.accounts.forEach((account) => {
+                            const child = document.createElement('tr');
+                            child.className = 'calculator-child-row';
+                            appendCalculatorCell(child, account.name);
+                            appendCalculatorCell(child, invoiceMoney.format(Number(account.amount)));
+                            body.appendChild(child);
+                        });
+                    });
+                    output.querySelector('[data-dispersal-total]').textContent = invoiceMoney.format(Number(result.data.total));
+                }
+            } catch (error) {
+                showToast(error instanceof Error ? error.message : 'No fue posible realizar el cálculo.');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalLabel;
+            }
+        });
+    });
 
     const captureAnalyzer = document.getElementById('captureAnalyzer');
     const captureEditor = document.getElementById('captureEditor');
