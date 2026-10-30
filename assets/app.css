@@ -426,31 +426,36 @@ textarea:focus {
     white-space: nowrap;
 }
 
-.dashboard-calculators-panel {
-    margin-bottom: 20px;
-}
-
-.calculator-launcher-heading {
+.dashboard-calculator-shortcuts {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 7px;
 }
 
-.calculator-launcher-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 9px;
-}
-
-.calculator-launcher-actions .button {
-    min-width: 112px;
-}
-
-.calculator-launcher-actions .button span {
+.calculator-shortcut {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-surface);
     color: var(--color-primary-dark);
-    font-size: 16px;
+    font: inherit;
+    font-size: 15px;
     font-weight: 850;
+    box-shadow: 0 3px 10px rgba(67, 43, 28, 0.06);
+    cursor: pointer;
+    transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.calculator-shortcut:hover,
+.calculator-shortcut:focus-visible {
+    border-color: var(--color-primary-border);
+    outline: none;
+    background: var(--color-primary-soft);
+    transform: translateY(-1px);
 }
 
 .calculator-icon {
@@ -563,14 +568,15 @@ textarea:focus {
     overflow-y: auto;
 }
 
-.calculator-modal-card {
+.glass-modal.calculator-modal-card {
     grid-template-columns: 1fr;
+    gap: 18px;
     width: min(540px, 100%);
     max-height: calc(100vh - 40px);
     overflow: auto;
 }
 
-.calculator-modal-card.calculator-modal-wide {
+.glass-modal.calculator-modal-card.calculator-modal-wide {
     width: min(850px, 100%);
 }
 
@@ -2325,15 +2331,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 850px) {
-    .calculator-launcher-heading {
-        align-items: stretch;
-        flex-direction: column;
-    }
-
-    .calculator-launcher-actions {
-        justify-content: flex-start;
-    }
-
     .calculator-modal-wide .calculator-form {
         grid-template-columns: 1fr;
     }
@@ -2410,11 +2407,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 520px) {
-    .calculator-launcher-actions,
-    .calculator-launcher-actions .button {
-        width: 100%;
-    }
-
     .company-grid,
     .company-account-grid,
     .company-summary-grid {

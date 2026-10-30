@@ -28,6 +28,7 @@ $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
 $companyView = (string) ($_GET['companies'] ?? '');
 $companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture', 'movements', 'account', 'analyze'], true);
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
@@ -395,6 +396,12 @@ if ($companyModule) {
             <a class="button primary" href="?invoice=create">+ Nueva factura</a>
         <?php elseif ($complementView === 'list'): ?>
             <a class="button primary" href="?complement=create">+ Nuevo complemento</a>
+        <?php elseif ($dashboardModule): ?>
+            <div class="dashboard-calculator-shortcuts" aria-label="Calculadoras">
+                <button type="button" class="calculator-shortcut" data-calculator-open="balance" aria-label="Abrir calculadora de saldos" title="Calculadora de saldos">$</button>
+                <button type="button" class="calculator-shortcut" data-calculator-open="banking" aria-label="Abrir calculadora de banking" title="Calculadora de banking">%</button>
+                <button type="button" class="calculator-shortcut" data-calculator-open="dispersal" aria-label="Abrir dispersor" title="Dispersor">⇄</button>
+            </div>
         <?php endif; ?>
     </header>
 
@@ -894,10 +901,6 @@ if ($companyModule) {
             <article><span>Saldos internos</span><strong><?= e(report_value($dashboardOverview['internalBalance'], 'money')) ?></strong><small>Cartera interna #13</small></article>
             <article><span>Movimientos pendientes</span><strong><?= e(report_value($dashboardOverview['pendingBalance'], 'money')) ?></strong><small><?= number_format($dashboardOverview['pendingCount']) ?> movimientos</small></article>
             <article class="<?= abs($dashboardOverview['balanceDifference']) > 0.01 ? 'is-warning' : '' ?>"><span>Diferencia de saldos</span><strong><?= e(report_value($dashboardOverview['balanceDifference'], 'money')) ?></strong><small>Estados de cuenta contra pagos</small></article>
-        </section>
-
-        <section class="panel dashboard-calculators-panel">
-            <div class="panel-heading calculator-launcher-heading"><div><p class="eyebrow">Herramientas operativas</p><h2>Calculadoras</h2><p class="panel-copy">Abre una herramienta para realizar el cálculo sin abandonar el panel.</p></div><div class="calculator-launcher-actions"><button type="button" class="button" data-calculator-open="balance"><span>$</span> Saldos</button><button type="button" class="button" data-calculator-open="banking"><span>%</span> Banking</button><button type="button" class="button" data-calculator-open="dispersal"><span>⇄</span> Dispersor</button></div></div>
         </section>
 
         <div class="glass-modal-backdrop dashboard-calculator-modal" data-calculator-modal="balance" hidden>
