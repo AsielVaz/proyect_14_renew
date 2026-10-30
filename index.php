@@ -612,7 +612,7 @@ if ($companyModule) {
                             <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones de la factura #<?= e($row['id']) ?>">•••</button>
                             <div class="record-action-source" hidden>
                                 <?php if ((int) $row['method_id'] === 2): ?>
-                                    <a data-record-action data-action-label="Hacer complemento de pago" data-action-icon="$" href="?complement=create&amp;invoice_id=<?= e($row['id']) ?>">Hacer complemento de pago</a>
+                                    <a data-record-action data-action-label="Hacer complemento de pago" data-action-icon="$" href="?complement=create&amp;invoice_id=<?= e($row['id']) ?>" target="_blank" rel="noopener">Hacer complemento de pago</a>
                                 <?php endif; ?>
                                 <?php if (!$invoiceStamped): ?>
                                     <form method="post" data-confirm="¿Timbrar fiscalmente la factura #<?= e($row['id']) ?>? Esta operación emitirá el CFDI." data-confirm-title="Timbrar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button id="invoiceStamp<?= e($row['id']) ?>" type="submit" data-record-action data-action-label="Timbrar factura" data-action-icon="✓">Timbrar</button></form>
