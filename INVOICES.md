@@ -33,4 +33,6 @@ Cada fila ofrece un menú contextual con clic derecho y un botón visible de acc
 
 Las facturas PPD incluyen la acción **Hacer complemento de pago**. La acción abre el alta de complementos con empresa, cliente y clave corta precargados y bloqueados, y relaciona la factura con su saldo pendiente vigente.
 
+La acción **Ver complementos asociados** muestra únicamente los complementos aplicados a la factura, su cantidad, los importes pagados y el saldo restante vigente.
+
 Las pruebas automáticas nunca invocan el timbrado o el reenvío, ya que producirían efectos fiscales o comunicaciones reales.

@@ -23,7 +23,7 @@ $movementKey = (string) ($_GET['movement'] ?? '');
 $movement = $movementKey !== '' ? Movements::get($movementKey) : null;
 $movementAction = $movement['action'] ?? null;
 $invoiceView = (string) ($_GET['invoice'] ?? '');
-$invoiceModule = in_array($invoiceView, ['list', 'create'], true);
+$invoiceModule = in_array($invoiceView, ['list', 'create', 'complements'], true);
 $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
 $companyView = (string) ($_GET['companies'] ?? '');
@@ -279,7 +279,7 @@ if ($companyModule) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <base href="<?= e(app_url('/')) ?>">
-    <title><?= e($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Detalle de complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : 'Facturas') : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))) ?> · Sistema 14</title>
+    <title><?= e($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
@@ -360,7 +360,7 @@ if ($companyModule) {
     <header class="topbar">
         <div>
             <p class="eyebrow"><?= $companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))) ?></p>
-            <h1><?= e($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Detalle de complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : 'Facturas') : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))) ?></h1>
+            <h1><?= e($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))) ?></h1>
         </div>
         <?php if ($catalog && $action !== 'form'): ?>
             <a class="button primary" href="?catalog=<?= e($key) ?>&amp;action=form">+ Nuevo registro</a>
@@ -550,13 +550,14 @@ if ($companyModule) {
                             <?php if (!$complementStamped): ?><button type="button" class="button primary compact" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>">Timbrar</button><?php endif; ?>
                             <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del complemento #<?= e($row['id']) ?>">•••</button>
                             <div class="record-action-source" hidden>
-                                <a data-record-action data-action-label="Ver detalles" data-action-icon="⌕" href="?complement=detail&amp;id=<?= e($row['id']) ?>">Detalles</a>
+                                <a data-record-action data-action-label="Ver facturas asociadas" data-action-icon="⌕" href="?complement=detail&amp;id=<?= e($row['id']) ?>">Ver facturas asociadas</a>
                                 <?php if (!$complementStamped): ?>
                                     <button type="button" data-record-action data-action-label="Timbrar complemento" data-action-icon="✓" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>">Timbrar</button>
                                     <a data-record-action data-action-label="Vista PDF" data-action-icon="▧" href="https://old.sistema14.com/gen_fact_complemento_pdf.php?id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
                                     <form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
                                 <?php else: ?>
                                     <form method="post" data-confirm="¿Reenviar por correo este complemento timbrado?" data-confirm-title="Reenviar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
+                                    <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
                                     <a data-record-action data-action-label="Descargar PDF" data-action-icon="▧" href="https://old.sistema14.com/gen_fact_complemento_pdf.php?id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
                                     <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/firmados-comp/XML-complemento-<?= e($row['id']) ?>-<?= e(rawurlencode((string) $row['uuid'])) ?>.xml" target="_blank" rel="noopener">XML</a>
                                 <?php endif; ?>
@@ -596,6 +597,26 @@ if ($companyModule) {
                     <div class="invoice-summary"><div><span>Subtotal</span><strong id="invoiceSubtotal">$0.00</strong></div><div><span>IVA</span><strong id="invoiceTax">$0.00</strong></div><div><span>Total</span><strong id="invoiceTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar factura</button></div>
                 </section>
             </form>
+        <?php elseif ($invoiceView === 'complements'): ?>
+            <?php $invoiceComplements = invoice_repository()->associatedComplements((int) ($id ?? 0)); ?>
+            <?php if (!$invoiceComplements): ?>
+                <section class="panel"><div class="empty">No se encontró la factura PPD solicitada. <a href="?invoice=list">Volver al listado</a></div></section>
+            <?php else: ?>
+                <section class="report-intro"><p>Complementos de pago aplicados exclusivamente a esta factura PPD.</p><span class="operation-badge"><?= e($invoiceComplements['complement_count']) ?> complemento(s)</span></section>
+                <section class="panel">
+                    <div class="panel-heading"><div><p class="eyebrow">Factura #<?= e($invoiceComplements['id']) ?></p><h2><?= e(($invoiceComplements['serie'] ?? '') . ($invoiceComplements['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($invoiceComplements['uuid'] ?: 'Factura sin UUID') ?></p></div><a class="button" href="?invoice=list">Volver a facturas</a></div>
+                    <dl class="complement-detail-grid">
+                        <div><dt>Empresa emisora</dt><dd><?= e($invoiceComplements['empresa']) ?></dd></div><div><dt>Cliente</dt><dd><?= e($invoiceComplements['cliente']) ?></dd></div>
+                        <div><dt>Clave corta / receptor</dt><dd><?= e($invoiceComplements['clave_corta']) ?><small><?= e($invoiceComplements['receptor']) ?></small></dd></div><div><dt>Complementos asociados</dt><dd><?= e($invoiceComplements['complement_count']) ?></dd></div>
+                        <div><dt>Total de la factura</dt><dd><?= e(report_value($invoiceComplements['total_iva'], 'money')) ?></dd></div><div><dt>Total pagado</dt><dd><?= e(report_value($invoiceComplements['paid'], 'money')) ?></dd></div>
+                        <div><dt>Saldo restante</dt><dd><?= e(report_value($invoiceComplements['balance'], 'money')) ?></dd></div>
+                    </dl>
+                    <div class="table-wrap"><table class="movement-table"><thead><tr><th>Complemento</th><th>UUID</th><th>Fecha de pago</th><th>Pago / parcialidad</th><th>Saldo restante</th><th>Estado</th></tr></thead><tbody><?php foreach ($invoiceComplements['complements'] as $relation): ?><tr>
+                        <td><a href="?complement=detail&amp;id=<?= e($relation['id_complemento']) ?>">#<?= e($relation['id_complemento']) ?> · <?= e(($relation['serie'] ?? 'P') . ($relation['folio'] ?? '')) ?></a></td><td><?= e($relation['uuid'] ?: 'Sin UUID') ?></td><td><?= e(substr((string) $relation['fecha_pago'], 0, 10)) ?></td>
+                        <td><span class="movement-cell-main"><?= e(report_value($relation['monto'], 'money')) ?></span><span class="movement-cell-secondary">Parcialidad <?= e($relation['num_pago']) ?></span></td><td><?= e(report_value($relation['restante'], 'money')) ?></td><td><?= e(trim((string) $relation['uuid']) !== '' ? 'Timbrado' : ($relation['status'] ?: ($relation['status_error'] ?: 'Pendiente'))) ?></td>
+                    </tr><?php endforeach; ?><?php if ($invoiceComplements['complements'] === []): ?><tr><td colspan="6" class="empty">Esta factura todavía no tiene complementos asociados.</td></tr><?php endif; ?></tbody></table></div>
+                </section>
+            <?php endif; ?>
         <?php else: ?>
             <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage); ?>
             <section class="report-intro"><p>Facturas guardadas en la tabla original, con emisor, receptor, relación de pago y estado fiscal.</p></section>
@@ -613,6 +634,7 @@ if ($companyModule) {
                             <div class="record-action-source" hidden>
                                 <?php if ((int) $row['method_id'] === 2): ?>
                                     <a data-record-action data-action-label="Hacer complemento de pago" data-action-icon="$" href="?complement=create&amp;invoice_id=<?= e($row['id']) ?>" target="_blank" rel="noopener">Hacer complemento de pago</a>
+                                    <a data-record-action data-action-label="Ver complementos asociados" data-action-icon="⌕" href="?invoice=complements&amp;id=<?= e($row['id']) ?>">Ver complementos asociados</a>
                                 <?php endif; ?>
                                 <?php if (!$invoiceStamped): ?>
                                     <form method="post" data-confirm="¿Timbrar fiscalmente la factura #<?= e($row['id']) ?>? Esta operación emitirá el CFDI." data-confirm-title="Timbrar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button id="invoiceStamp<?= e($row['id']) ?>" type="submit" data-record-action data-action-label="Timbrar factura" data-action-icon="✓">Timbrar</button></form>
@@ -620,6 +642,7 @@ if ($companyModule) {
                                     <a data-record-action data-action-label="Descargar PRE XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/sinfirma/XML-factura-<?= e($row['id']) ?>.xml" target="_blank" rel="noopener">PRE XML</a>
                                     <form method="post" data-confirm="¿Eliminar esta factura pendiente y todos sus conceptos?" data-confirm-title="Eliminar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
                                 <?php else: ?>
+                                    <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
                                     <a data-record-action data-action-label="Ver PDF" data-action-icon="▧" href="https://ultra.sistema14.com/api/genera_factura.php?token=<?= e(rawurlencode((string) $row['token'])) ?>&amp;per=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
                                     <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/gateWayFactura.php?factura=<?= e($row['id']) ?>" target="_blank" rel="noopener">XML</a>
                                     <form method="post" data-confirm="¿Reenviar por correo esta factura timbrada?" data-confirm-title="Reenviar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
@@ -1071,6 +1094,38 @@ if ($companyModule) {
 
     document.querySelectorAll('[data-proxy-action]').forEach((button) => {
         button.addEventListener('click', () => document.getElementById(button.dataset.proxyAction)?.click());
+    });
+
+    document.querySelectorAll('[data-copy-uuid]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const uuid = button.dataset.copyUuid || '';
+            if (!uuid) return;
+            try {
+                let copied = false;
+                if (navigator.clipboard?.writeText) {
+                    try {
+                        await navigator.clipboard.writeText(uuid);
+                        copied = true;
+                    } catch (error) {
+                        copied = false;
+                    }
+                }
+                if (!copied) {
+                    const helper = document.createElement('textarea');
+                    helper.value = uuid;
+                    helper.style.position = 'fixed';
+                    helper.style.opacity = '0';
+                    document.body.appendChild(helper);
+                    helper.select();
+                    copied = document.execCommand('copy');
+                    helper.remove();
+                }
+                if (!copied) throw new Error('No se pudo copiar');
+                showToast('UUID copiado al portapapeles.', 'success');
+            } catch (error) {
+                showToast('No fue posible copiar el UUID al portapapeles.');
+            }
+        });
     });
 
     const stampModal = document.getElementById('complementStampModal');

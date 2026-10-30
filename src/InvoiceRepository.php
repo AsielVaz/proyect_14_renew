@@ -79,6 +79,45 @@ final class InvoiceRepository
         return $query->fetchAll();
     }
 
+    public function associatedComplements(int $invoiceId): ?array
+    {
+        if ($invoiceId <= 0) {
+            return null;
+        }
+        $invoiceQuery = $this->pdo->prepare('SELECT f.id, f.fecha, f.serie, f.folio, f.uuid,
+            f.total_iva, f.metodo_pago, c.nombre AS cliente, e.razon AS empresa,
+            cc.clave_corta, cc.razon_social AS receptor, cc.rfc
+            FROM facturas f
+            INNER JOIN clientes c ON c.id = f.nombre
+            INNER JOIN empresas e ON e.id = f.razon
+            INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta
+            WHERE f.id = :id LIMIT 1');
+        $invoiceQuery->execute(['id' => $invoiceId]);
+        $invoice = $invoiceQuery->fetch();
+        if (!$invoice || (int) $invoice['metodo_pago'] !== 2) {
+            return null;
+        }
+
+        $relationsQuery = $this->pdo->prepare('SELECT rel.id, rel.id_complemento, rel.monto,
+            rel.num_pago, rel.saldo, rel.restante, rel.fecha_pago,
+            fc.serie, fc.folio, fc.uuid, fc.status, fc.status_error
+            FROM facturar_rel_complementos rel
+            INNER JOIN facturas_complementos fc ON fc.id = rel.id_complemento
+            WHERE rel.id_factura = :invoice
+            ORDER BY rel.num_pago ASC, rel.id ASC');
+        $relationsQuery->execute(['invoice' => $invoiceId]);
+        $relations = $relationsQuery->fetchAll();
+        $paid = array_reduce($relations, static fn (float $total, array $relation): float =>
+            $total + (float) $relation['monto'], 0.0);
+        $invoice['paid'] = round($paid, 2);
+        $invoice['balance'] = max(0, round((float) $invoice['total_iva'] - $paid, 2));
+        $invoice['complement_count'] = count(array_unique(array_map(
+            static fn (array $relation): int => (int) $relation['id_complemento'], $relations
+        )));
+        $invoice['complements'] = $relations;
+        return $invoice;
+    }
+
     public function create(array $input, int $operatorId): int
     {
         $companyId = (int) ($input['company_id'] ?? 0);

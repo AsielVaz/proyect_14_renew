@@ -25,6 +25,8 @@ Los registros nuevos quedan con estado `Pendiente` y sin UUID. El botón **Timbr
 
 Cada fila dispone de menú contextual con clic derecho y botón accesible de acciones. Los pendientes ofrecen timbrado, detalle, PDF y eliminación; los timbrados ofrecen detalle, reenvío, PDF y XML. Las pruebas no ejecutan acciones fiscales ni envíos de correo reales.
 
+La opción **Ver facturas asociadas** abre el detalle del complemento y consulta las relaciones por su ID, por lo que sólo presenta las facturas pagadas mediante ese complemento.
+
 El tratamiento legado se conserva en `facturas_complementos.cadena`:
 
 - `T`: típico, IVA 16%.
