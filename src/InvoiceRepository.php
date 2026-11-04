@@ -37,7 +37,7 @@ final class InvoiceRepository
             f.nombre AS client_id, f.razon AS company_id, f.id_clave_corta AS receiver_id,
             GREATEST(0, f.total_iva - COALESCE((SELECT SUM(rel.monto)
                 FROM facturar_rel_complementos rel WHERE rel.id_factura = f.id), 0)) AS saldo_pendiente,
-            c.nombre AS cliente,
+            c.nombre AS cliente, c.correo AS cliente_correo,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
             fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
             $joins . $where . " ORDER BY f.id DESC LIMIT {$fetchLimit} OFFSET {$offset}");

@@ -14,6 +14,8 @@ use App\FiscalDocumentService;
 use App\StatisticsRepository;
 use App\GlobalSearchRepository;
 use App\ManualEmailService;
+use App\PdfDocumentService;
+use App\InvoiceEmailService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -204,13 +206,25 @@ function company_panel_repository(): CompanyPanelRepository
 function capture_analysis_service(): CaptureAnalysisService
 {
     static $service;
-    return $service ??= new CaptureAnalysisService(db(), company_panel_repository());
+    return $service ??= new CaptureAnalysisService(db(), company_panel_repository(), movement_repository());
 }
 
 function fiscal_document_service(): FiscalDocumentService
 {
     static $service;
     return $service ??= new FiscalDocumentService(db());
+}
+
+function pdf_document_service(): PdfDocumentService
+{
+    static $service;
+    return $service ??= new PdfDocumentService(db());
+}
+
+function invoice_email_service(): InvoiceEmailService
+{
+    static $service;
+    return $service ??= new InvoiceEmailService(db(), pdf_document_service());
 }
 
 function dashboard_repository(): DashboardRepository

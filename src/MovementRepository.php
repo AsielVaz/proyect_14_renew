@@ -84,6 +84,119 @@ final class MovementRepository
         });
     }
 
+    public function assignWithinTransaction(int $paymentId, int $clientId, int $operatorId): array
+    {
+        if (!$this->pdo->inTransaction()) {
+            throw new RuntimeException('La asignación de captura requiere una transacción activa.');
+        }
+        return $this->assignInternal($paymentId, $clientId, $operatorId);
+    }
+
+    public function previewCaptureAssignments(array $movements): array
+    {
+        if (count($movements) > 500) {
+            throw new RuntimeException('No se pueden calcular más de 500 movimientos por captura.');
+        }
+
+        $iva = (float) ($this->pdo->query('SELECT iva FROM configuracion ORDER BY id DESC LIMIT 1')->fetchColumn() ?: 16);
+        $clientQuery = $this->pdo->prepare(
+            'SELECT id, nombre, empresa, comision, esquema_comision,
+                    1_subcomision AS sub_1, 2_subcomision AS sub_2, 3_subcomision AS sub_3, 4_subcomision AS sub_4,
+                    porc_1_subcomision AS pct_1, porc_2_subcomision AS pct_2,
+                    porc_3_subcomision AS pct_3, porc_4_subcomision AS pct_4
+             FROM clientes WHERE id = :id'
+        );
+
+        $rows = [];
+        $recipientIds = [1];
+        foreach ($movements as $movement) {
+            $clientId = (int) ($movement['clientId'] ?? 0);
+            $amount = round((float) ($movement['amount'] ?? 0), 6);
+            $movementType = (string) ($movement['type'] ?? '');
+            if ($clientId <= 0 || $amount <= 0 || !in_array($movementType, ['Deposito', 'Retiro'], true)) {
+                continue;
+            }
+            $clientQuery->execute(['id' => $clientId]);
+            $client = $clientQuery->fetch();
+            if (!$client) {
+                throw new RuntimeException('La cartera #' . $clientId . ' asociada por clave corta no existe.');
+            }
+
+            $calculation = $this->calculate($amount, $movementType, $client, $iva);
+            $commissions = [];
+            foreach ($calculation['subcommissions'] as $commission) {
+                $recipientIds[] = $commission['clientId'];
+                $commissions[] = [
+                    'recipientId' => $commission['clientId'],
+                    'type' => 'Subcomisión',
+                    'rate' => $commission['rate'],
+                    'amount' => $commission['amount'],
+                ];
+            }
+            if ($calculation['houseCommission'] > 0) {
+                $commissions[] = [
+                    'recipientId' => 1,
+                    'type' => 'Comisión principal',
+                    'rate' => (float) ($client['comision'] ?? 0),
+                    'amount' => $calculation['houseCommission'],
+                ];
+            }
+
+            $recipientIds[] = $clientId;
+            $rows[] = [
+                'sourceIndex' => (int) ($movement['sourceIndex'] ?? 0),
+                'amount' => $amount,
+                'movementType' => $movementType,
+                'clientId' => $clientId,
+                'clientName' => (string) $client['nombre'],
+                'scheme' => $calculation['scheme'],
+                'mainCredit' => $calculation['mainCredit'],
+                'commissions' => $commissions,
+                'commissionTotal' => round(array_sum(array_column($commissions, 'amount')), 6),
+            ];
+        }
+
+        $names = [];
+        $recipientIds = array_values(array_unique(array_filter(array_map('intval', $recipientIds))));
+        if ($recipientIds !== []) {
+            $query = $this->pdo->prepare('SELECT id, nombre FROM clientes WHERE id IN (' . implode(',', array_fill(0, count($recipientIds), '?')) . ')');
+            $query->execute($recipientIds);
+            foreach ($query->fetchAll() as $recipient) {
+                $names[(int) $recipient['id']] = (string) $recipient['nombre'];
+            }
+        }
+
+        $distributed = [];
+        foreach ($rows as &$row) {
+            foreach ($row['commissions'] as &$commission) {
+                $recipientId = (int) $commission['recipientId'];
+                $commission['recipientName'] = $names[$recipientId] ?? 'Cartera #' . $recipientId;
+                if (!isset($distributed[$recipientId])) {
+                    $distributed[$recipientId] = [
+                        'recipientId' => $recipientId,
+                        'recipientName' => $commission['recipientName'],
+                        'amount' => 0.0,
+                    ];
+                }
+                $distributed[$recipientId]['amount'] += (float) $commission['amount'];
+            }
+            unset($commission);
+        }
+        unset($row);
+        foreach ($distributed as &$recipient) {
+            $recipient['amount'] = round((float) $recipient['amount'], 6);
+        }
+        unset($recipient);
+
+        return [
+            'movementCount' => count($rows),
+            'commissionCount' => array_sum(array_map(static fn (array $row): int => count($row['commissions']), $rows)),
+            'commissionTotal' => round(array_sum(array_column($rows, 'commissionTotal')), 6),
+            'rows' => $rows,
+            'distributed' => array_values($distributed),
+        ];
+    }
+
     public function previewAssignments(array $assignments): array
     {
         $assignments = $this->normalizeAssignments($assignments);
@@ -370,7 +483,14 @@ final class MovementRepository
         }
         $this->audit('assign', $operatorId, $paymentId, ['clientId' => $clientId, 'calculation' => $calculation, 'commissionIds' => $commissionIds]);
 
-        return ['paymentId' => $paymentId, 'clientId' => $clientId, 'commissions' => count($commissionIds), 'credit' => $calculation['mainCredit']];
+        return [
+            'paymentId' => $paymentId,
+            'clientId' => $clientId,
+            'commissions' => count($commissionIds),
+            'commissionTotal' => round((float) $calculation['houseCommission']
+                + array_sum(array_column($calculation['subcommissions'], 'amount')), 6),
+            'credit' => $calculation['mainCredit'],
+        ];
     }
 
     private function normalizeAssignments(array $assignments): array

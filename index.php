@@ -60,6 +60,62 @@ if (isset($_GET['wallet_balance']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
     exit;
 }
 
+if (isset($_GET['document']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    try {
+        current_operator_id();
+        $documentId = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$documentId) {
+            throw new RuntimeException('El documento solicitado no es válido.');
+        }
+        $document = match ((string) $_GET['document']) {
+            'invoice_pdf' => pdf_document_service()->invoice((int) $documentId),
+            'complement_pdf' => pdf_document_service()->complement((int) $documentId),
+            default => throw new RuntimeException('Tipo de documento no disponible.'),
+        };
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $document['filename'] . '"');
+        header('Content-Length: ' . strlen($document['bytes']));
+        header('Cache-Control: private, max-age=0, must-revalidate');
+        echo $document['bytes'];
+    } catch (RuntimeException $exception) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo $exception->getMessage();
+    } catch (Throwable $exception) {
+        error_log('PDF fiscal local: ' . $exception->getMessage());
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'No fue posible generar el documento PDF.';
+    }
+    exit;
+}
+
+if (isset($_GET['invoice_email']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=UTF-8');
+    try {
+        verify_csrf();
+        $result = invoice_email_service()->send(
+            (int) ($_POST['invoice_id'] ?? 0),
+            (string) ($_POST['email'] ?? ''),
+            current_operator_id()
+        );
+        $accepted = in_array((string) ($result['status'] ?? ''), ['sent', 'queued', 'scheduled'], true);
+        if (!$accepted) http_response_code(422);
+        echo json_encode(['ok' => $accepted, 'result' => $result, 'message' => $result['message'] ?? ''],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    } catch (RuntimeException $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (Throwable $exception) {
+        error_log('Invoice email: ' . $exception->getMessage());
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No fue posible confirmar el envío. Inténtalo nuevamente.'],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
+
 $catalogs = Catalogs::all();
 $movements = Movements::allowedFor(current_operator_id());
 $reports = Reports::all();
@@ -139,7 +195,7 @@ if (!$catalog && !$report && !$movement && !$invoiceModule && !$complementModule
     exit;
 }
 
-if ($companyView === 'analyze' && in_array((string) ($_GET['data'] ?? ''), ['parse', 'short_keys'], true)
+if ($companyView === 'analyze' && in_array((string) ($_GET['data'] ?? ''), ['parse', 'short_keys', 'load'], true)
     && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=UTF-8');
     try {
@@ -150,6 +206,12 @@ if ($companyView === 'analyze' && in_array((string) ($_GET['data'] ?? ''), ['par
                 (string) ($_POST['capture'] ?? ''), current_operator_id()
             );
             echo json_encode(['ok' => true, 'analysis' => $analysis], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        } elseif (($_GET['data'] ?? '') === 'load') {
+            $result = capture_analysis_service()->load(
+                (int) ($id ?? 0), (int) ($_POST['account_id'] ?? 0),
+                (string) ($_POST['capture'] ?? ''), current_operator_id()
+            );
+            echo json_encode(['ok' => true, 'result' => $result], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         } else {
             $descriptions = json_decode((string) ($_POST['descriptions'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR);
             if (!is_array($descriptions)) {
@@ -251,12 +313,31 @@ try {
                 flash('success', 'Factura #' . $invoiceId . ' guardada con sus conceptos y relaciones. Quedó pendiente de timbrado.');
                 redirect('?invoice=list');
             } elseif ($postAction === 'invoice_stamp') {
-                $message = fiscal_document_service()->stampInvoice((int) ($_POST['id'] ?? 0), current_operator_id());
+                $invoiceId = (int) ($_POST['id'] ?? 0);
+                $operatorId = current_operator_id();
+                ignore_user_abort(true);
+                @set_time_limit(360);
+                $message = fiscal_document_service()->stampInvoice($invoiceId, $operatorId);
+                try {
+                    $emailResult = invoice_email_service()->sendToInvoiceContact($invoiceId, $operatorId, true, true);
+                    $message .= ' ' . ($emailResult['status'] === 'skipped'
+                        ? $emailResult['message']
+                        : 'Se prepararon el PDF y el XML para el correo del cliente. ' . $emailResult['message']);
+                } catch (Throwable $emailException) {
+                    error_log('Invoice automatic email #' . $invoiceId . ': ' . $emailException->getMessage());
+                    $message .= ' La factura quedó timbrada, pero el correo automático no pudo completarse: ' . $emailException->getMessage();
+                }
                 flash('success', $message);
                 redirect('?invoice=list');
             } elseif ($postAction === 'invoice_resend') {
-                $message = fiscal_document_service()->resendInvoice((int) ($_POST['id'] ?? 0));
-                flash('success', $message);
+                $invoiceId = (int) ($_POST['id'] ?? 0);
+                ignore_user_abort(true);
+                @set_time_limit(180);
+                $result = invoice_email_service()->sendToInvoiceContact($invoiceId, current_operator_id(), true, true);
+                if (($result['status'] ?? '') === 'skipped') {
+                    throw new RuntimeException((string) $result['message']);
+                }
+                flash('success', 'Se prepararon el PDF moderno y el XML de Sistema 14 para el correo del cliente. ' . ($result['message'] ?? ''));
                 redirect('?invoice=list');
             } elseif ($postAction === 'invoice_delete') {
                 invoice_repository()->deletePending((int) ($_POST['id'] ?? 0));
@@ -725,20 +806,26 @@ if ($statisticsModule) {
                 </section>
             </div>
         <?php elseif ($companyView === 'analyze'): ?>
-            <section class="report-intro"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · Analizar captura bancaria</p><span class="operation-badge"><?= e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) ?></span></section>
+            <section class="report-intro capture-analysis-breadcrumb"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · Analizar captura bancaria</p><span class="operation-badge"><?= e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) ?></span></section>
             <section class="panel capture-analyzer-panel">
-                <div class="panel-heading"><div><p class="eyebrow">Paso previo a la carga</p><h2>Analizar movimientos</h2><p class="panel-copy">Pega la captura conservando su formato. El análisis no guarda información y verifica cada movimiento contra la tabla de claves cortas.</p></div><a class="button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>">Volver al panel</a></div>
-                <form id="captureAnalyzer" class="capture-analyzer" data-parser-url="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;data=parse" data-company-id="<?= e($companyData['id']) ?>" data-account-id="<?= e($companyResult['account']['id']) ?>">
+                <div class="panel-heading capture-analyzer-heading"><span class="capture-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg></span><div><p class="eyebrow">Paso previo a la carga</p><h2>Analizar movimientos</h2><p class="panel-copy">Pega la captura conservando su formato. Se validarán duplicados, claves cortas y comisiones antes de guardar.</p></div><a class="button capture-back-button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Volver al panel</a></div>
+                <form id="captureAnalyzer" class="capture-analyzer" data-parser-url="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;data=parse" data-loader-url="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;data=load" data-company-id="<?= e($companyData['id']) ?>" data-account-id="<?= e($companyResult['account']['id']) ?>">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <label class="field"><span>Contenido de la captura *</span><div id="captureEditor" class="capture-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Pega aquí la tabla o captura copiada desde el portal bancario…"></div></label>
-                    <div class="capture-analyzer-actions"><button type="button" class="button" id="clearCaptureAnalysis">Limpiar</button><button type="submit" class="button primary" id="analyzeCapture">Analizar antes de cargar</button></div>
+                    <label class="field capture-input-field"><span>Contenido de la captura *</span><div id="captureEditor" class="capture-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-describedby="captureEditorHelp" data-placeholder="Pega aquí la tabla o captura copiada desde el portal bancario…"></div><small id="captureEditorHelp">Puedes pegar una tabla HTML o contenido tabulado. Máximo 2 MB y 500 movimientos.</small></label>
+                    <div class="capture-analyzer-actions"><button type="button" class="button" id="clearCaptureAnalysis"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 14h8l1-14M10 11v6m4-6v6"/></svg>Limpiar</button><button type="submit" class="button primary" id="analyzeCapture"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"/></svg><span>Analizar antes de cargar</span></button></div>
                 </form>
             </section>
-            <section class="panel" id="captureAnalysisResult" hidden>
-                <div class="panel-heading"><div><p class="eyebrow">Resultado del análisis</p><h2>Movimientos detectados</h2><p class="panel-copy" id="captureAnalysisMessage"></p></div></div>
+            <section class="panel capture-analysis-result" id="captureAnalysisResult" aria-live="polite" hidden>
+                <div class="panel-heading capture-result-heading"><span class="capture-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10h3v10H5Zm6 0V4h3v16h-3Zm6 0v-7h3v7h-3Z"/></svg></span><div><p class="eyebrow">Resultado del análisis</p><h2>Movimientos detectados</h2><p class="panel-copy" id="captureAnalysisMessage"></p></div></div>
                 <div class="company-summary-grid capture-analysis-summary" id="captureAnalysisSummary"></div>
-                <div class="table-wrap"><table class="movement-table"><thead><tr><th>#</th><th>Fecha</th><th>Descripción / referencia</th><th>Tipo</th><th>Importe</th><th>Duplicado</th><th>Clave corta asociada</th></tr></thead><tbody id="captureAnalysisRows"></tbody></table></div>
-                <div class="capture-analysis-note"><strong>Revisión previa</strong><span>“Sin clave asociada” no impide revisar el movimiento, pero indica que no se encontró ninguna clave de <code>claves_cortas</code> dentro de su descripción o referencia.</span></div>
+                <div class="table-wrap capture-results-table"><table class="movement-table"><thead><tr><th>#</th><th>Fecha</th><th>Descripción / referencia</th><th>Tipo</th><th>Importe</th><th>Duplicado</th><th>Clave corta asociada</th></tr></thead><tbody id="captureAnalysisRows"></tbody></table></div>
+                <section class="capture-commission-summary" id="captureCommissionSummary" hidden>
+                    <div class="capture-commission-heading"><div><p class="eyebrow">Proyección automática</p><h3>Resumen de comisiones</h3><span>Se generará únicamente para movimientos nuevos con clave corta identificada.</span></div><strong id="captureCommissionTotal">$0.00</strong></div>
+                    <div class="capture-commission-kpis"><div><span>Movimientos asignables</span><strong id="captureCommissionMovements">0</strong></div><div><span>Registros de comisión</span><strong id="captureCommissionCount">0</strong></div></div>
+                    <div class="table-wrap"><table class="capture-commission-table"><thead><tr><th>Cartera receptora</th><th>Comisión estimada</th></tr></thead><tbody id="captureCommissionRows"></tbody></table></div>
+                </section>
+                <div class="capture-analysis-note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></svg></span><strong>Revisión previa</strong><span>“Sin clave asociada” no impide cargar el movimiento: se registrará como <b>sin asignar</b>. Los duplicados serán omitidos.</span></div>
+                <div class="capture-load-actions"><div><strong id="captureLoadTitle">Revisa el resultado antes de cargar</strong><span id="captureLoadStatus">La carga volverá a validar todos los datos en el servidor.</span></div><button type="button" class="button primary" id="loadCaptureMovements" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg><span>Cargar movimientos al sistema</span></button></div>
             </section>
         <?php elseif (in_array($companyView, ['captures', 'movements', 'account'], true)): ?>
             <?php
@@ -870,12 +957,12 @@ if ($statisticsModule) {
                                 <a data-record-action data-action-label="Ver facturas asociadas" data-action-icon="⌕" href="?complement=detail&amp;id=<?= e($row['id']) ?>">Ver facturas asociadas</a>
                                 <?php if (!$complementStamped): ?>
                                     <button type="button" data-record-action data-action-label="Timbrar complemento" data-action-icon="✓" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>">Timbrar</button>
-                                    <a data-record-action data-action-label="Vista PDF" data-action-icon="▧" href="https://old.sistema14.com/gen_fact_complemento_pdf.php?id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
+                                    <a data-record-action data-action-label="Vista PDF" data-action-icon="▧" href="?document=complement_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
                                     <form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
                                 <?php else: ?>
                                     <form method="post" data-confirm="¿Reenviar por correo este complemento timbrado?" data-confirm-title="Reenviar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
                                     <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
-                                    <a data-record-action data-action-label="Descargar PDF" data-action-icon="▧" href="https://old.sistema14.com/gen_fact_complemento_pdf.php?id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
+                                    <a data-record-action data-action-label="Descargar PDF" data-action-icon="▧" href="?document=complement_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
                                     <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/firmados-comp/XML-complemento-<?= e($row['id']) ?>-<?= e(rawurlencode((string) $row['uuid'])) ?>.xml" target="_blank" rel="noopener">XML</a>
                                 <?php endif; ?>
                             </div>
@@ -955,15 +1042,16 @@ if ($statisticsModule) {
                                 <?php endif; ?>
                                 <?php if (!$invoiceStamped): ?>
                                     <form method="post" data-confirm="¿Timbrar fiscalmente la factura #<?= e($row['id']) ?>? Esta operación emitirá el CFDI." data-confirm-title="Timbrar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button id="invoiceStamp<?= e($row['id']) ?>" type="submit" data-record-action data-action-label="Timbrar factura" data-action-icon="✓">Timbrar</button></form>
-                                    <a data-record-action data-action-label="Ver PDF previo" data-action-icon="▧" href="https://ultra.sistema14.com/api/genera_factura.php?token=<?= e(rawurlencode((string) $row['token'])) ?>&amp;per=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
+                                    <a data-record-action data-action-label="Ver PDF previo" data-action-icon="▧" href="?document=invoice_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
                                     <a data-record-action data-action-label="Descargar PRE XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/sinfirma/XML-factura-<?= e($row['id']) ?>.xml" target="_blank" rel="noopener">PRE XML</a>
                                     <form method="post" data-confirm="¿Eliminar esta factura pendiente y todos sus conceptos?" data-confirm-title="Eliminar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
                                 <?php else: ?>
                                     <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
-                                    <a data-record-action data-action-label="Ver PDF" data-action-icon="▧" href="https://ultra.sistema14.com/api/genera_factura.php?token=<?= e(rawurlencode((string) $row['token'])) ?>&amp;per=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
+                                    <a data-record-action data-action-label="Ver PDF" data-action-icon="▧" href="?document=invoice_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
                                     <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/gateWayFactura.php?factura=<?= e($row['id']) ?>" target="_blank" rel="noopener">XML</a>
-                                    <form method="post" data-confirm="¿Reenviar por correo esta factura timbrada?" data-confirm-title="Reenviar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
+                                    <form method="post" data-confirm="¿Reenviar al correo principal del cliente el PDF moderno y el XML timbrado?" data-confirm-title="Reenviar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
                                 <?php endif; ?>
+                                <button type="button" data-record-action data-action-label="Enviar a correo" data-action-icon="mail" data-invoice-email-trigger data-invoice-id="<?= e($row['id']) ?>" data-invoice-folio="<?= e(trim((string) (($row['serie'] ?? '') . ($row['folio'] ?? ''))) ?: ('#' . $row['id'])) ?>" data-invoice-email="<?= e($row['cliente_correo'] ?? '') ?>">Enviar a correo</button>
                             </div>
                         </div>
                     </td>
@@ -1577,6 +1665,29 @@ if ($statisticsModule) {
     </section>
 </div>
 
+<div class="glass-modal-backdrop invoice-email-modal" id="invoiceEmailModal" hidden>
+    <section class="glass-modal invoice-email-dialog" role="dialog" aria-modal="true" aria-labelledby="invoiceEmailTitle" aria-describedby="invoiceEmailDescription">
+        <div class="glass-modal-icon invoice-email-icon" aria-hidden="true">@</div>
+        <div class="glass-modal-copy">
+            <p class="eyebrow">Mailchimp Transactional</p>
+            <h2 id="invoiceEmailTitle">Enviar factura por correo</h2>
+            <p id="invoiceEmailDescription">Se adjuntará el PDF generado por Sistema 14 y el XML cuando esté disponible.</p>
+        </div>
+        <form id="invoiceEmailForm" class="invoice-email-form" data-endpoint="?invoice_email=1">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="invoice_id" id="invoiceEmailInvoiceId" value="">
+            <div class="invoice-email-document"><span>Factura seleccionada</span><strong id="invoiceEmailFolio">—</strong></div>
+            <label class="field"><span>Correo destinatario *</span><input type="email" name="email" id="invoiceEmailRecipient" maxlength="100" autocomplete="email" placeholder="cliente@empresa.com" required></label>
+            <div class="invoice-email-sender"><span>Remitente</span><strong>no-reply@sistema14.org</strong></div>
+            <div class="invoice-email-result" id="invoiceEmailResult" role="status" aria-live="polite" hidden></div>
+            <div class="glass-modal-actions">
+                <button type="button" class="button" id="invoiceEmailCancel">Cancelar</button>
+                <button type="submit" class="button primary" id="invoiceEmailSend"><span>Enviar factura</span></button>
+            </div>
+        </form>
+    </section>
+</div>
+
 <script nonce="<?= e(csp_nonce()) ?>">
 (() => {
     const thirdPartyLoader = document.getElementById('thirdPartyLoader');
@@ -1612,7 +1723,7 @@ if ($statisticsModule) {
 
     const thirdPartyOperations = {
         invoice_stamp: ['Timbrando factura', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
-        invoice_resend: ['Reenviando factura', 'Solicitando el reenvío al servicio de Ultra Sistema 14…'],
+        invoice_resend: ['Reenviando factura', 'Obteniendo el PDF y el XML para enviarlos al correo del cliente…'],
         complement_stamp: ['Timbrando complemento', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
         complement_resend: ['Reenviando complemento', 'Solicitando el reenvío al servicio de Ultra Sistema 14…'],
     };
@@ -1668,6 +1779,8 @@ if ($statisticsModule) {
             const icon = document.createElement('span');
             if (original.dataset.actionIcon === 'receipt') {
                 icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg>';
+            } else if (original.dataset.actionIcon === 'mail') {
+                icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3V6Zm1 1 8 6 8-6"/></svg>';
             } else {
                 icon.textContent = original.dataset.actionIcon || '•';
             }
@@ -1744,6 +1857,94 @@ if ($statisticsModule) {
                 showToast('No fue posible copiar el UUID al portapapeles.');
             }
         });
+    });
+
+    const invoiceEmailModal = document.getElementById('invoiceEmailModal');
+    const invoiceEmailForm = document.getElementById('invoiceEmailForm');
+    const invoiceEmailRecipient = document.getElementById('invoiceEmailRecipient');
+    const invoiceEmailInvoiceId = document.getElementById('invoiceEmailInvoiceId');
+    const invoiceEmailFolio = document.getElementById('invoiceEmailFolio');
+    const invoiceEmailResult = document.getElementById('invoiceEmailResult');
+    const invoiceEmailSend = document.getElementById('invoiceEmailSend');
+    const invoiceEmailCancel = document.getElementById('invoiceEmailCancel');
+    let invoiceEmailSending = false;
+
+    const closeInvoiceEmailModal = () => {
+        if (invoiceEmailSending) return;
+        invoiceEmailModal.classList.remove('is-visible');
+        document.body.classList.remove('has-invoice-email-modal');
+        window.setTimeout(() => {
+            if (!invoiceEmailModal.classList.contains('is-visible')) invoiceEmailModal.hidden = true;
+        }, 220);
+    };
+
+    const openInvoiceEmailModal = (button) => {
+        invoiceEmailForm.reset();
+        invoiceEmailInvoiceId.value = button.dataset.invoiceId || '';
+        invoiceEmailFolio.textContent = button.dataset.invoiceFolio || `#${button.dataset.invoiceId || ''}`;
+        invoiceEmailRecipient.value = button.dataset.invoiceEmail || '';
+        invoiceEmailResult.hidden = true;
+        invoiceEmailResult.className = 'invoice-email-result';
+        invoiceEmailResult.textContent = '';
+        invoiceEmailSend.disabled = false;
+        invoiceEmailSend.querySelector('span').textContent = 'Enviar factura';
+        invoiceEmailCancel.disabled = false;
+        invoiceEmailCancel.textContent = 'Cancelar';
+        invoiceEmailSending = false;
+        invoiceEmailModal.hidden = false;
+        document.body.classList.add('has-invoice-email-modal');
+        window.requestAnimationFrame(() => invoiceEmailModal.classList.add('is-visible'));
+        window.setTimeout(() => invoiceEmailRecipient.focus(), 80);
+    };
+
+    document.querySelectorAll('[data-invoice-email-trigger]').forEach((button) => {
+        button.addEventListener('click', () => openInvoiceEmailModal(button));
+    });
+
+    invoiceEmailCancel?.addEventListener('click', closeInvoiceEmailModal);
+    invoiceEmailModal?.addEventListener('click', (event) => {
+        if (event.target === invoiceEmailModal) closeInvoiceEmailModal();
+    });
+
+    invoiceEmailForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (invoiceEmailSending || !invoiceEmailForm.reportValidity()) return;
+        invoiceEmailSending = true;
+        invoiceEmailSend.disabled = true;
+        invoiceEmailCancel.disabled = true;
+        invoiceEmailSend.querySelector('span').textContent = 'Esperando respuesta…';
+        invoiceEmailResult.hidden = false;
+        invoiceEmailResult.className = 'invoice-email-result is-waiting';
+        invoiceEmailResult.textContent = 'Generando el PDF y esperando la respuesta de Mailchimp Transactional…';
+        try {
+            const response = await fetch(invoiceEmailForm.dataset.endpoint, {
+                method: 'POST',
+                body: new FormData(invoiceEmailForm),
+                headers: {'Accept': 'application/json'},
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.message || data.result?.message || 'Mailchimp no aceptó el correo.');
+            const status = String(data.result?.status || 'sent');
+            invoiceEmailResult.className = `invoice-email-result is-success is-${status}`;
+            invoiceEmailResult.textContent = data.result?.message || 'Correo aceptado correctamente.';
+            invoiceEmailSend.querySelector('span').textContent = status === 'sent' ? 'Enviado correctamente' : 'Aceptado por Mailchimp';
+            invoiceEmailCancel.textContent = 'Cerrar';
+            invoiceEmailCancel.disabled = false;
+            showToast(invoiceEmailResult.textContent, 'success');
+        } catch (error) {
+            invoiceEmailResult.className = 'invoice-email-result is-error';
+            invoiceEmailResult.textContent = error instanceof Error ? error.message : 'No fue posible confirmar el envío.';
+            invoiceEmailSend.disabled = false;
+            invoiceEmailSend.querySelector('span').textContent = 'Intentar nuevamente';
+            invoiceEmailCancel.disabled = false;
+            showToast(invoiceEmailResult.textContent, 'error');
+        } finally {
+            invoiceEmailSending = false;
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && invoiceEmailModal && !invoiceEmailModal.hidden) closeInvoiceEmailModal();
     });
 
     const stampModal = document.getElementById('complementStampModal');
@@ -2397,17 +2598,89 @@ if ($statisticsModule) {
     const captureSummary = document.getElementById('captureAnalysisSummary');
     const captureMessage = document.getElementById('captureAnalysisMessage');
     const analyzeCaptureButton = document.getElementById('analyzeCapture');
+    const captureCommissionSummary = document.getElementById('captureCommissionSummary');
+    const captureCommissionTotal = document.getElementById('captureCommissionTotal');
+    const captureCommissionMovements = document.getElementById('captureCommissionMovements');
+    const captureCommissionCount = document.getElementById('captureCommissionCount');
+    const captureCommissionRows = document.getElementById('captureCommissionRows');
+    const loadCaptureButton = document.getElementById('loadCaptureMovements');
+    const captureLoadTitle = document.getElementById('captureLoadTitle');
+    const captureLoadStatus = document.getElementById('captureLoadStatus');
+    let analyzedCapture = '';
+    let currentCaptureAnalysis = null;
 
-    const appendCaptureSummary = (label, value, detail) => {
+    const captureSummaryIcons = {
+        detected: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg>',
+        new: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3 3m-3-3 3-3"/></svg>',
+        key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8m-3 3 2 2m-5 1 2 2"/></svg>',
+        missing: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3 20h18L12 4Zm0 6v4m0 3h.01"/></svg>',
+    };
+
+    const appendCaptureSummary = (kind, label, value, detail) => {
         const card = document.createElement('article');
+        const icon = document.createElement('span');
+        const copy = document.createElement('div');
         const labelNode = document.createElement('span');
         const valueNode = document.createElement('strong');
         const detailNode = document.createElement('small');
+        card.className = `capture-summary-card is-${kind}`;
+        icon.className = 'capture-summary-icon';
+        icon.innerHTML = captureSummaryIcons[kind] || captureSummaryIcons.detected;
         labelNode.textContent = label;
         valueNode.textContent = String(value);
         detailNode.textContent = detail;
-        card.append(labelNode, valueNode, detailNode);
+        copy.append(labelNode, valueNode, detailNode);
+        card.append(icon, copy);
         captureSummary.appendChild(card);
+    };
+
+    const resetCaptureResult = (message = 'La carga volverá a validar todos los datos en el servidor.') => {
+        analyzedCapture = '';
+        currentCaptureAnalysis = null;
+        captureRows?.replaceChildren();
+        captureSummary?.replaceChildren();
+        captureCommissionRows?.replaceChildren();
+        if (captureResult) captureResult.hidden = true;
+        if (captureCommissionSummary) captureCommissionSummary.hidden = true;
+        if (loadCaptureButton) {
+            loadCaptureButton.disabled = true;
+            loadCaptureButton.querySelector('span').textContent = 'Cargar movimientos al sistema';
+        }
+        if (captureLoadTitle) captureLoadTitle.textContent = 'Revisa el resultado antes de cargar';
+        if (captureLoadStatus) captureLoadStatus.textContent = message;
+    };
+
+    const renderCaptureCommissions = (preview) => {
+        captureCommissionRows.replaceChildren();
+        const movementCount = Number(preview?.movementCount) || 0;
+        if (movementCount < 1) {
+            captureCommissionSummary.hidden = true;
+            return;
+        }
+        captureCommissionSummary.hidden = false;
+        captureCommissionTotal.textContent = invoiceMoney.format(Number(preview.commissionTotal) || 0);
+        captureCommissionMovements.textContent = String(movementCount);
+        captureCommissionCount.textContent = String(Number(preview.commissionCount) || 0);
+        const distributed = Array.isArray(preview.distributed) ? preview.distributed : [];
+        if (distributed.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 2;
+            cell.className = 'empty';
+            cell.textContent = 'Las claves fueron identificadas, pero sus carteras no tienen una comisión configurada.';
+            row.appendChild(cell);
+            captureCommissionRows.appendChild(row);
+            return;
+        }
+        distributed.forEach((recipient) => {
+            const row = document.createElement('tr');
+            const name = document.createElement('td');
+            const amount = document.createElement('td');
+            name.textContent = recipient.recipientName || `Cartera #${recipient.recipientId}`;
+            amount.textContent = invoiceMoney.format(Number(recipient.amount) || 0);
+            row.append(name, amount);
+            captureCommissionRows.appendChild(row);
+        });
     };
 
     captureAnalyzer?.addEventListener('submit', async (event) => {
@@ -2423,9 +2696,10 @@ if ($statisticsModule) {
             return;
         }
 
+        const analyzeLabel = analyzeCaptureButton.querySelector('span');
         analyzeCaptureButton.disabled = true;
-        analyzeCaptureButton.textContent = 'Analizando…';
-        captureResult.hidden = true;
+        analyzeLabel.textContent = 'Analizando…';
+        resetCaptureResult('Analizando duplicados, claves cortas y comisiones…');
         try {
             const parserPayload = new FormData();
             parserPayload.set('csrf_token', captureAnalyzer.querySelector('[name="csrf_token"]').value);
@@ -2440,33 +2714,17 @@ if ($statisticsModule) {
 
             const movementCount = analysis.movements.length;
             if (movementCount < 1) throw new Error('No se detectaron movimientos en la captura.');
-            const descriptions = analysis.movements.map((movement) => [
-                movement.description,
-                movement.detail,
-                movement.reference,
-            ].filter(Boolean).join(' '));
-
-            const keyPayload = new FormData();
-            keyPayload.set('csrf_token', captureAnalyzer.querySelector('[name="csrf_token"]').value);
-            keyPayload.set('account_id', captureAnalyzer.dataset.accountId);
-            keyPayload.set('descriptions', JSON.stringify(descriptions));
-            const keyResponse = await fetch(`?companies=analyze&id=${encodeURIComponent(captureAnalyzer.dataset.companyId)}&data=short_keys`, {
-                method: 'POST', body: keyPayload, headers: {'Accept': 'application/json'}
-            });
-            const keyResult = await keyResponse.json();
-            if (!keyResponse.ok || !keyResult.ok) throw new Error(keyResult.message || 'No fue posible consultar las claves cortas.');
 
             captureRows.replaceChildren();
             captureSummary.replaceChildren();
-            let associated = 0;
-            keyResult.matches.forEach((match, index) => {
-                if (match.associated) associated += 1;
-                const movement = analysis.movements[index];
+            analysis.movements.forEach((movement, index) => {
+                const match = movement.short_key || {associated: false};
+                const description = [movement.description, movement.detail, movement.reference].filter(Boolean).join(' ');
                 const row = document.createElement('tr');
                 const cells = [
                     String(index + 1),
-                    movement.date || '—',
-                    descriptions[index] || 'Sin descripción',
+                    [movement.date, movement.time].filter(Boolean).join(' · ') || '—',
+                    description || 'Sin descripción',
                     movement.type || '—',
                     invoiceMoney.format(Number(movement.amount) || 0),
                     movement.duplicate ? 'Sí' : 'No',
@@ -2481,11 +2739,26 @@ if ($statisticsModule) {
                 captureRows.appendChild(row);
             });
 
-            appendCaptureSummary('Detectados', movementCount, 'Movimientos leídos');
-            appendCaptureSummary('Nuevos', Number(analysis.summary.new) || 0, 'No encontrados previamente');
-            appendCaptureSummary('Con clave corta', associated, 'Asociación encontrada');
-            appendCaptureSummary('Sin clave corta', movementCount - associated, 'Requieren revisión');
+            const newCount = Number(analysis.summary.new) || 0;
+            const associated = Number(analysis.summary.with_key) || 0;
+            const withoutKey = Number(analysis.summary.without_key) || 0;
+            const duplicateCount = Number(analysis.summary.duplicates) || 0;
+            appendCaptureSummary('detected', 'Detectados', movementCount, 'Movimientos leídos');
+            appendCaptureSummary('new', 'Nuevos', newCount, 'No encontrados previamente');
+            appendCaptureSummary('key', 'Con clave corta', associated, 'Asociación encontrada');
+            appendCaptureSummary('missing', 'Sin clave corta', withoutKey, 'Se cargarán sin asignar');
             captureMessage.textContent = `${associated} de ${movementCount} movimientos tienen una clave corta asociada en la tabla claves_cortas.`;
+            renderCaptureCommissions(analysis.commission_preview || {});
+            analyzedCapture = capture;
+            currentCaptureAnalysis = analysis;
+            loadCaptureButton.disabled = newCount < 1;
+            loadCaptureButton.querySelector('span').textContent = newCount === 1
+                ? 'Cargar 1 movimiento al sistema'
+                : `Cargar ${newCount} movimientos al sistema`;
+            captureLoadTitle.textContent = newCount > 0 ? 'Análisis listo para cargar' : 'No hay movimientos nuevos';
+            captureLoadStatus.textContent = newCount > 0
+                ? `${associated} con clave corta; ${withoutKey} sin clave; ${duplicateCount} duplicados serán omitidos.`
+                : 'Todos los movimientos detectados ya existen en el sistema.';
             captureResult.hidden = false;
             captureResult.scrollIntoView({
                 behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
@@ -2495,15 +2768,58 @@ if ($statisticsModule) {
             showToast(error instanceof Error ? error.message : 'No fue posible analizar la captura.');
         } finally {
             analyzeCaptureButton.disabled = false;
-            analyzeCaptureButton.textContent = 'Analizar antes de cargar';
+            analyzeLabel.textContent = 'Analizar antes de cargar';
         }
+    });
+
+    loadCaptureButton?.addEventListener('click', async () => {
+        const capture = captureEditor.innerHTML.trim();
+        if (!currentCaptureAnalysis || capture !== analyzedCapture) {
+            resetCaptureResult('El contenido cambió. Analiza nuevamente antes de cargar.');
+            showToast('Analiza nuevamente la captura antes de cargarla.');
+            return;
+        }
+        const label = loadCaptureButton.querySelector('span');
+        const originalLabel = label.textContent;
+        loadCaptureButton.disabled = true;
+        label.textContent = 'Cargando…';
+        captureLoadTitle.textContent = 'Guardando movimientos';
+        captureLoadStatus.textContent = 'No cierres esta ventana mientras se aplican saldos y comisiones.';
+        try {
+            const payload = new FormData();
+            payload.set('csrf_token', captureAnalyzer.querySelector('[name="csrf_token"]').value);
+            payload.set('capture', capture);
+            payload.set('account_id', captureAnalyzer.dataset.accountId);
+            const response = await fetch(captureAnalyzer.dataset.loaderUrl, {
+                method: 'POST', body: payload, headers: {'Accept': 'application/json'}
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.message || 'No fue posible cargar los movimientos.');
+            const result = data.result;
+            captureLoadTitle.textContent = 'Carga completada';
+            captureLoadStatus.textContent = `${result.loaded} movimientos cargados: ${result.assigned} asignados y ${result.unassigned} sin asignar. ${result.commissions} comisiones por ${invoiceMoney.format(Number(result.commissionTotal) || 0)}.`;
+            label.textContent = 'Carga completada';
+            showToast('Los movimientos se cargaron correctamente.');
+            window.setTimeout(() => {
+                window.location.assign(`?companies=capture&id=${encodeURIComponent(captureAnalyzer.dataset.companyId)}&capture_id=${encodeURIComponent(result.captureId)}`);
+            }, 900);
+        } catch (error) {
+            captureLoadTitle.textContent = 'No se completó la carga';
+            captureLoadStatus.textContent = error instanceof Error ? error.message : 'No fue posible cargar los movimientos.';
+            label.textContent = originalLabel;
+            loadCaptureButton.disabled = false;
+            showToast(captureLoadStatus.textContent);
+        }
+    });
+
+    captureEditor?.addEventListener('input', () => {
+        if (!currentCaptureAnalysis) return;
+        resetCaptureResult('El contenido cambió. Analiza nuevamente antes de cargar.');
     });
 
     document.getElementById('clearCaptureAnalysis')?.addEventListener('click', () => {
         captureEditor.replaceChildren();
-        captureRows?.replaceChildren();
-        captureSummary?.replaceChildren();
-        if (captureResult) captureResult.hidden = true;
+        resetCaptureResult();
         captureEditor.focus();
     });
 
