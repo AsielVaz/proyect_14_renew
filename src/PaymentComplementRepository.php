@@ -86,6 +86,58 @@ final class PaymentComplementRepository
         return $this->findInvoice('f.id = :value', $id);
     }
 
+    public function paymentPrefill(int $paymentId): array
+    {
+        if ($paymentId <= 0) {
+            throw new RuntimeException('El movimiento seleccionado no es válido.');
+        }
+
+        $query = $this->pdo->prepare("SELECT p.id,
+                CAST(p.nombre AS UNSIGNED) AS client_id,
+                CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
+                cl.nombre AS cliente, e.razon AS empresa,
+                COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable,
+                COALESCE((SELECT SUM(fc.total_factura)
+                    FROM facturas_complementos fc
+                    WHERE fc.id_pago = p.id AND COALESCE(fc.status, '') <> 'Cancelado'), 0) AS utilizado,
+                DATE(COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_asignacion, p.fecha_captura)) AS payment_date
+            FROM pagos p
+            LEFT JOIN captura ca ON ca.id = p.id_captura
+            LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
+            LEFT JOIN empresas e ON e.id = CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED)
+            WHERE p.id = :id
+              AND p.status = 'asignado'
+              AND p.tipo_movimiento <> 'Abono por comisión'
+              AND p.banco <> 'STP'
+              AND p.banco <> '99'
+            LIMIT 1");
+        $query->execute(['id' => $paymentId]);
+        $payment = $query->fetch();
+        if (!$payment) {
+            throw new RuntimeException('El movimiento ya no está asignado o no está disponible para complementos.');
+        }
+
+        $clientId = (int) $payment['client_id'];
+        $companyId = (int) $payment['company_id'];
+        $maximum = round((float) $payment['saldo_acreditable'] - (float) $payment['utilizado'], 2);
+        if ($clientId <= 0 || $companyId <= 0 || trim((string) $payment['cliente']) === '' || trim((string) $payment['empresa']) === '') {
+            throw new RuntimeException('El movimiento no tiene empresa y cliente válidos para crear el complemento.');
+        }
+        if ($maximum <= 0) {
+            throw new RuntimeException('El movimiento no tiene saldo acreditable disponible para otro complemento.');
+        }
+
+        return [
+            'id' => (int) $payment['id'],
+            'client_id' => $clientId,
+            'company_id' => $companyId,
+            'cliente' => (string) $payment['cliente'],
+            'empresa' => (string) $payment['empresa'],
+            'maximum' => $maximum,
+            'payment_date' => (string) ($payment['payment_date'] ?: date('Y-m-d')),
+        ];
+    }
+
     private function findInvoice(string $condition, string|int $value): ?array
     {
         $query = $this->pdo->prepare('SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
@@ -175,11 +227,32 @@ final class PaymentComplementRepository
             if (!$receiver->fetchColumn()) {
                 throw new RuntimeException('La razón social no pertenece al cliente seleccionado.');
             }
+            $paymentMaximum = null;
             if ($paymentId > 0) {
-                $payment = $this->pdo->prepare('SELECT id FROM pagos WHERE id = :id FOR UPDATE');
+                $payment = $this->pdo->prepare("SELECT p.id, CAST(p.nombre AS UNSIGNED) AS client_id,
+                        CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
+                        COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable
+                    FROM pagos p
+                    LEFT JOIN captura ca ON ca.id = p.id_captura
+                    WHERE p.id = :id AND p.status = 'asignado'
+                      AND p.tipo_movimiento <> 'Abono por comisión'
+                      AND p.banco <> 'STP' AND p.banco <> '99'
+                    FOR UPDATE");
                 $payment->execute(['id' => $paymentId]);
-                if (!$payment->fetchColumn()) {
-                    throw new RuntimeException('El movimiento de pago indicado no existe.');
+                $paymentRow = $payment->fetch();
+                if (!$paymentRow) {
+                    throw new RuntimeException('El movimiento de pago ya no está asignado o no está disponible.');
+                }
+                if ((int) $paymentRow['client_id'] !== $clientId || (int) $paymentRow['company_id'] !== $companyId) {
+                    throw new RuntimeException('El movimiento de pago no corresponde al cliente y empresa seleccionados.');
+                }
+                $used = $this->pdo->prepare("SELECT COALESCE(SUM(total_factura), 0)
+                    FROM facturas_complementos
+                    WHERE id_pago = :payment AND COALESCE(status, '') <> 'Cancelado'");
+                $used->execute(['payment' => $paymentId]);
+                $paymentMaximum = round((float) $paymentRow['saldo_acreditable'] - (float) $used->fetchColumn(), 2);
+                if ($paymentMaximum <= 0) {
+                    throw new RuntimeException('El movimiento no tiene saldo acreditable disponible para otro complemento.');
                 }
             }
 
@@ -230,6 +303,9 @@ final class PaymentComplementRepository
             }
             if (!$sourceInvoiceIncluded) {
                 throw new RuntimeException('La factura PPD que originó el complemento debe permanecer relacionada.');
+            }
+            if ($paymentMaximum !== null && $total > $paymentMaximum + 0.001) {
+                throw new RuntimeException('El total del complemento excede el máximo disponible de $' . number_format($paymentMaximum, 2) . '.');
             }
 
             $token = bin2hex(random_bytes(20));

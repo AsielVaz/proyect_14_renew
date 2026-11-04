@@ -1091,7 +1091,12 @@ tbody tr:hover {
     cursor: context-menu;
 }
 
-.document-table tbody tr.has-open-menu {
+.movement-table tbody tr[data-record-row] {
+    cursor: context-menu;
+}
+
+.document-table tbody tr.has-open-menu,
+.movement-table tbody tr.has-open-menu {
     background: var(--color-primary-soft);
     box-shadow: inset 3px 0 0 var(--color-primary);
 }
@@ -1168,6 +1173,81 @@ tbody tr:hover {
     color: var(--color-primary-dark);
     font-weight: 800;
     text-align: center;
+}
+
+.record-context-item > span:first-child svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+    margin: auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.movement-record-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.movement-record-actions .inline-operation {
+    flex: none;
+}
+
+.complement-payment-context {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 22px 22px;
+    padding: 13px 15px;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--color-border));
+    border-radius: 12px;
+    background: var(--color-primary-soft);
+    color: var(--color-text-secondary);
+}
+
+.complement-payment-context > span {
+    display: grid;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--color-surface);
+    color: var(--color-primary-dark);
+}
+
+.complement-payment-context svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.complement-payment-context strong,
+.complement-payment-context p {
+    display: block;
+    margin: 0;
+}
+
+.complement-payment-context p {
+    margin-top: 3px;
+    font-size: 12px;
+}
+
+.complement-payment-context b {
+    color: var(--color-primary-dark);
+    font-variant-numeric: tabular-nums;
+}
+
+.complement-payment-context b.is-exceeded {
+    color: var(--color-danger);
 }
 
 .record-context-item:hover,
@@ -6185,6 +6265,75 @@ main::before {
 .wallet-card footer a svg {
     width: 15px;
     height: 15px;
+}
+
+.wallet-card > header {
+    padding-right: 42px;
+}
+
+.wallet-balance-refresh {
+    position: absolute;
+    z-index: 2;
+    top: 14px;
+    right: 14px;
+    display: grid;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--wallet-accent) 28%, var(--color-border));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--wallet-accent) 7%, var(--color-surface));
+    color: var(--color-primary-deep, #c74700);
+    box-shadow: 0 5px 14px rgba(58, 37, 24, 0.07);
+    cursor: pointer;
+    transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.wallet-balance-refresh svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.9;
+}
+
+.wallet-balance-refresh:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--wallet-accent) 58%, var(--color-border));
+    background: color-mix(in srgb, var(--wallet-accent) 13%, var(--color-surface));
+    box-shadow: 0 8px 18px rgba(58, 37, 24, 0.12);
+    transform: translateY(-1px);
+}
+
+.wallet-balance-refresh:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--wallet-accent) 30%, transparent);
+    outline-offset: 2px;
+}
+
+.wallet-balance-refresh:disabled {
+    cursor: wait;
+}
+
+.wallet-balance-refresh.is-loading svg {
+    animation: wallet-balance-spin 0.7s linear infinite;
+}
+
+.wallet-balance-refresh.is-success {
+    border-color: rgba(17, 146, 77, 0.35);
+    background: rgba(17, 146, 77, 0.1);
+    color: #0c8b48;
+}
+
+.wallet-balance-refresh.is-error {
+    border-color: rgba(196, 40, 40, 0.35);
+    background: rgba(196, 40, 40, 0.08);
+    color: #b42318;
+}
+
+@keyframes wallet-balance-spin {
+    to { transform: rotate(360deg); }
 }
 
 .wallet-filter-empty {

@@ -64,6 +64,38 @@ final class DashboardRepository
         return ['rows' => $rows, 'total' => $total, 'page' => $page, 'lastPage' => $lastPage];
     }
 
+    public function walletAccreditableBalance(int $clientId, int $operatorId): array
+    {
+        if ($clientId <= 0) {
+            throw new RuntimeException('La cartera seleccionada no es válida.');
+        }
+
+        $query = $this->pdo->prepare('SELECT c.id,
+                COALESCE(SUM(p.saldo_acreditable), 0) AS balance
+            FROM clientes c
+            LEFT JOIN pagos p ON p.nombre = CAST(c.id AS CHAR)
+            WHERE c.id = :id
+              AND c.activo = 1
+              AND (c.id <> 1 OR :operator_one = 1)
+              AND (c.id NOT IN (146, 189) OR :operator_restricted = 32)
+            GROUP BY c.id');
+        $query->execute([
+            'id' => $clientId,
+            'operator_one' => $operatorId,
+            'operator_restricted' => $operatorId,
+        ]);
+        $wallet = $query->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('La cartera seleccionada no está disponible.');
+        }
+
+        return [
+            'id' => (int) $wallet['id'],
+            'balance' => round((float) $wallet['balance'], 2),
+            'updatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
+        ];
+    }
+
     public function overview(int $operatorId): array
     {
         $query = $this->pdo->prepare("SELECT wallet_summary.*, payment_summary.*, pending_summary.*, capture_summary.*, exchange_summary.exchange_rate

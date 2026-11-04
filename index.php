@@ -36,6 +36,30 @@ if (isset($_GET['global_search']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
     exit;
 }
 
+if (isset($_GET['wallet_balance']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Content-Type: application/json; charset=UTF-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        $clientId = filter_var($_GET['client_id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$clientId) {
+            throw new RuntimeException('La cartera seleccionada no es válida.');
+        }
+        $data = dashboard_repository()->walletAccreditableBalance((int) $clientId, current_operator_id());
+        echo json_encode(['ok' => true, 'data' => $data],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    } catch (RuntimeException $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (Throwable $exception) {
+        error_log('Wallet balance refresh: ' . $exception->getMessage());
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No fue posible actualizar el saldo. Inténtalo nuevamente.'],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
+
 $catalogs = Catalogs::all();
 $movements = Movements::allowedFor(current_operator_id());
 $reports = Reports::all();
@@ -291,6 +315,7 @@ try {
 
 $flash = take_flash();
 $complementPrefill = null;
+$complementPaymentPrefill = null;
 if ($complementView === 'create' && isset($_GET['invoice_id'])) {
     try {
         $sourceInvoiceId = filter_var($_GET['invoice_id'], FILTER_VALIDATE_INT) ?: 0;
@@ -307,6 +332,14 @@ if ($complementView === 'create' && isset($_GET['invoice_id'])) {
     } catch (Throwable $exception) {
         flash('error', $exception->getMessage());
         redirect('?invoice=list');
+    }
+} elseif ($complementView === 'create' && isset($_GET['payment_id'])) {
+    try {
+        $sourcePaymentId = filter_var($_GET['payment_id'], FILTER_VALIDATE_INT) ?: 0;
+        $complementPaymentPrefill = payment_complement_repository()->paymentPrefill($sourcePaymentId);
+    } catch (Throwable $exception) {
+        flash('error', $exception->getMessage());
+        redirect('?movement=asignados');
     }
 }
 $record = null;
@@ -733,22 +766,39 @@ if ($statisticsModule) {
         <?php endif; ?>
     <?php elseif ($complementModule): ?>
         <?php if ($complementView === 'create'): ?>
-            <?php $complementData = payment_complement_repository()->formData(); $lockedComplementContext = $complementPrefill !== null; ?>
+            <?php
+            $complementData = payment_complement_repository()->formData();
+            $invoiceComplementContext = $complementPrefill !== null;
+            $paymentComplementContext = $complementPaymentPrefill !== null;
+            $lockedCompanyClient = $invoiceComplementContext || $paymentComplementContext;
+            $complementHeaderPrefill = $complementPrefill ?? $complementPaymentPrefill;
+            $paymentPrefillReceivers = $paymentComplementContext
+                ? payment_complement_repository()->receivers((int) $complementPaymentPrefill['client_id'])
+                : [];
+            ?>
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
-            <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $lockedComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?>>
+            <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $invoiceComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?><?= $paymentComplementContext ? ' data-prefill-payment-maximum="' . e($complementPaymentPrefill['maximum']) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_create">
-                <?php if ($lockedComplementContext): ?><input type="hidden" name="company_id" value="<?= e($complementPrefill['company_id']) ?>"><input type="hidden" name="client_id" value="<?= e($complementPrefill['client_id']) ?>"><input type="hidden" name="receiver_id" value="<?= e($complementPrefill['receiver_id']) ?>"><input type="hidden" name="source_invoice_id" value="<?= e($complementPrefill['id']) ?>"><?php endif; ?>
+                <?php if ($lockedCompanyClient): ?><input type="hidden" name="company_id" value="<?= e($complementHeaderPrefill['company_id']) ?>"><input type="hidden" name="client_id" value="<?= e($complementHeaderPrefill['client_id']) ?>"><?php endif; ?>
+                <?php if ($invoiceComplementContext): ?><input type="hidden" name="receiver_id" value="<?= e($complementPrefill['receiver_id']) ?>"><input type="hidden" name="source_invoice_id" value="<?= e($complementPrefill['id']) ?>"><?php endif; ?>
+                <?php if ($paymentComplementContext): ?><input type="hidden" name="payment_id" value="<?= e($complementPaymentPrefill['id']) ?>"><?php endif; ?>
                 <section class="panel invoice-form-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Datos del pago</p><h2>Emisor y receptor</h2></div><a class="button" href="?complement=list">Volver</a></div>
                     <div class="form-grid invoice-header-grid">
-                        <label class="field"><span>Empresa emisora *</span><select <?= $lockedComplementContext ? '' : 'name="company_id" ' ?>id="complementCompany" required<?= $lockedComplementContext ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedComplementContext): ?><option value="<?= e($complementPrefill['company_id']) ?>" selected><?= e($complementPrefill['empresa']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
-                        <label class="field"><span>Cliente *</span><select <?= $lockedComplementContext ? '' : 'name="client_id" ' ?>id="complementClient" required<?= $lockedComplementContext ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedComplementContext): ?><option value="<?= e($complementPrefill['client_id']) ?>" selected><?= e($complementPrefill['cliente']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
-                        <label class="field"><span>Razón social / clave corta *</span><select <?= $lockedComplementContext ? '' : 'name="receiver_id" ' ?>id="complementReceiver" required<?= $lockedComplementContext ? ' disabled aria-disabled="true"' : ' disabled' ?>><?php if ($lockedComplementContext): ?><option value="<?= e($complementPrefill['receiver_id']) ?>" selected><?= e($complementPrefill['clave_corta'] . ' · ' . $complementPrefill['receptor']) ?></option><?php else: ?><option value="">Selecciona primero un cliente…</option><?php endif; ?></select></label>
+                        <label class="field"><span>Empresa emisora *</span><select <?= $lockedCompanyClient ? '' : 'name="company_id" ' ?>id="complementCompany" required<?= $lockedCompanyClient ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedCompanyClient): ?><option value="<?= e($complementHeaderPrefill['company_id']) ?>" selected><?= e($complementHeaderPrefill['empresa']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
+                        <label class="field"><span>Cliente *</span><select <?= $lockedCompanyClient ? '' : 'name="client_id" ' ?>id="complementClient" required<?= $lockedCompanyClient ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedCompanyClient): ?><option value="<?= e($complementHeaderPrefill['client_id']) ?>" selected><?= e($complementHeaderPrefill['cliente']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
+                        <label class="field"><span>Razón social / clave corta *</span><select <?= $invoiceComplementContext ? '' : 'name="receiver_id" ' ?>id="complementReceiver" required<?= $invoiceComplementContext ? ' disabled aria-disabled="true"' : (!$paymentComplementContext ? ' disabled' : '') ?>><?php if ($invoiceComplementContext): ?><option value="<?= e($complementPrefill['receiver_id']) ?>" selected><?= e($complementPrefill['clave_corta'] . ' · ' . $complementPrefill['receptor']) ?></option><?php elseif ($paymentComplementContext): ?><option value="">Seleccionar…</option><?php foreach ($paymentPrefillReceivers as $item): ?><option value="<?= e($item['id']) ?>"><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social']) ?></option><?php endforeach; ?><?php else: ?><option value="">Selecciona primero un cliente…</option><?php endif; ?></select></label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e(date('Y-m-d')) ?>" required></label>
+                        <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e($paymentComplementContext ? $complementPaymentPrefill['payment_date'] : date('Y-m-d')) ?>" required></label>
                         <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
-                        <label class="field"><span>Movimiento de pago</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label>
+                        <?php if ($paymentComplementContext): ?>
+                            <label class="field"><span>Movimiento de pago</span><input type="text" value="#<?= e($complementPaymentPrefill['id']) ?>" readonly aria-readonly="true"></label>
+                            <label class="field"><span>Monto máximo disponible</span><input type="text" value="<?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?>" readonly aria-readonly="true"></label>
+                        <?php else: ?>
+                            <label class="field"><span>Movimiento de pago</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label>
+                        <?php endif; ?>
                     </div>
+                    <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente bloqueados para conservar la relación. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID; el sistema consulta el saldo vigente antes de agregarlo.</p></div><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div>
@@ -908,6 +958,7 @@ if ($statisticsModule) {
         $movementClientId = filter_input(INPUT_GET, 'client', FILTER_VALIDATE_INT) ?: null;
         $movementClient = $movementClientId ? movement_repository()->client($movementClientId) : null;
         $isTransferForm = $movementAction === 'transfer' && $action === 'form';
+        $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
         $movementResult = $isTransferForm ? null : movement_repository()->page($movementKey, $movement, $movementSearch, $movementPage, 25, $movementClient ? $movementClientId : null);
         $movementClients = in_array($movementAction, ['assign', 'reassign', 'transfer'], true) ? movement_repository()->clients() : [];
         ?>
@@ -987,11 +1038,16 @@ if ($statisticsModule) {
                 <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></template>
             <?php endif; ?>
             <div class="table-wrap">
-                <table class="movement-table<?= $movementAction ? ' has-actions' : '' ?>">
-                    <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
+                <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>">
+                    <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction || $hasMovementContextActions): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
                     <tbody>
                     <?php foreach ($movementResult['rows'] as $row): ?>
-                        <tr>
+                        <?php $canCreateMovementComplement = $hasMovementContextActions
+                            && (string) ($row['status'] ?? '') === 'asignado'
+                            && (float) ($row['saldo_acreditable'] ?? 0) > 0.005
+                            && (int) ($row['client_id'] ?? 0) > 0
+                            && (int) ($row['company_id'] ?? 0) > 0; ?>
+                        <tr<?= $canCreateMovementComplement ? ' data-record-row' : '' ?>>
                             <?php foreach ($movement['columns'] as $columnKey => $column): ?>
                                 <?php
                                 $columnConfig = is_array($column) ? $column : [];
@@ -1036,7 +1092,7 @@ if ($statisticsModule) {
                                     <?php endforeach; ?>
                                 </td>
                             <?php endforeach; ?>
-                            <?php if ($movementAction): ?>
+                            <?php if ($movementAction || $hasMovementContextActions): ?>
                                 <td class="movement-action">
                                     <?php if ($movementAction === 'assign'): ?>
                                         <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>" data-client-picker>
@@ -1051,21 +1107,32 @@ if ($statisticsModule) {
                                             <button class="button primary" type="submit">Reasignar</button>
                                         </form>
                                     <?php elseif ($movementAction === 'unassign'): ?>
-                                        <form method="post" class="inline-operation single-action" data-confirm="¿Desasignar este movimiento y eliminar todas sus comisiones relacionadas?" data-confirm-title="Confirmar desasignación">
-                                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="movement_unassign"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
-                                            <button class="button danger" type="submit">Desasignar</button>
-                                        </form>
+                                        <div class="movement-record-actions">
+                                            <form method="post" class="inline-operation single-action" data-confirm="¿Desasignar este movimiento y eliminar todas sus comisiones relacionadas?" data-confirm-title="Confirmar desasignación">
+                                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="movement_unassign"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
+                                                <button class="button danger" type="submit">Desasignar</button>
+                                            </form>
+                                            <?php if ($canCreateMovementComplement): ?>
+                                                <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
+                                                <div class="record-action-source" hidden><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a></div>
+                                            <?php endif; ?>
+                                        </div>
                                     <?php elseif ($movementAction === 'transfer'): ?>
                                         <form method="post" class="inline-operation single-action" data-confirm="¿Eliminar de forma permanente la entrada y la salida de este traspaso?" data-confirm-title="Eliminar traspaso">
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="transfer_delete"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
                                             <button class="button danger" type="submit">Eliminar par</button>
                                         </form>
+                                    <?php elseif ($canCreateMovementComplement): ?>
+                                        <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
+                                        <div class="record-action-source" hidden><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a></div>
+                                    <?php else: ?>
+                                        <span aria-hidden="true">—</span>
                                     <?php endif; ?>
                                 </td>
                             <?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if ($movementResult['rows'] === []): ?><tr><td colspan="<?= count($movement['columns']) + ($movementAction ? 1 : 0) ?>" class="empty">No hay movimientos para mostrar.</td></tr><?php endif; ?>
+                    <?php if ($movementResult['rows'] === []): ?><tr><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">No hay movimientos para mostrar.</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -1335,15 +1402,17 @@ if ($statisticsModule) {
             <div class="wallet-grid">
                 <?php foreach ($walletRows as $wallet): ?>
                     <?php $walletColor = preg_match('/^[0-9a-fA-F]{6}$/', ltrim((string) $wallet['color'], '#')) ? '#' . ltrim((string) $wallet['color'], '#') : 'var(--color-primary)'; ?>
-                    <article class="wallet-card <?= (float) $wallet['saldo'] < -0.005 ? 'is-negative' : '' ?>" style="--wallet-accent: <?= e($walletColor) ?>" data-wallet-available="<?= (float) $wallet['saldo'] >= -0.005 ? 'true' : 'false' ?>" data-wallet-movements="<?= (int) $wallet['movimientos_pend'] > 0 ? 'true' : 'false' ?>" data-wallet-balance="<?= abs((float) $wallet['saldo']) > 0.005 ? 'true' : 'false' ?>">
-                        <header><div class="wallet-identity"><span class="wallet-avatar"><?= e(mb_strtoupper(mb_substr((string) $wallet['nombre'], 0, 1))) ?></span><div><h3><?= e($wallet['nombre']) ?></h3><small><?= e($wallet['clave_corta'] ?: 'Sin clave corta') ?> · #<?= e($wallet['id']) ?></small></div></div><span class="wallet-state"><i aria-hidden="true"></i><?= (float) $wallet['saldo'] < -0.005 ? 'Saldo negativo' : 'Disponible' ?></span></header>
-                        <div class="wallet-balance"><span>Saldo actual</span><strong><?= e(report_value($wallet['saldo'], 'money')) ?></strong></div>
+                    <article class="wallet-card <?= (float) $wallet['saldo'] < -0.005 ? 'is-negative' : '' ?>" style="--wallet-accent: <?= e($walletColor) ?>" data-wallet-card data-wallet-id="<?= e($wallet['id']) ?>" data-wallet-available="<?= (float) $wallet['saldo'] >= -0.005 ? 'true' : 'false' ?>" data-wallet-movements="<?= (int) $wallet['movimientos_pend'] > 0 ? 'true' : 'false' ?>" data-wallet-balance="<?= abs((float) $wallet['saldo']) > 0.005 ? 'true' : 'false' ?>">
+                        <button type="button" class="wallet-balance-refresh" data-wallet-balance-refresh aria-label="Actualizar saldo de <?= e($wallet['nombre']) ?>" title="Actualizar saldo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6.2 6.5L4 11m16 2-2.2 4.5A7 7 0 0 1 5.5 15"/></svg></button>
+                        <span class="sr-only" data-wallet-balance-status role="status" aria-live="polite"></span>
+                        <header><div class="wallet-identity"><span class="wallet-avatar"><?= e(mb_strtoupper(mb_substr((string) $wallet['nombre'], 0, 1))) ?></span><div><h3><?= e($wallet['nombre']) ?></h3><small><?= e($wallet['clave_corta'] ?: 'Sin clave corta') ?> · #<?= e($wallet['id']) ?></small></div></div><span class="wallet-state"><i aria-hidden="true"></i><span data-wallet-state-label><?= (float) $wallet['saldo'] < -0.005 ? 'Saldo negativo' : 'Disponible' ?></span></span></header>
+                        <div class="wallet-balance"><span>Saldo acreditable</span><strong data-wallet-balance-value><?= e(report_value($wallet['saldo'], 'money')) ?></strong></div>
                         <dl>
                             <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg>Mov. pendientes</dt><dd><?= number_format((int) $wallet['movimientos_pend']) ?> · <?= e(report_value($wallet['dinero_sin_fact'], 'money')) ?></dd></div>
                             <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6"/></svg>Cheques pendientes</dt><dd><?= number_format((int) $wallet['cheques_pend']) ?> · <?= e(report_value($wallet['cheques_pend_dinero'], 'money')) ?></dd></div>
                             <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h4"/></svg>Facturas sin pago</dt><dd><?= number_format((int) $wallet['facturas_sin_pago']) ?></dd></div>
                         </dl>
-                        <footer><small><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5V5Zm3-2v4m8-4v4M5 9h14"/></svg>Actualizado <?= e($wallet['ultima_act'] ?: 'sin fecha') ?></small><a href="?movement=cartera&amp;client=<?= e($wallet['id']) ?>">Ver movimientos <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg></a></footer>
+                        <footer><small><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5V5Zm3-2v4m8-4v4M5 9h14"/></svg><span data-wallet-updated>Actualizado <?= e($wallet['ultima_act'] ?: 'sin fecha') ?></span></small><a href="?movement=cartera&amp;client=<?= e($wallet['id']) ?>">Ver movimientos <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg></a></footer>
                     </article>
                 <?php endforeach; ?>
                 <?php if ($dashboardWallets['rows'] === []): ?><p class="empty wallet-empty">No se encontraron carteras.</p><?php endif; ?>
@@ -1570,9 +1639,14 @@ if ($statisticsModule) {
             const item = document.createElement('button');
             item.type = 'button';
             item.className = 'record-context-item';
+            item.setAttribute('role', 'menuitem');
             if (original.hasAttribute('data-action-danger')) item.classList.add('is-danger');
             const icon = document.createElement('span');
-            icon.textContent = original.dataset.actionIcon || '•';
+            if (original.dataset.actionIcon === 'receipt') {
+                icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg>';
+            } else {
+                icon.textContent = original.dataset.actionIcon || '•';
+            }
             const label = document.createElement('span');
             label.textContent = original.dataset.actionLabel || original.textContent.trim();
             item.append(icon, label);
@@ -1824,13 +1898,27 @@ if ($statisticsModule) {
     const complementLines = document.getElementById('complementLines');
     const complementForm = document.getElementById('complementForm');
     const addComplementInvoice = document.getElementById('addComplementInvoice');
+    const complementPaymentMaximum = Number(complementForm?.dataset.prefillPaymentMaximum || 0);
+    const complementPaymentRemaining = document.querySelector('[data-complement-payment-remaining]');
+
+    const complementTotalAmount = (excludedRow = null) => {
+        if (!complementLines) return 0;
+        return Array.from(complementLines.querySelectorAll('tr[data-complement-line]'))
+            .filter((row) => row !== excludedRow)
+            .reduce((sum, row) => sum + (Number(row.querySelector('[name="amount[]"]').value) || 0), 0);
+    };
 
     const recalculateComplement = () => {
         if (!complementLines) return;
         const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
-        const total = rows.reduce((sum, row) => sum + (Number(row.querySelector('[name="amount[]"]').value) || 0), 0);
+        const total = complementTotalAmount();
         document.getElementById('complementCount').textContent = String(rows.filter((row) => row.dataset.validated === 'true').length);
         document.getElementById('complementTotal').textContent = invoiceMoney.format(total);
+        if (complementPaymentRemaining && complementPaymentMaximum > 0) {
+            const remaining = Math.max(0, complementPaymentMaximum - total);
+            complementPaymentRemaining.textContent = invoiceMoney.format(remaining);
+            complementPaymentRemaining.classList.toggle('is-exceeded', total > complementPaymentMaximum + 0.001);
+        }
         rows.forEach((row) => {
             const balance = Number(row.dataset.balance) || 0;
             const amount = Number(row.querySelector('[name="amount[]"]').value) || 0;
@@ -1879,8 +1967,13 @@ if ($statisticsModule) {
             row.querySelector('[data-complement-balance]').textContent = invoiceMoney.format(Number(invoice.saldo));
             const amount = row.querySelector('[name="amount[]"]');
             amount.disabled = false;
-            amount.max = String(invoice.saldo);
-            amount.value = String(invoice.saldo);
+            const movementCapacity = complementPaymentMaximum > 0
+                ? Math.max(0, complementPaymentMaximum - complementTotalAmount(row))
+                : Number(invoice.saldo);
+            const maximumForLine = Math.min(Number(invoice.saldo), movementCapacity);
+            if (maximumForLine <= 0) throw new Error('El monto máximo del movimiento ya fue aplicado en otras facturas.');
+            amount.max = String(maximumForLine);
+            amount.value = String(maximumForLine);
             row.querySelector('[name="installment[]"]').value = String(invoice.siguiente_parcialidad || 1);
             recalculateComplement();
         } catch (error) {
@@ -1941,6 +2034,12 @@ if ($statisticsModule) {
             event.preventDefault();
             event.stopImmediatePropagation();
             showToast('Consulta y valida todas las facturas antes de guardar el complemento.');
+            return;
+        }
+        if (complementPaymentMaximum > 0 && complementTotalAmount() > complementPaymentMaximum + 0.001) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            showToast(`El total excede el máximo disponible de ${invoiceMoney.format(complementPaymentMaximum)}.`);
         }
     });
 
@@ -2492,6 +2591,7 @@ if ($statisticsModule) {
 })();
 </script>
 <script src="assets/ui-motion.js"></script>
+<script src="assets/wallet-balance.js"></script>
 <script src="assets/global-search.js"></script>
 <script src="assets/company-directory.js"></script>
 <script src="assets/searchable-select.js"></script>

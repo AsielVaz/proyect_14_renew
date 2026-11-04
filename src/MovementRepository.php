@@ -538,7 +538,9 @@ final class MovementRepository
 
     private function source(string $view, bool $filterByClient = false): array
     {
-        $base = "SELECT p.id, p.nombre AS client_id, COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
+        $base = "SELECT p.id, p.nombre AS client_id, p.status,
+                        CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
+                        COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.banco, p.monto,
                         COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable, p.tipo_movimiento,
                         CONCAT_WS(' ', p.detalle, p.descripcion, p.descripcion_detallada) AS detalles,
@@ -576,7 +578,9 @@ final class MovementRepository
                 '`id` DESC',
             ],
             'cartera' => [
-                "SELECT p.id, p.nombre AS client_id, COALESCE(e.razon, p.empresa) AS empresa,
+                "SELECT p.id, p.nombre AS client_id, p.status,
+                        CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
+                        COALESCE(e.razon, p.empresa) AS empresa,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.monto,
                         COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable, p.tipo_movimiento,
                         CONCAT_WS(' ', p.detalle, p.descripcion, p.descripcion_detallada) AS detalles,
