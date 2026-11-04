@@ -11,6 +11,9 @@ use App\PaymentComplementRepository;
 use App\CompanyPanelRepository;
 use App\CaptureAnalysisService;
 use App\FiscalDocumentService;
+use App\StatisticsRepository;
+use App\GlobalSearchRepository;
+use App\ManualEmailService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -214,6 +217,24 @@ function dashboard_repository(): DashboardRepository
 {
     static $repository;
     return $repository ??= new DashboardRepository(db());
+}
+
+function statistics_repository(): StatisticsRepository
+{
+    static $repository;
+    return $repository ??= new StatisticsRepository(db());
+}
+
+function global_search_repository(): GlobalSearchRepository
+{
+    static $repository;
+    return $repository ??= new GlobalSearchRepository(db());
+}
+
+function manual_email_service(): ManualEmailService
+{
+    static $service;
+    return $service ??= new ManualEmailService(APP_ROOT . '/src/manual-email-templates.php');
 }
 
 function auth_service(): App\AuthService

@@ -16,10 +16,27 @@ final class CompanyPanelRepository
     {
     }
 
-    public function companies(string $search, int $page, int $operatorId, int $perPage = 24): array
+    public function companies(
+        string $search,
+        int $page,
+        int $operatorId,
+        int $perPage = 6,
+        string $sort = 'id_asc'
+    ): array
     {
         $page = max(1, $page);
-        $limit = $perPage + 1;
+        $perPage = in_array($perPage, [6, 12, 24], true) ? $perPage : 6;
+        $orderBy = match ($sort) {
+            'id_desc' => 'e.id DESC',
+            'name_asc' => 'e.razon ASC, e.id ASC',
+            'name_desc' => 'e.razon DESC, e.id DESC',
+            'accounts_desc' => 'cuentas DESC, e.razon ASC',
+            default => 'e.id ASC',
+        };
+        $sort = in_array($sort, ['id_asc', 'id_desc', 'name_asc', 'name_desc', 'accounts_desc'], true)
+            ? $sort
+            : 'id_asc';
+        $limit = $perPage;
         $offset = ($page - 1) * $perPage;
         $where = 'WHERE e.comodin = 0 AND e.id <> 99';
         $params = [];
@@ -27,19 +44,51 @@ final class CompanyPanelRepository
             $where .= ' AND e.id <> ' . self::RESTRICTED_COMPANY;
         }
         if ($search !== '') {
-            $where .= ' AND (e.razon LIKE :search OR e.rfc LIKE :search OR CAST(e.id AS CHAR) LIKE :search)';
-            $params['search'] = '%' . $search . '%';
+            $where .= ' AND (e.razon LIKE :search_name OR e.rfc LIKE :search_rfc
+                OR CAST(e.id AS CHAR) LIKE :search_id)';
+            $searchValue = '%' . $search . '%';
+            $params['search_name'] = $searchValue;
+            $params['search_rfc'] = $searchValue;
+            $params['search_id'] = $searchValue;
         }
+        $count = $this->pdo->prepare("SELECT COUNT(*) FROM empresas e {$where}");
+        $count->execute($params);
+        $total = (int) $count->fetchColumn();
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $lastPage);
+        $offset = ($page - 1) * $perPage;
+
         $query = $this->pdo->prepare("SELECT e.id, e.razon, e.rfc, e.logo, e.descripcion,
-            (SELECT COUNT(*) FROM bancos b WHERE b.razon = e.id AND b.status_banco = 'AC') AS cuentas
-            FROM empresas e {$where} ORDER BY e.razon LIMIT {$limit} OFFSET {$offset}");
+            (SELECT COUNT(*) FROM bancos b WHERE b.razon = e.id AND b.status_banco = 'AC') AS cuentas,
+            (SELECT COUNT(*) FROM captura c WHERE c.razon = CAST(e.id AS CHAR)) AS capturas,
+            (SELECT COUNT(*) FROM pagos p WHERE p.empresa = CAST(e.id AS CHAR)) AS movimientos
+            FROM empresas e {$where} ORDER BY {$orderBy} LIMIT {$limit} OFFSET {$offset}");
         $query->execute($params);
         $rows = $query->fetchAll();
-        $hasNext = count($rows) > $perPage;
-        if ($hasNext) {
-            array_pop($rows);
-        }
-        return ['rows' => $rows, 'page' => $page, 'hasNext' => $hasNext];
+
+        $restricted = !in_array($operatorId, self::RESTRICTED_OPERATORS, true)
+            ? ' AND ec.id <> ' . self::RESTRICTED_COMPANY
+            : '';
+        $stats = $this->pdo->query("SELECT
+            (SELECT COUNT(*) FROM empresas ec
+                WHERE ec.comodin = 0 AND ec.id <> 99 {$restricted}) AS empresas,
+            (SELECT COUNT(*) FROM bancos b INNER JOIN empresas ec ON ec.id = b.razon
+                WHERE ec.comodin = 0 AND ec.id <> 99 {$restricted} AND b.status_banco = 'AC') AS cuentas,
+            (SELECT COUNT(*) FROM captura c INNER JOIN empresas ec ON ec.id = CAST(c.razon AS UNSIGNED)
+                WHERE ec.comodin = 0 AND ec.id <> 99 {$restricted}) AS capturas,
+            (SELECT COUNT(*) FROM pagos p INNER JOIN empresas ec ON ec.id = CAST(p.empresa AS UNSIGNED)
+                WHERE ec.comodin = 0 AND ec.id <> 99 {$restricted}) AS movimientos")->fetch() ?: [];
+
+        return [
+            'rows' => $rows,
+            'page' => $page,
+            'perPage' => $perPage,
+            'sort' => $sort,
+            'total' => $total,
+            'lastPage' => $lastPage,
+            'hasNext' => $page < $lastPage,
+            'stats' => $stats,
+        ];
     }
 
     public function company(int $id, int $operatorId): array

@@ -75,7 +75,22 @@ final class Movements
                     'cep' => ['label' => 'Comprobante', 'secondary' => ['notificado' => 'Enviado']],
                 ],
             ],
+            'correos-manuales' => [
+                'label' => 'Correos manuales',
+                'description' => 'Prepara cotizaciones con plantilla, revisa el HTML final y envía por correo.',
+                'action' => 'manual_email',
+                'restrictedTo' => [1, 32, 82],
+                'columns' => [],
+            ],
         ];
+    }
+
+    public static function allowedFor(int $operatorId): array
+    {
+        return array_filter(self::all(), static function (array $movement) use ($operatorId): bool {
+            $restricted = $movement['restrictedTo'] ?? null;
+            return !is_array($restricted) || in_array($operatorId, $restricted, true);
+        });
     }
 
     public static function get(string $key): ?array

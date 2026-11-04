@@ -10,8 +10,22 @@ La navegación y columnas de las vistas están en `src/Movements.php`. Las consu
 - Ingreso de pagos: consulta general equivalente a la pantalla anterior.
 - Traspasos: creación y eliminación conjunta de la entrada y la salida.
 - Movimientos STP: consulta paginada.
+- Correos manuales: composición con plantilla por empresa, conceptos calculados, edición HTML, adjuntos PDF y revisión final obligatoria.
 
 Cada operación de escritura valida CSRF y se ejecuta dentro de una transacción de base de datos. El operador se obtiene de la sesión autenticada mediante `current_operator_id()`.
+
+## Correos manuales
+
+El módulo aparece dentro de **Movimientos** únicamente para los operadores autorizados (IDs 1, 32 y 82). El flujo separa la generación de la plantilla, la revisión y el envío. La revisión crea un token temporal ligado a destinatarios, asunto, HTML y adjuntos; si algún dato cambia, el servidor rechaza el envío hasta que se vuelva a revisar. El token vence a los 30 minutos y se consume antes de contactar al proveedor, para reducir envíos duplicados.
+
+Las 16 plantillas proporcionadas están integradas en `src/manual-email-templates.php`; el módulo no depende del archivo del sistema anterior. La redacción asistida sólo se utiliza cuando el mensaje principal está vacío y existen conceptos. La configuración externa se toma exclusivamente de variables de entorno:
+
+- `DEEPSEEK_API_KEY` y `DEEPSEEK_MODEL` para redacción asistida.
+- `MANDRILL_API_KEY` para envío.
+- `S14_IMAP_HOST`, `S14_IMAP_PASSWORD` y `S14_IMAP_SENT_FOLDER` para guardar una copia opcional en Enviados.
+- `S14_AUDIT_EMAIL` para la copia oculta de auditoría cuando aplique.
+
+Los adjuntos aceptan exclusivamente PDF: máximo 10 archivos, 10 MB por archivo y 20 MB en conjunto. Si PHP no tiene la extensión IMAP, el correo todavía puede ser aceptado por Mandrill, pero no se guardará la copia local en Enviados.
 
 La asignación se guarda por lote mediante un único botón. Las filas sin cartera se omiten y permanecen sin asignar. Antes de escribir, el servidor calcula y devuelve al modal el saldo acreditable, el esquema utilizado, cada comisión, su porcentaje, la cartera receptora y los totales repartidos. Al aceptar, el lote seleccionado se vuelve a validar y se ejecuta en una sola transacción: si un movimiento fue modificado o falla, se revierte todo el lote.
 

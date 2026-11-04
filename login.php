@@ -61,5 +61,6 @@
         <footer class="login-security">Sesión protegida · Los datos de acceso no se modifican al ingresar</footer>
     </section>
 </main>
+<script src="assets/ui-motion.js"></script>
 </body>
 </html>

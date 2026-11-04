@@ -9,18 +9,48 @@ send_security_headers();
 handle_authentication();
 
 use App\Catalogs;
+use App\ManualEmailService;
 use App\Movements;
 use App\Reports;
+use App\Statistics;
+
+if (isset($_GET['global_search']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Content-Type: application/json; charset=UTF-8');
+    $query = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 120);
+    if (mb_strlen($query) < 2) {
+        echo json_encode(['ok' => true, 'query' => $query, 'results' => [
+            'payments' => [], 'invoices' => [], 'captures' => [],
+        ], 'total' => 0], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        exit;
+    }
+    try {
+        $results = global_search_repository()->search($query, current_operator_id());
+        $total = array_sum(array_map('count', $results));
+        echo json_encode(['ok' => true, 'query' => $query, 'results' => $results, 'total' => $total],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    } catch (Throwable) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No fue posible completar la búsqueda. Inténtalo nuevamente.'],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
 
 $catalogs = Catalogs::all();
-$movements = Movements::all();
+$movements = Movements::allowedFor(current_operator_id());
 $reports = Reports::all();
+$statistics = Statistics::all();
 $key = (string) ($_GET['catalog'] ?? '');
 $catalog = $key !== '' ? Catalogs::get($key) : null;
 $reportKey = (string) ($_GET['report'] ?? '');
 $report = $reportKey !== '' ? Reports::get($reportKey) : null;
 $movementKey = (string) ($_GET['movement'] ?? '');
-$movement = $movementKey !== '' ? Movements::get($movementKey) : null;
+$movement = $movementKey !== '' ? ($movements[$movementKey] ?? null) : null;
+$knownMovement = $movementKey !== '' ? Movements::get($movementKey) : null;
+if ($knownMovement && !$movement) {
+    flash('error', 'No tienes permiso para abrir ese módulo.');
+    redirect('./');
+}
 $movementAction = $movement['action'] ?? null;
 $invoiceView = (string) ($_GET['invoice'] ?? '');
 $invoiceModule = in_array($invoiceView, ['list', 'create', 'complements'], true);
@@ -28,9 +58,37 @@ $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
 $companyView = (string) ($_GET['companies'] ?? '');
 $companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture', 'movements', 'account', 'analyze'], true);
-$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule;
+$statisticsKey = (string) ($_GET['statistics'] ?? '');
+$statistic = $statisticsKey !== '' ? Statistics::get($statisticsKey) : null;
+$statisticsModule = $statistic !== null;
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$statisticsModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+
+if ($movementKey === 'correos-manuales' && isset($_GET['mail_action']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=UTF-8');
+    try {
+        verify_csrf();
+        if (!ManualEmailService::isAllowed(current_operator_id())) {
+            throw new RuntimeException('No tienes permiso para utilizar este módulo.');
+        }
+        $result = match ((string) $_GET['mail_action']) {
+            'generate' => manual_email_service()->generate($_POST),
+            'review' => manual_email_service()->review($_POST, $_FILES),
+            'send' => manual_email_service()->send($_POST, $_FILES),
+            default => throw new RuntimeException('Acción de correo no permitida.'),
+        };
+        echo json_encode(['ok' => true, 'data' => $result], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    } catch (RuntimeException $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (Throwable $exception) {
+        error_log('ManualEmail: ' . $exception->getMessage());
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No fue posible completar la operación. Inténtalo nuevamente.'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
 
 if (!$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule
     && isset($_GET['calculator']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -270,7 +328,13 @@ if ($companyModule) {
         $operatorId = current_operator_id();
         $companyPage = max(1, (int) ($_GET['page'] ?? 1));
         if ($companyView === 'list') {
-            $companyResult = company_panel_repository()->companies(trim((string) ($_GET['q'] ?? '')), $companyPage, $operatorId);
+            $companyResult = company_panel_repository()->companies(
+                trim((string) ($_GET['q'] ?? '')),
+                $companyPage,
+                $operatorId,
+                (int) ($_GET['per_page'] ?? 6),
+                (string) ($_GET['sort'] ?? 'id_asc')
+            );
         } else {
             $companyId = (int) ($id ?? 0);
             $companyData = company_panel_repository()->company($companyId, $operatorId);
@@ -298,6 +362,17 @@ if ($companyModule) {
         $companyError = $exception->getMessage();
     }
 }
+$statisticsError = null;
+$statisticsResult = null;
+$statisticsClients = [];
+if ($statisticsModule) {
+    try {
+        $statisticsClients = ($statistic['clientFilter'] ?? false) ? statistics_repository()->clients() : [];
+        $statisticsResult = statistics_repository()->run($statisticsKey, $_GET);
+    } catch (Throwable $exception) {
+        $statisticsError = $exception->getMessage();
+    }
+}
 ?>
 <!doctype html>
 <html lang="es">
@@ -305,27 +380,33 @@ if ($companyModule) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <base href="<?= e(app_url('/')) ?>">
-    <title><?= e($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))) ?> · Sistema 14</title>
+    <title><?= e($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14'))))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
 </head>
-<body class="<?= $companyModule ? 'company-module' : '' ?>">
-<aside class="sidebar">
-    <a class="brand" href="./"><img src="assets/logo-s14.png" alt="Sistema 14"><strong>Sistema 14</strong></a>
+<body class="<?= $companyModule ? 'company-module' : '' ?><?= $companyView === 'list' ? ' company-directory-module' : '' ?><?= $companyView === 'detail' ? ' company-detail-module' : '' ?>">
+<a class="skip-link" href="#main-content">Saltar al contenido</a>
+<aside class="sidebar" id="s14-sidebar">
+    <div class="sidebar-brand-row">
+        <a class="brand" href="./" aria-label="Ir al panel principal de Sistema 14"><img src="assets/logo-s14.png" alt="Sistema 14"></a>
+        <button class="mobile-menu-toggle" type="button" aria-controls="s14-sidebar" aria-expanded="false" aria-label="Abrir menú principal">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+    </div>
     <nav class="main-nav">
-        <a class="dashboard-link <?= !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule ? 'active' : '' ?>" href="./">
-            <span class="nav-icon">⌂</span>
+        <a class="dashboard-link <?= $dashboardModule ? 'active' : '' ?>" href="./">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9.5 20v-6h5v6"/></svg></span>
             Panel principal
         </a>
         <a class="dashboard-link <?= $companyModule ? 'active' : '' ?>" href="?companies=list">
-            <span class="nav-icon">▥</span>
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4h14v17M3 21h18M8 8h2m4 0h2m-8 4h2m4 0h2m-8 4h2m4 0h2"/></svg></span>
             Panel de empresas
         </a>
         <details class="catalog-menu" <?= $catalog ? 'open' : '' ?>>
             <summary>
-                <span><span class="nav-icon">▦</span> Catálogos</span>
-                <span class="chevron">⌄</span>
+                <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 12 2l8 3.5-8 3.5-8-3.5Zm0 6L12 15l8-3.5M4 17.5 12 21l8-3.5"/></svg></span> Catálogos</span>
+                <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
             </summary>
             <div class="catalog-links">
                 <?php foreach ($catalogs as $navKey => $item): ?>
@@ -337,8 +418,8 @@ if ($companyModule) {
         </details>
         <details class="catalog-menu movement-menu" <?= $movement ? 'open' : '' ?>>
             <summary>
-                <span><span class="nav-icon">⇄</span> Movimientos</span>
-                <span class="chevron">⌄</span>
+                <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span> Movimientos</span>
+                <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
             </summary>
             <div class="catalog-links">
                 <?php foreach ($movements as $navKey => $item): ?>
@@ -349,7 +430,7 @@ if ($companyModule) {
             </div>
         </details>
         <details class="catalog-menu" <?= $invoiceModule || $complementModule ? 'open' : '' ?>>
-            <summary><span><span class="nav-icon">▧</span> Facturación</span><span class="chevron">⌄</span></summary>
+            <summary><span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6m-6 4h4"/></svg></span> Facturación</span><span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span></summary>
             <div class="catalog-links">
                 <a class="<?= $invoiceView === 'list' ? 'active' : '' ?>" href="?invoice=list"><span></span>Facturas</a>
                 <a class="<?= $invoiceView === 'create' ? 'active' : '' ?>" href="?invoice=create"><span></span>Crear factura</a>
@@ -358,8 +439,8 @@ if ($companyModule) {
         </details>
         <details class="catalog-menu report-menu" <?= $report ? 'open' : '' ?>>
             <summary>
-                <span><span class="nav-icon">▤</span> Reportes</span>
-                <span class="chevron">⌄</span>
+                <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm3 5h6m-6 4h6m-6 4h4"/></svg></span> Reportes</span>
+                <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
             </summary>
             <div class="catalog-links">
                 <?php foreach ($reports as $navKey => $item): ?>
@@ -369,41 +450,79 @@ if ($companyModule) {
                 <?php endforeach; ?>
             </div>
         </details>
+        <details class="catalog-menu statistics-menu" <?= $statisticsModule ? 'open' : '' ?>>
+            <summary>
+                <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-7h4v7m2 0V9h4v11m2 0V4h4v16M3 20h19"/></svg></span> Estadísticas</span>
+                <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
+            </summary>
+            <div class="catalog-links">
+                <?php foreach ($statistics as $navKey => $item): ?>
+                    <a class="<?= $statisticsKey === $navKey ? 'active' : '' ?>" href="?statistics=<?= e($navKey) ?>">
+                        <span></span><?= e($item['label']) ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </details>
     </nav>
     <?php $signedUser = current_user(); ?>
     <div class="session-user">
-        <span><?= e($signedUser['name'] ?? '') ?></span>
-        <small><?= e($signedUser['type'] ?? '') ?></small>
+        <span class="session-avatar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0"/></svg></span>
+        <div class="session-copy"><span><?= e($signedUser['name'] ?? '') ?></span><small><?= e($signedUser['type'] ?? '') ?></small></div>
         <form method="post" action="?auth=logout">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <button type="submit">Cerrar sesión</button>
+            <button type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5m4-3 4-4-4-4m4 4H9"/></svg>Cerrar sesión</button>
         </form>
     </div>
     <p class="phase">Sistema 14 renovado · PHP <?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?></p>
 </aside>
 
-<main>
+<main id="main-content">
     <header class="topbar">
-        <div>
-            <p class="eyebrow"><?= $companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))) ?></p>
-            <h1><?= e($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))) ?></h1>
+        <div class="topbar-copy">
+            <p class="eyebrow"><?= $statisticsModule ? 'Análisis operativo' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración')))) ?></p>
+            <h1><?= e($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal'))))))) ?></h1>
+            <?php if ($dashboardModule): ?><p class="topbar-description">Visión general de saldos, movimientos y carteras de clientes del sistema.</p><?php endif; ?>
         </div>
-        <?php if ($catalog && $action !== 'form'): ?>
-            <a class="button primary" href="?catalog=<?= e($key) ?>&amp;action=form">+ Nuevo registro</a>
-        <?php elseif ($movementKey === 'traspasos' && $action !== 'form'): ?>
-            <a class="button primary" href="?movement=traspasos&amp;action=form">+ Nuevo traspaso</a>
-        <?php elseif ($invoiceView === 'list'): ?>
-            <a class="button primary" href="?invoice=create">+ Nueva factura</a>
-        <?php elseif ($complementView === 'list'): ?>
-            <a class="button primary" href="?complement=create">+ Nuevo complemento</a>
-        <?php elseif ($dashboardModule): ?>
-            <div class="dashboard-calculator-shortcuts" aria-label="Calculadoras">
-                <button type="button" class="calculator-shortcut" data-calculator-open="balance" aria-label="Abrir calculadora de saldos" title="Calculadora de saldos">$</button>
-                <button type="button" class="calculator-shortcut" data-calculator-open="banking" aria-label="Abrir calculadora de banking" title="Calculadora de banking">%</button>
-                <button type="button" class="calculator-shortcut" data-calculator-open="dispersal" aria-label="Abrir dispersor" title="Dispersor">⇄</button>
-            </div>
-        <?php endif; ?>
+        <div class="topbar-actions">
+            <button type="button" class="global-search-trigger" data-global-search-open aria-haspopup="dialog" aria-controls="global-search-dialog">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+                <span>Buscar</span><kbd>Ctrl K</kbd>
+            </button>
+            <?php if ($catalog && $action !== 'form'): ?>
+                <a class="button primary" href="?catalog=<?= e($key) ?>&amp;action=form">+ Nuevo registro</a>
+            <?php elseif ($movementKey === 'traspasos' && $action !== 'form'): ?>
+                <a class="button primary" href="?movement=traspasos&amp;action=form">+ Nuevo traspaso</a>
+            <?php elseif ($invoiceView === 'list'): ?>
+                <a class="button primary" href="?invoice=create">+ Nueva factura</a>
+            <?php elseif ($complementView === 'list'): ?>
+                <a class="button primary" href="?complement=create">+ Nuevo complemento</a>
+            <?php elseif ($dashboardModule): ?>
+                <div class="dashboard-calculator-shortcuts" aria-label="Calculadoras">
+                    <button type="button" class="calculator-shortcut" data-calculator-open="balance" aria-label="Abrir calculadora de saldos" title="Calculadora de saldos">$</button>
+                    <button type="button" class="calculator-shortcut" data-calculator-open="banking" aria-label="Abrir calculadora de banking" title="Calculadora de banking">%</button>
+                    <button type="button" class="calculator-shortcut" data-calculator-open="dispersal" aria-label="Abrir dispersor" title="Dispersor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></button>
+                </div>
+            <?php endif; ?>
+        </div>
     </header>
+
+    <div class="global-search-backdrop" data-global-search-backdrop hidden>
+        <section class="global-search-dialog" id="global-search-dialog" role="dialog" aria-modal="true" aria-labelledby="global-search-title" aria-describedby="global-search-help">
+            <header class="global-search-header">
+                <span class="global-search-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></span>
+                <div><h2 id="global-search-title">Búsqueda general</h2><p id="global-search-help">Busca pagos, facturas y capturas de estados de cuenta.</p></div>
+                <button type="button" class="global-search-close" data-global-search-close aria-label="Cerrar búsqueda"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+            </header>
+            <form class="global-search-form" data-global-search-form role="search">
+                <label class="sr-only" for="global-search-input">Buscar por ID, descripción, monto, folio, UUID o referencia</label>
+                <span class="global-search-input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></span>
+                <input id="global-search-input" type="search" name="q" minlength="2" maxlength="120" autocomplete="off" spellcheck="false" placeholder="ID, descripción, monto, folio, UUID o referencia…" aria-describedby="global-search-status">
+                <kbd>Esc</kbd>
+            </form>
+            <div class="global-search-status" id="global-search-status" data-global-search-status role="status" aria-live="polite">Escribe al menos 2 caracteres para buscar.</div>
+            <div class="global-search-results" data-global-search-results></div>
+        </section>
+    </div>
 
     <?php if ($flash): ?>
         <div class="toast-stack" aria-live="polite">
@@ -419,53 +538,145 @@ if ($companyModule) {
         <?php if ($companyError): ?>
             <section class="panel"><div class="empty"><strong>No se pudo abrir el panel.</strong><br><?= e($companyError) ?><br><a href="?companies=list">Volver a empresas</a></div></section>
         <?php elseif ($companyView === 'list'): ?>
-            <section class="report-intro"><p>Consulta cada empresa, sus cuentas bancarias, capturas importadas y movimientos conciliados.</p><span class="operation-badge">Vista operativa</span></section>
-            <section class="panel company-directory-panel">
-                <div class="panel-heading list-tools">
-                    <div><p class="eyebrow">Empresas activas</p><h2>Directorio de empresas</h2><p class="panel-copy"><?= count($companyResult['rows'] ?? []) ?> resultados en esta página</p></div>
-                    <form method="get" class="search"><input type="hidden" name="companies" value="list"><input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="Razón social, RFC o ID…"><button class="button">Buscar</button></form>
+            <?php
+            $companyStats = $companyResult['stats'] ?? [];
+            $companyTotal = (int) ($companyResult['total'] ?? 0);
+            $companyPerPage = (int) ($companyResult['perPage'] ?? 6);
+            $companyCurrentPage = (int) ($companyResult['page'] ?? 1);
+            $companyLastPage = (int) ($companyResult['lastPage'] ?? 1);
+            $companyStart = $companyTotal > 0 ? (($companyCurrentPage - 1) * $companyPerPage) + 1 : 0;
+            $companyEnd = min($companyCurrentPage * $companyPerPage, $companyTotal);
+            $companyListQuery = [
+                'companies' => 'list',
+                'q' => (string) ($_GET['q'] ?? ''),
+                'sort' => (string) ($companyResult['sort'] ?? 'id_asc'),
+                'per_page' => $companyPerPage,
+            ];
+            $pageWindowStart = max(1, $companyCurrentPage - 2);
+            $pageWindowEnd = min($companyLastPage, $companyCurrentPage + 2);
+            ?>
+            <section class="company-directory-shell" aria-labelledby="company-directory-title">
+                <header class="company-directory-hero">
+                    <div class="company-directory-heading">
+                        <span class="company-directory-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 21V4.8a1.8 1.8 0 0 1 1.3-1.7l7-2.1A1.3 1.3 0 0 1 15 2.2V21M3 21h18M8 7h2m-2 4h2m-2 4h2m7-7h2v13m-2-9h2m-2 4h2"/></svg></span>
+                        <div><p>Empresas activas</p><h1 id="company-directory-title">Directorio de empresas</h1><span>Consulta cada empresa, sus cuentas bancarias, capturas importadas y movimientos conciliados.</span></div>
+                    </div>
+                    <span class="company-operational-status"><i aria-hidden="true"></i>Vista operativa</span>
+                </header>
+
+                <div class="company-kpi-grid" aria-label="Resumen del directorio">
+                    <article class="company-kpi is-featured"><span class="company-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 21V5l10-3v19M3 21h18M8 8h2m-2 4h2m-2 4h2m7-8h4v13m-3-9h1m-1 4h1"/></svg></span><div><strong><?= number_format((int) ($companyStats['empresas'] ?? 0)) ?></strong><span>Empresas registradas</span></div></article>
+                    <article class="company-kpi"><span class="company-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 9 9-5 9 5M5 10h14M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16M3 17h18"/></svg></span><div><strong><?= number_format((int) ($companyStats['cuentas'] ?? 0)) ?></strong><span>Cuentas bancarias activas</span></div></article>
+                    <article class="company-kpi"><span class="company-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3 3m-3-3 3-3"/></svg></span><div><strong><?= number_format((int) ($companyStats['movimientos'] ?? 0)) ?></strong><span>Movimientos conciliados</span></div></article>
+                    <article class="company-kpi"><span class="company-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg></span><div><strong><?= number_format((int) ($companyStats['capturas'] ?? 0)) ?></strong><span>Capturas importadas</span></div></article>
                 </div>
-                <div class="company-grid">
-                    <?php foreach ($companyResult['rows'] ?? [] as $item): ?>
-                        <a class="company-card" href="?companies=detail&amp;id=<?= e($item['id']) ?>">
-                            <div class="company-card-media">
-                                <?php if (trim((string) ($item['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($item['logo'])) ?>" alt="" loading="lazy"><?php else: ?><span><?= e(mb_strtoupper(mb_substr((string) $item['razon'], 0, 2))) ?></span><?php endif; ?>
-                            </div>
-                            <div class="company-card-body"><small>Empresa #<?= e($item['id']) ?></small><strong><?= e($item['razon']) ?></strong><span><?= e($item['rfc'] ?: 'RFC no registrado') ?></span></div>
-                            <div class="company-card-footer"><span><?= e($item['cuentas']) ?> cuentas activas</span><b>Ver panel →</b></div>
-                        </a>
-                    <?php endforeach; ?>
-                    <?php if (($companyResult['rows'] ?? []) === []): ?><div class="empty">No se encontraron empresas con ese criterio.</div><?php endif; ?>
-                </div>
-                <?php $companyListQuery = ['companies' => 'list', 'q' => (string) ($_GET['q'] ?? '')]; ?>
-                <div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($companyListQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($companyListQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div>
+
+                <form method="get" class="company-toolbar" role="search">
+                    <input type="hidden" name="companies" value="list">
+                    <input type="hidden" name="per_page" value="<?= $companyPerPage ?>">
+                    <div class="company-search-field"><label class="sr-only" for="companyDirectorySearch">Buscar empresa</label><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg><input id="companyDirectorySearch" type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="Razón social, RFC o ID de empresa..." autocomplete="off"><button type="submit">Buscar</button></div>
+                    <label class="company-select-field"><span class="sr-only">Estado</span><select aria-label="Estado de las empresas"><option>Estado: Activas</option></select></label>
+                    <label class="company-select-field"><span class="sr-only">Ordenar empresas</span><select name="sort" data-company-auto-submit><option value="id_asc" <?= ($companyResult['sort'] ?? '') === 'id_asc' ? 'selected' : '' ?>>Orden: ID (asc)</option><option value="id_desc" <?= ($companyResult['sort'] ?? '') === 'id_desc' ? 'selected' : '' ?>>Orden: ID (desc)</option><option value="name_asc" <?= ($companyResult['sort'] ?? '') === 'name_asc' ? 'selected' : '' ?>>Nombre A–Z</option><option value="name_desc" <?= ($companyResult['sort'] ?? '') === 'name_desc' ? 'selected' : '' ?>>Nombre Z–A</option><option value="accounts_desc" <?= ($companyResult['sort'] ?? '') === 'accounts_desc' ? 'selected' : '' ?>>Más cuentas</option></select></label>
+                    <div class="company-view-switch" role="group" aria-label="Vista del directorio"><button type="button" data-company-view="grid" aria-pressed="true" aria-label="Vista de tarjetas"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg></button><button type="button" data-company-view="list" aria-pressed="false" aria-label="Vista de lista"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1"/></svg></button></div>
+                </form>
+
+                <div class="company-results-meta"><strong><?= number_format($companyTotal) ?> resultados</strong><span>Mostrando <?= number_format($companyStart) ?>–<?= number_format($companyEnd) ?> de <?= number_format($companyTotal) ?></span></div>
+
+                <?php if (($companyResult['rows'] ?? []) !== []): ?>
+                    <div class="company-grid" data-company-view-panel="grid">
+                        <?php foreach ($companyResult['rows'] as $item): ?>
+                            <?php $companyInitials = mb_strtoupper(mb_substr(trim((string) $item['razon']), 0, 2)); ?>
+                            <article class="company-card">
+                                <div class="company-card-head">
+                                    <div class="company-card-media">
+                                        <?php if (trim((string) ($item['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($item['logo'])) ?>" alt="Logo de <?= e($item['razon']) ?>" loading="lazy" data-company-logo><span data-company-logo-fallback hidden><?= e($companyInitials) ?></span><?php else: ?><span><?= e($companyInitials) ?></span><?php endif; ?>
+                                    </div>
+                                    <div class="company-card-identity"><span class="company-id-badge">#<?= e($item['id']) ?></span><h2 title="<?= e($item['razon']) ?>"><?= e($item['razon']) ?></h2><p><?= e($item['rfc'] ?: 'RFC no registrado') ?></p></div>
+                                    <span class="company-status"><i aria-hidden="true"></i>Activa</span>
+                                </div>
+                                <dl class="company-card-metrics">
+                                    <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-5 9 5M5 10h14M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16"/></svg><strong><?= number_format((int) $item['cuentas']) ?></strong></dt><dd><?= (int) $item['cuentas'] === 1 ? 'Cuenta activa' : 'Cuentas activas' ?></dd></div>
+                                    <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg><strong><?= number_format((int) $item['capturas']) ?></strong></dt><dd>Capturas</dd></div>
+                                    <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3 3m-3-3 3-3"/></svg><strong><?= number_format((int) $item['movimientos']) ?></strong></dt><dd>Movimientos</dd></div>
+                                </dl>
+                                <footer class="company-card-footer"><a class="company-primary-action" href="?companies=detail&amp;id=<?= e($item['id']) ?>">Ver panel <span aria-hidden="true">→</span></a></footer>
+                            </article>
+                        <?php endforeach; ?>
+                    </div>
+                    <div class="company-list-wrap" data-company-view-panel="list" hidden>
+                        <table class="company-list-table"><thead><tr><th>Empresa</th><th>RFC</th><th>ID</th><th>Cuentas</th><th>Capturas</th><th>Movimientos</th><th>Estado</th><th><span class="sr-only">Acciones</span></th></tr></thead><tbody>
+                        <?php foreach ($companyResult['rows'] as $item): ?><tr><td><strong><?= e($item['razon']) ?></strong></td><td><?= e($item['rfc'] ?: 'No registrado') ?></td><td>#<?= e($item['id']) ?></td><td><?= number_format((int) $item['cuentas']) ?></td><td><?= number_format((int) $item['capturas']) ?></td><td><?= number_format((int) $item['movimientos']) ?></td><td><span class="company-status"><i aria-hidden="true"></i>Activa</span></td><td><a href="?companies=detail&amp;id=<?= e($item['id']) ?>">Ver panel <span aria-hidden="true">→</span></a></td></tr><?php endforeach; ?>
+                        </tbody></table>
+                    </div>
+                <?php else: ?>
+                    <div class="company-empty"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></span><strong>No encontramos empresas</strong><p>Prueba con otra razón social, RFC o ID.</p><a href="?companies=list">Limpiar búsqueda</a></div>
+                <?php endif; ?>
+
+                <footer class="company-pagination">
+                    <form method="get"><input type="hidden" name="companies" value="list"><input type="hidden" name="q" value="<?= e($_GET['q'] ?? '') ?>"><input type="hidden" name="sort" value="<?= e($companyResult['sort'] ?? 'id_asc') ?>"><label>Resultados por página:<select name="per_page" data-company-auto-submit><option value="6" <?= $companyPerPage === 6 ? 'selected' : '' ?>>6</option><option value="12" <?= $companyPerPage === 12 ? 'selected' : '' ?>>12</option><option value="24" <?= $companyPerPage === 24 ? 'selected' : '' ?>>24</option></select></label></form>
+                    <nav aria-label="Paginación de empresas">
+                        <a class="company-page-link company-page-arrow<?= $companyCurrentPage <= 1 ? ' is-disabled' : '' ?>" href="?<?= e(http_build_query($companyListQuery + ['page' => max(1, $companyCurrentPage - 1)])) ?>" aria-label="Página anterior"<?= $companyCurrentPage <= 1 ? ' aria-disabled="true" tabindex="-1"' : '' ?>>‹</a>
+                        <?php for ($companyPageNumber = $pageWindowStart; $companyPageNumber <= $pageWindowEnd; $companyPageNumber++): ?><a class="company-page-link<?= $companyPageNumber === $companyCurrentPage ? ' is-active' : '' ?>" href="?<?= e(http_build_query($companyListQuery + ['page' => $companyPageNumber])) ?>"<?= $companyPageNumber === $companyCurrentPage ? ' aria-current="page"' : '' ?>><?= $companyPageNumber ?></a><?php endfor; ?>
+                        <a class="company-page-link company-page-arrow<?= $companyCurrentPage >= $companyLastPage ? ' is-disabled' : '' ?>" href="?<?= e(http_build_query($companyListQuery + ['page' => min($companyLastPage, $companyCurrentPage + 1)])) ?>" aria-label="Página siguiente"<?= $companyCurrentPage >= $companyLastPage ? ' aria-disabled="true" tabindex="-1"' : '' ?>>›</a>
+                    </nav>
+                </footer>
             </section>
         <?php elseif ($companyView === 'detail'): ?>
-            <section class="company-identity panel">
-                <div class="company-identity-logo"><?php if (trim((string) ($companyData['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($companyData['logo'])) ?>" alt=""><?php else: ?><span><?= e(mb_strtoupper(mb_substr((string) $companyData['razon'], 0, 2))) ?></span><?php endif; ?></div>
-                <div><p class="eyebrow">Empresa #<?= e($companyData['id']) ?></p><h2><?= e($companyData['razon']) ?></h2><p><?= e($companyData['rfc'] ?: 'RFC no registrado') ?> · <?= e(trim(implode(' ', array_filter([$companyData['calle'], $companyData['numero'], $companyData['colonia'], $companyData['cp'], $companyData['estado']]))) ?: 'Domicilio no registrado') ?></p></div>
-                <a class="button" href="?companies=list">Todas las empresas</a>
-            </section>
-            <div class="company-summary-grid">
-                <article><span>Capturas</span><strong><?= number_format((int) ($companySummary['capturas'] ?? 0)) ?></strong><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Consultar</a></article>
-                <article><span>Movimientos</span><strong><?= number_format((int) ($companySummary['movimientos'] ?? 0)) ?></strong><a href="?companies=movements&amp;id=<?= e($companyData['id']) ?>">Consultar</a></article>
-                <article><span>Por facturar</span><strong><?= number_format((int) ($companySummary['pendientes'] ?? 0)) ?></strong><small>Movimientos no retirados</small></article>
-                <article><span>Depósitos sin facturar</span><strong><?= e(report_value($companySummary['sin_facturar'] ?? 0, 'money')) ?></strong><small>Importe acumulado</small></article>
+            <?php
+            $companyInitials = mb_strtoupper(mb_substr(trim((string) $companyData['razon']), 0, 2));
+            $companyAddress = trim(implode(' ', array_filter([
+                $companyData['calle'], $companyData['numero'], $companyData['colonia'],
+                $companyData['cp'], $companyData['estado'],
+            ])));
+            ?>
+            <div class="company-detail-shell">
+                <header class="company-detail-hero">
+                    <div class="company-detail-identity">
+                        <div class="company-identity-logo">
+                            <?php if (trim((string) ($companyData['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($companyData['logo'])) ?>" alt="Logo de <?= e($companyData['razon']) ?>" width="100" height="100" fetchpriority="high" data-company-logo><span data-company-logo-fallback hidden><?= e($companyInitials) ?></span><?php else: ?><span><?= e($companyInitials) ?></span><?php endif; ?>
+                        </div>
+                        <div class="company-detail-divider" aria-hidden="true"></div>
+                        <div class="company-detail-copy"><p>Empresa #<?= e($companyData['id']) ?></p><h1><?= e($companyData['razon']) ?></h1><span><?= e($companyData['rfc'] ?: 'RFC no registrado') ?> · <?= e($companyAddress ?: 'Domicilio no registrado') ?></span></div>
+                    </div>
+                    <a class="company-all-link" href="?companies=list"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Todas las empresas</a>
+                </header>
+
+                <section class="company-detail-kpis" aria-label="Resumen de la empresa">
+                    <article class="is-featured"><span class="company-detail-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg></span><div><span>Capturas</span><strong><?= number_format((int) ($companySummary['capturas'] ?? 0)) ?></strong><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Consultar <b aria-hidden="true">→</b></a></div></article>
+                    <article><span class="company-detail-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3 3m-3-3 3-3"/></svg></span><div><span>Movimientos</span><strong><?= number_format((int) ($companySummary['movimientos'] ?? 0)) ?></strong><a href="?companies=movements&amp;id=<?= e($companyData['id']) ?>">Consultar <b aria-hidden="true">→</b></a></div></article>
+                    <article><span class="company-detail-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/><path d="m10 18 2 2 4-4"/></svg></span><div><span>Por facturar</span><strong><?= number_format((int) ($companySummary['pendientes'] ?? 0)) ?></strong><small>Movimientos no retirados</small></div></article>
+                    <article><span class="company-detail-kpi-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 11v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg></span><div><span>Depósitos sin facturar</span><strong><?= e(report_value($companySummary['sin_facturar'] ?? 0, 'money')) ?></strong><small>Importe acumulado</small></div></article>
+                </section>
+
+                <section class="company-bank-panel" aria-labelledby="company-bank-title">
+                    <header class="company-bank-heading">
+                        <div class="company-bank-title"><span class="company-bank-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 9 9-5 9 5M5 10h14M6 10v7m4-7v7m4-7v7m4-7v7M4 20h16M3 17h18"/></svg></span><div><p>Bancos</p><h2 id="company-bank-title">Cuentas activas</h2><span>Saldo calculado con los depósitos y retiros importados.</span></div></div>
+                        <nav class="company-bank-nav" aria-label="Consultas de la empresa"><a class="is-primary" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg>Capturas</a><a href="?companies=movements&amp;id=<?= e($companyData['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3 3m-3-3 3-3"/></svg>Movimientos</a></nav>
+                    </header>
+                    <div class="company-account-grid">
+                        <?php foreach ($companyData['accounts'] as $account): ?>
+                            <?php
+                            $accountColor = preg_match('/^#?[0-9a-f]{6}$/i', (string) $account['color'])
+                                ? '#' . ltrim((string) $account['color'], '#')
+                                : '#f26a0a';
+                            $accountIdentity = mb_strtoupper(trim((string) $account['banco'] . ' ' . (string) $account['nombre_corto']));
+                            $accountLogo = str_contains($accountIdentity, 'ASP') ? legacy_asset_url('img/asp.jpg') : '';
+                            $accountFallbackSource = trim((string) ($account['banco'] ?: $account['nombre_corto'] ?: 'Banco'));
+                            $accountInitials = mb_strtoupper(mb_substr($accountFallbackSource, 0, 3));
+                            ?>
+                            <article class="company-account-card" style="--account-color: <?= e($accountColor) ?>">
+                                <div class="company-account-main">
+                                    <div class="company-bank-logo"><?php if ($accountLogo !== ''): ?><img src="<?= e($accountLogo) ?>" alt="Logo de <?= e($account['banco']) ?>" width="200" height="200" loading="lazy" data-company-logo><span data-company-logo-fallback hidden><?= e($accountInitials) ?></span><?php else: ?><span><?= e($accountInitials) ?></span><?php endif; ?></div>
+                                    <div class="company-account-copy"><span class="company-account-bank"><i aria-hidden="true"></i><?= e($account['banco'] ?: 'Banco no registrado') ?> · <?= e($account['moneda'] ?: 'MXN') ?></span><h3><?= e($account['nombre_corto'] ?: ('Cuenta #' . $account['id'])) ?></h3><strong><?= e(report_value($account['saldo'], 'money')) ?></strong><p><?= e($account['numero_cuenta'] ?: 'Número no registrado') ?></p></div>
+                                </div>
+                                <dl class="company-account-metrics"><div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4-8 4-8-4 8-4Zm-8 9 8 4 8-4M4 17l8 4 8-4"/></svg>Capturas</dt><dd><?= number_format((int) $account['capturas']) ?></dd></div><div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2"/></svg>Última actividad</dt><dd><?= e($account['ultima_actividad'] ?: 'Sin movimientos') ?></dd></div></dl>
+                                <footer class="company-account-actions"><a class="is-primary" href="?companies=account&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm3 5h6m-6 4h6m-6 4h4"/></svg>Estado de cuenta</a><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>&amp;account=<?= e($account['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg>Capturas</a><a href="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-4 3 2 5-6"/></svg>Analizar captura</a></footer>
+                            </article>
+                        <?php endforeach; ?>
+                        <?php if ($companyData['accounts'] === []): ?><div class="company-bank-empty"><strong>Sin cuentas activas</strong><span>Esta empresa no tiene cuentas bancarias activas para consultar.</span></div><?php endif; ?>
+                    </div>
+                </section>
             </div>
-            <section class="panel">
-                <div class="panel-heading"><div><p class="eyebrow">Bancos</p><h2>Cuentas activas</h2><p class="panel-copy">Saldo calculado con los depósitos y retiros importados.</p></div><div class="panel-actions"><a class="button" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Capturas</a><a class="button" href="?companies=movements&amp;id=<?= e($companyData['id']) ?>">Movimientos</a></div></div>
-                <div class="company-account-grid">
-                    <?php foreach ($companyData['accounts'] as $account): ?>
-                        <article class="company-account-card" style="--account-color: <?= e(preg_match('/^#?[0-9a-f]{6}$/i', (string) $account['color']) ? '#' . ltrim((string) $account['color'], '#') : '#59657a') ?>">
-                            <div><span class="account-dot"></span><small><?= e($account['banco']) ?> · <?= e($account['moneda'] ?: 'MXN') ?></small></div><h3><?= e($account['nombre_corto'] ?: ('Cuenta #' . $account['id'])) ?></h3>
-                            <strong><?= e(report_value($account['saldo'], 'money')) ?></strong><p><?= e($account['numero_cuenta'] ?: 'Número no registrado') ?></p>
-                            <dl><div><dt>Capturas</dt><dd><?= number_format((int) $account['capturas']) ?></dd></div><div><dt>Última actividad</dt><dd><?= e($account['ultima_actividad'] ?: 'Sin movimientos') ?></dd></div></dl>
-                            <div class="company-account-actions"><a href="?companies=account&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>">Estado de cuenta</a><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>&amp;account=<?= e($account['id']) ?>">Capturas</a><a href="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>">Analizar captura</a></div>
-                        </article>
-                    <?php endforeach; ?>
-                    <?php if ($companyData['accounts'] === []): ?><div class="empty">Esta empresa no tiene cuentas bancarias activas.</div><?php endif; ?>
-                </div>
-            </section>
         <?php elseif ($companyView === 'analyze'): ?>
             <section class="report-intro"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · Analizar captura bancaria</p><span class="operation-badge"><?= e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) ?></span></section>
             <section class="panel capture-analyzer-panel">
@@ -687,6 +898,10 @@ if ($companyModule) {
             </section>
         <?php endif; ?>
     <?php elseif ($movement): ?>
+        <?php if ($movementKey === 'correos-manuales'): ?>
+            <?php $manualEmailCompanies = manual_email_service()->companies(); ?>
+            <?php require __DIR__ . '/views/manual-email.php'; ?>
+        <?php else: ?>
         <?php
         $movementPage = max(1, (int) ($_GET['page'] ?? 1));
         $movementSearch = trim((string) ($_GET['q'] ?? ''));
@@ -710,14 +925,45 @@ if ($companyModule) {
                     <div><p class="eyebrow">Nuevo movimiento</p><h2>Registrar traspaso</h2></div>
                     <a class="button" href="?movement=traspasos">Volver al listado</a>
                 </div>
-                <form method="post" class="form-grid" data-confirm="¿Registrar este traspaso entre carteras?" data-confirm-title="Confirmar traspaso">
+                <form method="post" class="transfer-form" data-transfer-form data-confirm="¿Registrar este traspaso entre carteras?" data-confirm-title="Confirmar traspaso">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="transfer_create">
-                    <label class="field"><span>Cartera origen *</span><select name="origin_id" required><option value="">Seleccionar…</option><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></select></label>
-                    <label class="field"><span>Cartera destino *</span><select name="destination_id" required><option value="">Seleccionar…</option><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></select></label>
-                    <label class="field"><span>Monto *</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
-                    <label class="field wide"><span>Detalle *</span><input type="text" name="detail" maxlength="500" required></label>
-                    <div class="form-actions wide"><button class="button primary" type="submit">Registrar entrada y salida</button></div>
+                    <div class="transfer-route" aria-label="Dirección del traspaso">
+                        <label class="transfer-account-card transfer-origin-card">
+                            <span class="transfer-card-heading">
+                                <span class="transfer-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span><small>Paso 1 · Origen</small><strong>Sale dinero de</strong></span>
+                            </span>
+                            <select name="origin_id" required data-transfer-origin aria-describedby="transferOriginHelp"><option value="">Seleccionar cartera origen…</option><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></select>
+                            <small id="transferOriginHelp" class="transfer-card-help">Se registrará un retiro por el monto indicado.</small>
+                        </label>
+
+                        <div class="transfer-direction" aria-hidden="true">
+                            <span>ENVÍA</span>
+                            <svg viewBox="0 0 112 34" fill="none"><path d="M2 17h101" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="m92 5 12 12-12 12" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </div>
+
+                        <label class="transfer-account-card transfer-destination-card">
+                            <span class="transfer-card-heading">
+                                <span class="transfer-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                                <span><small>Paso 2 · Destino</small><strong>Recibe dinero en</strong></span>
+                            </span>
+                            <select name="destination_id" required data-transfer-destination aria-describedby="transferDestinationHelp"><option value="">Seleccionar cartera destino…</option><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></select>
+                            <small id="transferDestinationHelp" class="transfer-card-help">Se registrará un depósito por el mismo monto.</small>
+                        </label>
+                    </div>
+
+                    <div class="transfer-route-summary" data-transfer-route-summary role="status" aria-live="polite">
+                        <span class="transfer-summary-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16M14 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                        <div><small>Ruta del traspaso</small><strong data-transfer-summary>Selecciona la cartera que envía y la cartera que recibe.</strong></div>
+                    </div>
+
+                    <div class="transfer-details-grid">
+                        <label class="field"><span>Monto que se transfiere *</span><input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" placeholder="$0.00" required data-transfer-amount></label>
+                        <label class="field"><span>Motivo o detalle *</span><input type="text" name="detail" maxlength="500" placeholder="Ej. Ajuste entre carteras" required></label>
+                    </div>
+                    <p class="transfer-validation" data-transfer-validation role="alert" hidden></p>
+                    <div class="form-actions transfer-actions"><button class="button primary" type="submit">Confirmar traspaso</button></div>
                 </form>
             </section>
         <?php else: ?>
@@ -838,6 +1084,103 @@ if ($companyModule) {
             </div>
         </section>
         <?php endif; ?>
+        <?php endif; ?>
+    <?php elseif ($statisticsModule): ?>
+        <?php
+        $statFrom = (string) ($statisticsResult['from'] ?? ($_GET['from'] ?? date('Y-01-01')));
+        $statTo = (string) ($statisticsResult['to'] ?? ($_GET['to'] ?? date('Y-m-d')));
+        $selectedStatClient = max(0, (int) ($_GET['client'] ?? 0));
+        if ($selectedStatClient <= 0 && $statisticsClients !== []) {
+            $selectedStatClient = (int) $statisticsClients[0]['id'];
+        }
+        $formatStatisticValue = static function (mixed $value, string $format): string {
+            return match ($format) {
+                'money' => '$' . number_format((float) $value, 2),
+                'number' => number_format((float) $value, (float) $value === floor((float) $value) ? 0 : 2),
+                default => (string) $value,
+            };
+        };
+        $renderStatisticChart = static function (array $chart, string $id = ''): void {
+            $payload = json_encode([
+                'labels' => array_values($chart['labels'] ?? []),
+                'series' => array_values($chart['series'] ?? []),
+                'format' => $chart['format'] ?? 'number',
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_APOS | JSON_HEX_QUOT);
+            ?>
+            <div class="statistics-chart"<?= $id !== '' ? ' id="' . e($id) . '"' : '' ?>>
+                <div class="statistics-chart-plot" data-statistics-chart="<?= e($payload ?: '{}') ?>" role="img" aria-label="Gráfica estadística"></div>
+            </div>
+            <?php
+        };
+        ?>
+        <section class="report-intro statistics-intro">
+            <p><?= e($statistic['description']) ?></p>
+            <span class="operation-badge">Datos al <?= e(date('d/m/Y')) ?></span>
+        </section>
+        <section class="panel statistics-filter-panel">
+            <form method="get" class="statistics-filters">
+                <input type="hidden" name="statistics" value="<?= e($statisticsKey) ?>">
+                <label><span>Desde</span><input type="date" name="from" value="<?= e($statFrom) ?>" required></label>
+                <label><span>Hasta</span><input type="date" name="to" value="<?= e($statTo) ?>" required></label>
+                <?php if ($statistic['clientFilter'] ?? false): ?>
+                    <label class="statistics-client-filter"><span>Cliente</span><select name="client" required>
+                        <?php foreach ($statisticsClients as $client): ?>
+                            <option value="<?= e($client['id']) ?>" <?= $selectedStatClient === (int) $client['id'] ? 'selected' : '' ?>><?= e($client['nombre']) ?></option>
+                        <?php endforeach; ?>
+                    </select></label>
+                <?php endif; ?>
+                <button class="button primary" type="submit">Actualizar estadísticas</button>
+            </form>
+        </section>
+
+        <?php if ($statisticsError !== null): ?>
+            <section class="panel"><div class="empty"><strong>No se pudo generar la estadística.</strong><br><?= e($statisticsError) ?></div></section>
+        <?php elseif ($statisticsResult !== null): ?>
+            <?php if (!empty($statisticsResult['summary'])): ?>
+                <section class="statistics-summary">
+                    <?php foreach ($statisticsResult['summary'] as $summary): ?>
+                        <article class="stat-card"><span><?= e($summary['label']) ?></span><strong><?= e($formatStatisticValue($summary['value'], $summary['format'])) ?></strong></article>
+                    <?php endforeach; ?>
+                </section>
+            <?php endif; ?>
+
+            <?php if (($statisticsResult['type'] ?? '') === 'multi'): ?>
+                <div class="statistics-grid">
+                    <?php foreach ($statisticsResult['charts'] as $chartIndex => $chart): ?>
+                        <section class="panel statistics-chart-panel"><div class="panel-heading"><div><p class="eyebrow">Comparativo semanal</p><h2><?= e($chart['title']) ?></h2></div></div><?php $renderStatisticChart($chart, 'statisticsChart' . $chartIndex); ?></section>
+                    <?php endforeach; ?>
+                </div>
+            <?php elseif (($statisticsResult['type'] ?? '') === 'table'): ?>
+                <div class="statistics-grid statistics-grid-two">
+                    <?php foreach ($statisticsResult['charts'] as $chartIndex => $chart): ?>
+                        <section class="panel statistics-chart-panel"><div class="panel-heading"><h2><?= e($chart['title']) ?></h2></div><?php $renderStatisticChart($chart, 'statisticsChart' . $chartIndex); ?></section>
+                    <?php endforeach; ?>
+                </div>
+                <section class="panel report-panel statistics-table-panel">
+                    <div class="panel-heading"><div><p class="eyebrow">Detalle agrupado</p><h2><?= number_format($statisticsResult['total']) ?> cuentas</h2><p class="panel-copy">100 resultados por página</p></div></div>
+                    <div class="table-wrap"><table class="report-table"><thead><tr>
+                        <?php foreach ($statisticsResult['columns'] as $label): ?><th><?= e($label) ?></th><?php endforeach; ?>
+                    </tr></thead><tbody>
+                        <?php foreach ($statisticsResult['rows'] as $row): ?><tr>
+                            <?php foreach ($statisticsResult['columns'] as $column => $label): ?><td><?= e($formatStatisticValue($row[$column] ?? '', $statisticsResult['format'][$column] ?? 'text')) ?></td><?php endforeach; ?>
+                        </tr><?php endforeach; ?>
+                        <?php if ($statisticsResult['rows'] === []): ?><tr><td colspan="<?= count($statisticsResult['columns']) ?>" class="empty">No hay cuentas STP en el periodo seleccionado.</td></tr><?php endif; ?>
+                    </tbody></table></div>
+                    <div class="pagination">
+                        <span>Página <?= e($statisticsResult['page']) ?> de <?= e(max(1, (int) ceil($statisticsResult['total'] / 100))) ?></span>
+                        <div>
+                            <?php if ($statisticsResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['statistics' => $statisticsKey, 'from' => $statFrom, 'to' => $statTo, 'page' => $statisticsResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
+                            <?php if ($statisticsResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['statistics' => $statisticsKey, 'from' => $statFrom, 'to' => $statTo, 'page' => $statisticsResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
+                        </div>
+                    </div>
+                </section>
+            <?php else: ?>
+                <section class="panel statistics-chart-panel statistics-chart-main">
+                    <div class="panel-heading"><div><p class="eyebrow">Periodo <?= e($statFrom) ?> a <?= e($statTo) ?></p><h2><?= e($statistic['label']) ?></h2></div></div>
+                    <?php $renderStatisticChart($statisticsResult, 'statisticsChartMain'); ?>
+                </section>
+            <?php endif; ?>
+        <?php endif; ?>
     <?php elseif ($report): ?>
         <?php
         $reportPage = max(1, (int) ($_GET['page'] ?? 1));
@@ -896,11 +1239,28 @@ if ($companyModule) {
         $dashboardOverview = dashboard_overview(current_operator_id());
         $dashboardWallets = dashboard_repository()->wallets($dashboardSearch, $dashboardPage, current_operator_id());
         $dashboardCalculators = dashboard_repository()->calculatorData(current_operator_id());
+        $walletRows = $dashboardWallets['rows'];
+        $walletCounts = [
+            'all' => count($walletRows),
+            'available' => count(array_filter($walletRows, static fn (array $wallet): bool => (float) $wallet['saldo'] >= -0.005)),
+            'movements' => count(array_filter($walletRows, static fn (array $wallet): bool => (int) $wallet['movimientos_pend'] > 0)),
+            'balance' => count(array_filter($walletRows, static fn (array $wallet): bool => abs((float) $wallet['saldo']) > 0.005)),
+        ];
         ?>
         <section class="dashboard-summary">
-            <article><span>Saldos internos</span><strong><?= e(report_value($dashboardOverview['internalBalance'], 'money')) ?></strong><small>Cartera interna #13</small></article>
-            <article><span>Movimientos pendientes</span><strong><?= e(report_value($dashboardOverview['pendingBalance'], 'money')) ?></strong><small><?= number_format($dashboardOverview['pendingCount']) ?> movimientos</small></article>
-            <article class="<?= abs($dashboardOverview['balanceDifference']) > 0.01 ? 'is-warning' : '' ?>"><span>Diferencia de saldos</span><strong><?= e(report_value($dashboardOverview['balanceDifference'], 'money')) ?></strong><small>Estados de cuenta contra pagos</small></article>
+            <article class="summary-card summary-card-primary">
+                <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 11v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg></span>
+                <div><span>Saldos internos</span><strong><?= e(report_value($dashboardOverview['internalBalance'], 'money')) ?></strong><small>Cartera interna #13</small></div>
+            </article>
+            <article class="summary-card">
+                <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span>
+                <div><span>Movimientos pendientes</span><strong><?= e(report_value($dashboardOverview['pendingBalance'], 'money')) ?></strong><small><?= number_format($dashboardOverview['pendingCount']) ?> movimientos</small></div>
+            </article>
+            <article class="summary-card <?= abs($dashboardOverview['balanceDifference']) > 0.01 ? 'is-warning' : '' ?>">
+                <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M6 6h12M8 6 4 14h8L8 6Zm8 0-4 8h8l-4-8ZM4 14c.7 2 2 3 4 3s3.3-1 4-3m0 0c.7 2 2 3 4 3s3.3-1 4-3"/></svg></span>
+                <div><span>Diferencia de saldos</span><strong><?= e(report_value($dashboardOverview['balanceDifference'], 'money')) ?></strong><small>Estados de cuenta contra pagos</small></div>
+                <?php if (abs($dashboardOverview['balanceDifference']) <= 0.01): ?><span class="summary-status" aria-label="Saldos conciliados"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7"/></svg></span><?php endif; ?>
+            </article>
         </section>
 
         <div class="glass-modal-backdrop dashboard-calculator-modal" data-calculator-modal="balance" hidden>
@@ -954,25 +1314,40 @@ if ($companyModule) {
         </div>
 
         <section class="panel wallet-panel">
-            <div class="panel-heading list-tools">
+            <div class="panel-heading wallet-heading">
+                <span class="wallet-heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4V7Zm4 0V4h8v3M8 12h8"/></svg></span>
                 <div><p class="eyebrow">Panel anterior renovado</p><h2>Carteras de clientes</h2><p class="panel-copy">Saldos, movimientos, cheques y facturas pendientes con la información calculada por el sistema.</p></div>
-                <form method="get" class="search"><input type="search" name="q" value="<?= e($dashboardSearch) ?>" placeholder="Buscar cartera o clave…"><button class="button">Buscar</button></form>
+            </div>
+            <div class="wallet-toolbar">
+                <div class="wallet-filters" role="group" aria-label="Filtrar carteras de esta página">
+                    <button type="button" class="wallet-filter is-active" data-wallet-filter="all" aria-pressed="true">Todas <span><?= $walletCounts['all'] ?></span></button>
+                    <button type="button" class="wallet-filter" data-wallet-filter="available" aria-pressed="false">Disponibles <span><?= $walletCounts['available'] ?></span></button>
+                    <button type="button" class="wallet-filter" data-wallet-filter="movements" aria-pressed="false">Con movimientos <span><?= $walletCounts['movements'] ?></span></button>
+                    <button type="button" class="wallet-filter" data-wallet-filter="balance" aria-pressed="false">Con saldo <span><?= $walletCounts['balance'] ?></span></button>
+                </div>
+                <form method="get" class="search wallet-search" role="search">
+                    <label class="sr-only" for="wallet-search">Buscar cartera o clave</label>
+                    <span class="search-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></span>
+                    <input id="wallet-search" type="search" name="q" value="<?= e($dashboardSearch) ?>" placeholder="Buscar cartera o clave…" autocomplete="off">
+                    <button class="button">Buscar</button>
+                </form>
             </div>
             <div class="wallet-grid">
-                <?php foreach ($dashboardWallets['rows'] as $wallet): ?>
+                <?php foreach ($walletRows as $wallet): ?>
                     <?php $walletColor = preg_match('/^[0-9a-fA-F]{6}$/', ltrim((string) $wallet['color'], '#')) ? '#' . ltrim((string) $wallet['color'], '#') : 'var(--color-primary)'; ?>
-                    <article class="wallet-card <?= (float) $wallet['saldo'] < -0.005 ? 'is-negative' : '' ?>" style="--wallet-accent: <?= e($walletColor) ?>">
-                        <header><div class="wallet-identity"><span class="wallet-avatar"><?= e(mb_strtoupper(mb_substr((string) $wallet['nombre'], 0, 1))) ?></span><div><h3><?= e($wallet['nombre']) ?></h3><small><?= e($wallet['clave_corta'] ?: 'Sin clave corta') ?> · #<?= e($wallet['id']) ?></small></div></div><span class="wallet-state"><?= (float) $wallet['saldo'] < -0.005 ? 'Saldo negativo' : 'Disponible' ?></span></header>
+                    <article class="wallet-card <?= (float) $wallet['saldo'] < -0.005 ? 'is-negative' : '' ?>" style="--wallet-accent: <?= e($walletColor) ?>" data-wallet-available="<?= (float) $wallet['saldo'] >= -0.005 ? 'true' : 'false' ?>" data-wallet-movements="<?= (int) $wallet['movimientos_pend'] > 0 ? 'true' : 'false' ?>" data-wallet-balance="<?= abs((float) $wallet['saldo']) > 0.005 ? 'true' : 'false' ?>">
+                        <header><div class="wallet-identity"><span class="wallet-avatar"><?= e(mb_strtoupper(mb_substr((string) $wallet['nombre'], 0, 1))) ?></span><div><h3><?= e($wallet['nombre']) ?></h3><small><?= e($wallet['clave_corta'] ?: 'Sin clave corta') ?> · #<?= e($wallet['id']) ?></small></div></div><span class="wallet-state"><i aria-hidden="true"></i><?= (float) $wallet['saldo'] < -0.005 ? 'Saldo negativo' : 'Disponible' ?></span></header>
                         <div class="wallet-balance"><span>Saldo actual</span><strong><?= e(report_value($wallet['saldo'], 'money')) ?></strong></div>
                         <dl>
-                            <div><dt>Mov. pendientes</dt><dd><?= number_format((int) $wallet['movimientos_pend']) ?> · <?= e(report_value($wallet['dinero_sin_fact'], 'money')) ?></dd></div>
-                            <div><dt>Cheques pendientes</dt><dd><?= number_format((int) $wallet['cheques_pend']) ?> · <?= e(report_value($wallet['cheques_pend_dinero'], 'money')) ?></dd></div>
-                            <div><dt>Facturas sin pago</dt><dd><?= number_format((int) $wallet['facturas_sin_pago']) ?></dd></div>
+                            <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg>Mov. pendientes</dt><dd><?= number_format((int) $wallet['movimientos_pend']) ?> · <?= e(report_value($wallet['dinero_sin_fact'], 'money')) ?></dd></div>
+                            <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6"/></svg>Cheques pendientes</dt><dd><?= number_format((int) $wallet['cheques_pend']) ?> · <?= e(report_value($wallet['cheques_pend_dinero'], 'money')) ?></dd></div>
+                            <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h4"/></svg>Facturas sin pago</dt><dd><?= number_format((int) $wallet['facturas_sin_pago']) ?></dd></div>
                         </dl>
-                        <footer><small>Actualizado <?= e($wallet['ultima_act'] ?: 'sin fecha') ?></small><a href="?movement=cartera&client=<?= e($wallet['id']) ?>">Ver movimientos →</a></footer>
+                        <footer><small><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5V5Zm3-2v4m8-4v4M5 9h14"/></svg>Actualizado <?= e($wallet['ultima_act'] ?: 'sin fecha') ?></small><a href="?movement=cartera&amp;client=<?= e($wallet['id']) ?>">Ver movimientos <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg></a></footer>
                     </article>
                 <?php endforeach; ?>
                 <?php if ($dashboardWallets['rows'] === []): ?><p class="empty wallet-empty">No se encontraron carteras.</p><?php endif; ?>
+                <p class="empty wallet-filter-empty" hidden>No hay carteras que coincidan con este filtro en la página actual.</p>
             </div>
             <div class="pagination"><span>Página <?= $dashboardWallets['page'] ?> de <?= $dashboardWallets['lastPage'] ?> · <?= number_format($dashboardWallets['total']) ?> carteras</span><div><?php if ($dashboardWallets['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['q'=>$dashboardSearch,'page'=>$dashboardWallets['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($dashboardWallets['page'] < $dashboardWallets['lastPage']): ?><a class="button" href="?<?= e(http_build_query(['q'=>$dashboardSearch,'page'=>$dashboardWallets['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
         </section>
@@ -1118,8 +1493,10 @@ if ($companyModule) {
     const hideThirdPartyLoader = () => {
         window.clearTimeout(thirdPartyLoaderTimer);
         thirdPartyLoader.classList.remove('is-visible');
-        thirdPartyLoader.hidden = true;
         document.body.classList.remove('has-third-party-loader');
+        window.setTimeout(() => {
+            if (!thirdPartyLoader.classList.contains('is-visible')) thirdPartyLoader.hidden = true;
+        }, 220);
     };
     const showThirdPartyLoader = (title, message, autoHide = 0) => {
         window.clearTimeout(thirdPartyLoaderTimer);
@@ -1132,7 +1509,7 @@ if ($companyModule) {
             thirdPartyLoaderTimer = window.setTimeout(() => {
                 thirdPartyLoader.classList.remove('is-visible');
                 document.body.classList.remove('has-third-party-loader');
-                window.setTimeout(() => { thirdPartyLoader.hidden = true; }, 180);
+                window.setTimeout(() => { thirdPartyLoader.hidden = true; }, 220);
             }, autoHide);
         }
     };
@@ -1162,14 +1539,18 @@ if ($companyModule) {
         });
     });
 
+    const dismissToast = (toast) => {
+        if (!(toast instanceof HTMLElement) || toast.classList.contains('is-leaving')) return;
+        toast.classList.add('is-leaving');
+        window.setTimeout(() => toast.remove(), 240);
+    };
     document.querySelectorAll('.toast-close').forEach((button) => {
-        button.addEventListener('click', () => button.closest('.glass-toast')?.remove());
+        button.addEventListener('click', () => dismissToast(button.closest('.glass-toast')));
     });
 
     document.querySelectorAll('[data-auto-dismiss]').forEach((toast) => {
         window.setTimeout(() => {
-            toast.classList.add('is-leaving');
-            window.setTimeout(() => toast.remove(), 240);
+            dismissToast(toast);
         }, 5200);
     });
 
@@ -1272,7 +1653,7 @@ if ($companyModule) {
     let pendingComplementStamp = null;
     const closeStampModal = () => {
         stampModal.classList.remove('is-visible');
-        window.setTimeout(() => { stampModal.hidden = true; }, 160);
+        window.setTimeout(() => { stampModal.hidden = true; }, 220);
         pendingComplementStamp = null;
     };
     document.querySelectorAll('[data-complement-stamp-trigger]').forEach((button) => {
@@ -1313,142 +1694,6 @@ if ($companyModule) {
             select.appendChild(movementClientOptions.content.cloneNode(true));
         });
     }
-
-    const normalizeSearchText = (value) => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    let openSearchSelect = null;
-    const closeSearchSelect = () => {
-        if (!openSearchSelect) return;
-        openSearchSelect.wrapper.classList.remove('is-open');
-        openSearchSelect.button.setAttribute('aria-expanded', 'false');
-        openSearchSelect.menu.remove();
-        openSearchSelect = null;
-    };
-
-    document.querySelectorAll('select[data-client-picker]').forEach((select, selectIndex) => {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'search-select';
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'search-select-trigger';
-        button.setAttribute('aria-haspopup', 'listbox');
-        button.setAttribute('aria-expanded', 'false');
-        button.setAttribute('aria-label', select.getAttribute('aria-label') || 'Seleccionar cartera');
-        const buttonLabel = document.createElement('span');
-        const chevron = document.createElement('span');
-        chevron.className = 'search-select-chevron';
-        chevron.textContent = '⌄';
-        button.append(buttonLabel, chevron);
-        select.classList.add('search-select-native');
-        select.insertAdjacentElement('afterend', wrapper);
-        wrapper.append(select, button);
-
-        const options = Array.from(select.options).map((option) => ({
-            value: option.value,
-            label: option.textContent.trim(),
-            disabled: option.disabled,
-            search: normalizeSearchText(option.textContent),
-        }));
-        const refreshLabel = () => {
-            const selected = select.options[select.selectedIndex];
-            buttonLabel.textContent = selected?.textContent.trim() || 'Seleccionar cartera…';
-            button.classList.toggle('has-value', Boolean(select.value));
-        };
-        refreshLabel();
-        select.addEventListener('change', () => {
-            button.classList.remove('is-invalid');
-            refreshLabel();
-        });
-        select.addEventListener('invalid', (event) => {
-            event.preventDefault();
-            button.classList.add('is-invalid');
-            button.focus();
-        });
-
-        button.addEventListener('click', () => {
-            if (openSearchSelect?.select === select) {
-                closeSearchSelect();
-                return;
-            }
-            closeSearchSelect();
-            const menu = document.createElement('div');
-            menu.className = 'search-select-menu';
-            menu.setAttribute('role', 'dialog');
-            menu.setAttribute('aria-label', 'Buscar y seleccionar cartera');
-            const search = document.createElement('input');
-            search.type = 'search';
-            search.className = 'search-select-input';
-            search.placeholder = 'Buscar cartera por nombre o ID…';
-            search.setAttribute('aria-label', 'Buscar cartera');
-            const list = document.createElement('div');
-            list.className = 'search-select-options';
-            list.setAttribute('role', 'listbox');
-            const status = document.createElement('p');
-            status.className = 'search-select-status';
-
-            const renderOptions = () => {
-                const term = normalizeSearchText(search.value.trim());
-                const filtered = options.filter((option) => option.value !== '' && !option.disabled && option.search.includes(term));
-                list.replaceChildren();
-                filtered.slice(0, 150).forEach((option) => {
-                    const item = document.createElement('button');
-                    item.type = 'button';
-                    item.className = 'search-select-option';
-                    item.setAttribute('role', 'option');
-                    item.setAttribute('aria-selected', String(select.value === option.value));
-                    item.textContent = option.label;
-                    item.addEventListener('click', () => {
-                        select.value = option.value;
-                        select.dispatchEvent(new Event('change', {bubbles: true}));
-                        refreshLabel();
-                        closeSearchSelect();
-                        button.focus();
-                    });
-                    list.appendChild(item);
-                });
-                status.textContent = filtered.length === 0
-                    ? 'No se encontraron carteras.'
-                    : `${filtered.length} cartera${filtered.length === 1 ? '' : 's'} encontrada${filtered.length === 1 ? '' : 's'}${filtered.length > 150 ? ' · mostrando las primeras 150' : ''}`;
-            };
-            search.addEventListener('input', renderOptions);
-            search.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') { closeSearchSelect(); button.focus(); }
-                if (event.key === 'Enter') { event.preventDefault(); list.querySelector('.search-select-option')?.click(); }
-                if (event.key === 'ArrowDown') { event.preventDefault(); list.querySelector('.search-select-option')?.focus(); }
-            });
-            list.addEventListener('keydown', (event) => {
-                const items = Array.from(list.querySelectorAll('.search-select-option'));
-                const current = items.indexOf(document.activeElement);
-                if (event.key === 'ArrowDown') { event.preventDefault(); items[Math.min(items.length - 1, current + 1)]?.focus(); }
-                if (event.key === 'ArrowUp') { event.preventDefault(); current <= 0 ? search.focus() : items[current - 1]?.focus(); }
-                if (event.key === 'Escape') { closeSearchSelect(); button.focus(); }
-            });
-            menu.append(search, list, status);
-            document.body.appendChild(menu);
-            const rect = button.getBoundingClientRect();
-            const menuWidth = Math.max(290, Math.min(390, rect.width));
-            const spaceBelow = window.innerHeight - rect.bottom;
-            menu.style.width = `${menuWidth}px`;
-            menu.style.left = `${Math.max(10, Math.min(window.innerWidth - menuWidth - 10, rect.left))}px`;
-            if (spaceBelow >= 330 || rect.top < spaceBelow) {
-                menu.style.top = `${rect.bottom + 6}px`;
-            } else {
-                menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
-            }
-            wrapper.classList.add('is-open');
-            button.setAttribute('aria-expanded', 'true');
-            openSearchSelect = {select, wrapper, button, menu, id: selectIndex};
-            renderOptions();
-            search.focus();
-        });
-    });
-
-    document.addEventListener('pointerdown', (event) => {
-        if (openSearchSelect && !openSearchSelect.menu.contains(event.target) && !openSearchSelect.wrapper.contains(event.target)) closeSearchSelect();
-    });
-    window.addEventListener('resize', closeSearchSelect);
-    document.addEventListener('scroll', (event) => {
-        if (openSearchSelect && !openSearchSelect.menu.contains(event.target)) closeSearchSelect();
-    }, true);
 
     const recalculateInvoice = () => {
         if (!invoiceLines) return;
@@ -1736,10 +1981,15 @@ if ($companyModule) {
         close.className = 'toast-close';
         close.setAttribute('aria-label', 'Cerrar notificación');
         close.textContent = '×';
-        close.addEventListener('click', () => toast.remove());
+        const dismiss = () => {
+            if (toast.classList.contains('is-leaving')) return;
+            toast.classList.add('is-leaving');
+            window.setTimeout(() => toast.remove(), 240);
+        };
+        close.addEventListener('click', dismiss);
         toast.append(icon, copy, close);
         stack.appendChild(toast);
-        window.setTimeout(() => toast.remove(), 6500);
+        window.setTimeout(dismiss, 6500);
     };
 
     const appendCalculatorCell = (row, text, tag = 'td', className = '') => {
@@ -1758,7 +2008,7 @@ if ($companyModule) {
         document.body.classList.remove('has-calculator-modal');
         window.setTimeout(() => {
             if (!modal.classList.contains('is-visible')) modal.hidden = true;
-        }, 180);
+        }, 220);
     };
 
     document.querySelectorAll('[data-calculator-open]').forEach((button) => {
@@ -1945,7 +2195,10 @@ if ($companyModule) {
             appendCaptureSummary('Sin clave corta', movementCount - associated, 'Requieren revisión');
             captureMessage.textContent = `${associated} de ${movementCount} movimientos tienen una clave corta asociada en la tabla claves_cortas.`;
             captureResult.hidden = false;
-            captureResult.scrollIntoView({behavior: 'smooth', block: 'start'});
+            captureResult.scrollIntoView({
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                block: 'start'
+            });
         } catch (error) {
             showToast(error instanceof Error ? error.message : 'No fue posible analizar la captura.');
         } finally {
@@ -1970,7 +2223,7 @@ if ($companyModule) {
 
     const closeModal = () => {
         backdrop.classList.remove('is-visible');
-        window.setTimeout(() => { backdrop.hidden = true; }, 160);
+        window.setTimeout(() => { backdrop.hidden = true; }, 220);
     };
 
     const clearDetails = () => {
@@ -2196,5 +2449,55 @@ if ($companyModule) {
     });
 })();
 </script>
+<script nonce="<?= e(csp_nonce()) ?>">
+(() => {
+    const sidebar = document.getElementById('s14-sidebar');
+    const menuToggle = document.querySelector('.mobile-menu-toggle');
+    if (sidebar && menuToggle) {
+        const setMenuState = (open) => {
+            sidebar.classList.toggle('is-open', open);
+            menuToggle.setAttribute('aria-expanded', String(open));
+            menuToggle.setAttribute('aria-label', open ? 'Cerrar menú principal' : 'Abrir menú principal');
+            document.body.classList.toggle('has-mobile-menu', open);
+        };
+        menuToggle.addEventListener('click', () => setMenuState(!sidebar.classList.contains('is-open')));
+        sidebar.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => setMenuState(false)));
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 850) setMenuState(false);
+        }, {passive: true});
+    }
+
+    const filterButtons = Array.from(document.querySelectorAll('[data-wallet-filter]'));
+    const walletCards = Array.from(document.querySelectorAll('.wallet-card[data-wallet-available]'));
+    const filterEmpty = document.querySelector('.wallet-filter-empty');
+    if (filterButtons.length && walletCards.length) {
+        filterButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                const filter = button.dataset.walletFilter;
+                let visibleCount = 0;
+                filterButtons.forEach((item) => {
+                    const active = item === button;
+                    item.classList.toggle('is-active', active);
+                    item.setAttribute('aria-pressed', String(active));
+                });
+                walletCards.forEach((card) => {
+                    const visible = filter === 'all' || card.dataset[`wallet${filter[0].toUpperCase()}${filter.slice(1)}`] === 'true';
+                    card.hidden = !visible;
+                    if (visible) visibleCount += 1;
+                });
+                if (filterEmpty) filterEmpty.hidden = visibleCount !== 0;
+            });
+        });
+    }
+})();
+</script>
+<script src="assets/ui-motion.js"></script>
+<script src="assets/global-search.js"></script>
+<script src="assets/company-directory.js"></script>
+<script src="assets/searchable-select.js"></script>
+<script src="assets/manual-email.js"></script>
+<script src="assets/transfer.js"></script>
+<script src="<?= e(legacy_asset_url('assets/js/apexcharts.js')) ?>"></script>
+<script src="assets/statistics.js"></script>
 </body>
 </html>

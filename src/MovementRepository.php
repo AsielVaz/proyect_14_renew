@@ -18,7 +18,9 @@ final class MovementRepository
     public function page(string $view, array $definition, string $search, int $page, int $perPage = 25, ?int $clientId = null): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
-        [$source, $sort] = $this->source($view, $filterByClient);
+        // Las vistas sin filtro conservan su límite rápido; una búsqueda explícita
+        // debe consultar el histórico completo para que un resultado global sea localizable.
+        [$source, $sort] = $this->source($view, $filterByClient || $search !== '');
         $columns = array_keys($definition['columns']);
         $searchableColumns = $columns;
         foreach ($definition['columns'] as $column) {

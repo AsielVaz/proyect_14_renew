@@ -22,10 +22,12 @@ Para producción, usar HTTPS, cambiar `APP_URL`, generar un `APP_KEY` aleatorio 
 - Catálogos con listado, búsqueda, paginación, alta, edición y eliminación.
 - Reportes operativos con filtros, paginación y exportación CSV.
 - Movimientos sin asignar, asignados, reasignación, traspasos y consultas STP.
+- Correos manuales dentro de Movimientos para operadores autorizados, con plantillas por empresa, revisión obligatoria y adjuntos PDF.
 - Facturación con consulta, búsqueda, alta transaccional, catálogos fiscales y conceptos dinámicos.
 - Complementos de pago con consulta, detalle, captura de múltiples facturas PPD, cálculo de saldos y guardado transaccional.
 - Panel de empresas con directorio, cuentas activas, saldos, capturas, contenido bancario y movimientos por empresa o cuenta.
 - Panel principal de carteras con saldos, movimientos, cheques y facturas pendientes, usando la misma información calculada del sistema anterior.
+- Búsqueda general desde cualquier módulo (`Ctrl + K`) sobre pagos, facturas y movimientos de capturas de estados de cuenta, con acceso directo al resultado.
 - Listados con paginación rápida sin ejecutar conteos globales en cada solicitud, pensados para PHP y MariaDB alojados en servicios separados.
 - PDO con parámetros preparados, escape HTML, protección CSRF y encabezados de seguridad del navegador.
 - No modifica el esquema de la base ni copia información.
@@ -45,6 +47,8 @@ El HTML carga primero `theme.css` y después `app.css`. Los componentes usan var
 La correspondencia entre cada reporte nuevo, su pantalla anterior y sus métodos de backend está documentada en `REPORTS.md`.
 
 Las reglas transaccionales de asignación, comisiones, desasignación y traspasos están documentadas en `MOVEMENTS.md`. El operador de movimientos se obtiene del usuario autenticado mediante `current_operator_id()`.
+
+La configuración de correos manuales también se detalla en `MOVEMENTS.md`. Sus secretos deben definirse en `.env`; nunca se almacenan en el código. Las 16 plantillas de identidad están integradas en `src/manual-email-templates.php`.
 
 El flujo, los catálogos y las reglas de persistencia del módulo de facturación están documentados en `INVOICES.md`.
 

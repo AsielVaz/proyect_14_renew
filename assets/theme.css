@@ -1,75 +1,101 @@
 /**
  * SISTEMA 14 — TOKENS DE DISEÑO
- * --------------------------------------------------------------------------
- * Este es el archivo principal para cambiar la identidad visual.
- * Modificar primero estas variables; no es necesario editar PHP.
- * Los componentes y su distribución se encuentran en app.css.
+ * La identidad visual vive aquí; app.css consume únicamente tokens semánticos.
  */
 
 :root {
-    /* Tipografía */
-    --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color-scheme: light;
+
+    /* Tipografía de sistema: rápida, legible y sin dependencias externas. */
+    --font-sans: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     --font-size-base: 15px;
     --line-height-base: 1.5;
 
-    /* Marca */
-    --color-primary: #e86f21;
-    --color-primary-dark: #c9530d;
-    --color-primary-soft: #fff2e8;
-    --color-primary-focus: #ffeadb;
-    --color-primary-border: #edc7aa;
+    /* Marca S14 */
+    --s14-primary: #f56600;
+    --s14-primary-hover: #dc5200;
+    --s14-primary-deep: #c74700;
+    --s14-primary-soft: #fff1e5;
+    --s14-background: #f7f4f1;
+    --s14-surface: #ffffff;
+    --s14-sidebar: #211e1e;
+    --s14-text: #19191f;
+    --s14-text-muted: #6e6871;
+    --s14-border: #e8dfd9;
+    --s14-success: #167a38;
+    --s14-danger: #d83a43;
 
-    /* Texto */
-    --color-text: #24211f;
-    --color-text-secondary: #5f5853;
-    --color-muted: #7c746f;
-    --color-label: #a06642;
-    --color-faint: #aaa19a;
-
-    /* Superficies */
-    --color-page: #f8f6f3;
-    --color-surface: #ffffff;
+    /* Alias semánticos conservados para todos los módulos existentes. */
+    --color-primary: var(--s14-primary);
+    --color-primary-dark: var(--s14-primary-hover);
+    --color-primary-soft: var(--s14-primary-soft);
+    --color-primary-focus: rgba(245, 102, 0, 0.17);
+    --color-primary-border: #f4a067;
+    --color-text: var(--s14-text);
+    --color-text-secondary: #4f4a50;
+    --color-muted: var(--s14-text-muted);
+    --color-label: #b4400b;
+    --color-faint: #a69da1;
+    --color-page: var(--s14-background);
+    --color-surface: var(--s14-surface);
     --color-surface-subtle: #fcfaf8;
-    --color-surface-hover: #fffaf6;
-    --color-navigation-hover: #fbf7f3;
-
-    /* Bordes y controles */
-    --color-border: #e9e2dc;
-    --color-border-control: #dcd3cc;
-    --color-border-hover: #e2b696;
-    --color-navigation-line: #ead9cc;
-    --color-navigation-dot: #d4c6bc;
-
-    /* Estados */
-    --color-success: #287143;
-    --color-success-dot: #42a566;
-    --color-success-bg: #edf8f0;
-    --color-danger: #bf4242;
-    --color-danger-dark: #a8323b;
-    --color-danger-bg: #fff0f0;
+    --color-surface-hover: #fff8f2;
+    --color-navigation-hover: rgba(255, 255, 255, 0.065);
+    --color-border: var(--s14-border);
+    --color-border-control: #dcd2cc;
+    --color-border-hover: #e7a476;
+    --color-navigation-line: rgba(255, 255, 255, 0.12);
+    --color-navigation-dot: rgba(255, 255, 255, 0.38);
+    --color-success: var(--s14-success);
+    --color-success-dot: #16863b;
+    --color-success-bg: #e9f7ed;
+    --color-danger: var(--s14-danger);
+    --color-danger-dark: #b92b34;
+    --color-danger-bg: #fff0f1;
     --color-warning: #9a4b13;
     --color-warning-bg: #fff5eb;
 
-    /* Superficies translúcidas para alertas y confirmaciones */
-    --glass-background: rgba(255, 255, 255, 0.74);
-    --glass-background-strong: rgba(255, 255, 255, 0.9);
-    --glass-border: rgba(255, 255, 255, 0.82);
-    --glass-overlay: rgba(50, 38, 30, 0.22);
+    /* Superficies translúcidas para alertas y confirmaciones. */
+    --glass-background: rgba(255, 255, 255, 0.78);
+    --glass-background-strong: rgba(255, 255, 255, 0.94);
+    --glass-border: rgba(255, 255, 255, 0.84);
+    --glass-overlay: rgba(36, 29, 27, 0.4);
     --glass-blur: 18px;
-    --glass-shadow: 0 22px 65px rgba(67, 43, 28, 0.2);
+    --glass-shadow: 0 24px 70px rgba(55, 37, 28, 0.22);
 
-    /* Forma y profundidad */
-    --radius-control: 9px;
-    --radius-navigation: 10px;
-    --radius-card: 14px;
-    --radius-panel: 16px;
-    --shadow-panel: 0 12px 34px rgba(83, 57, 40, 0.08);
-    --shadow-card: 0 5px 20px rgba(83, 57, 40, 0.04);
-    --shadow-primary: 0 5px 14px rgba(232, 111, 33, 0.18);
-    --shadow-brand: 0 7px 18px rgba(232, 111, 33, 0.23);
+    /* Forma, profundidad y ritmo. */
+    --s14-radius-sm: 10px;
+    --s14-radius-md: 14px;
+    --s14-radius-lg: 20px;
+    --s14-shadow-sm: 0 6px 18px rgba(57, 37, 26, 0.055);
+    --s14-shadow-md: 0 16px 42px rgba(57, 37, 26, 0.09);
+    --s14-space-1: 4px;
+    --s14-space-2: 8px;
+    --s14-space-3: 12px;
+    --s14-space-4: 16px;
+    --s14-space-5: 24px;
+    --s14-space-6: 32px;
+    --radius-control: var(--s14-radius-sm);
+    --radius-navigation: 11px;
+    --radius-card: var(--s14-radius-md);
+    --radius-panel: var(--s14-radius-lg);
+    --shadow-panel: var(--s14-shadow-md);
+    --shadow-card: var(--s14-shadow-sm);
+    --shadow-primary: 0 7px 18px rgba(245, 102, 0, 0.22);
+    --shadow-brand: 0 9px 22px rgba(245, 102, 0, 0.28);
 
-    /* Distribución principal */
-    --sidebar-width: 270px;
-    --page-padding: 36px;
-    --transition-fast: 150ms ease;
+    /* Distribución principal. */
+    --sidebar-width: 286px;
+    --page-padding: clamp(24px, 2.5vw, 42px);
+    --motion-duration-instant: 100ms;
+    --motion-duration-fast: 160ms;
+    --motion-duration-base: 220ms;
+    --motion-duration-slow: 320ms;
+    --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+    --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --motion-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --motion-distance-sm: 6px;
+    --motion-distance-md: 12px;
+    --transition-fast: var(--motion-duration-fast) var(--motion-ease-standard);
+    --transition-medium: var(--motion-duration-base) var(--motion-ease-standard);
 }
