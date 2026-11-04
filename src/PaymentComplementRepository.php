@@ -138,6 +138,60 @@ final class PaymentComplementRepository
         ];
     }
 
+    public function pendingInvoicesForPayment(int $paymentId, int $receiverId): array
+    {
+        if ($receiverId <= 0) {
+            throw new RuntimeException('Selecciona una razón social para consultar sus facturas pendientes.');
+        }
+
+        $payment = $this->paymentPrefill($paymentId);
+        $receiver = $this->pdo->prepare('SELECT id FROM claves_cortas WHERE id = :id AND id_cliente = :client');
+        $receiver->execute(['id' => $receiverId, 'client' => $payment['client_id']]);
+        if (!$receiver->fetchColumn()) {
+            throw new RuntimeException('La razón social seleccionada no pertenece al cliente del movimiento.');
+        }
+
+        $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
+                DATE(f.fecha_timbrado) AS fecha_timbrado,
+                COALESCE(rel.pagado, 0) AS pagado,
+                GREATEST(ROUND(f.total_iva - COALESCE(rel.pagado, 0), 2), 0) AS saldo,
+                COALESCE(rel.ultima_parcialidad, 0) + 1 AS siguiente_parcialidad
+            FROM facturas f
+            LEFT JOIN (
+                SELECT id_factura, SUM(monto) AS pagado, MAX(num_pago) AS ultima_parcialidad
+                FROM facturar_rel_complementos
+                GROUP BY id_factura
+            ) rel ON rel.id_factura = f.id
+            WHERE f.nombre = :client
+              AND f.razon = :company
+              AND f.id_clave_corta = :receiver
+              AND f.metodo_pago = 2
+              AND COALESCE(f.uuid, '') <> ''
+              AND COALESCE(f.status, '') <> 'Cancelado'
+              AND f.total_iva - COALESCE(rel.pagado, 0) > 0.005
+            ORDER BY f.fecha_timbrado ASC, f.id ASC
+            LIMIT 100");
+        $query->execute([
+            'client' => $payment['client_id'],
+            'company' => $payment['company_id'],
+            'receiver' => $receiverId,
+        ]);
+        $invoices = $query->fetchAll();
+        foreach ($invoices as &$invoice) {
+            $invoice['id'] = (int) $invoice['id'];
+            $invoice['total_iva'] = round((float) $invoice['total_iva'], 2);
+            $invoice['pagado'] = round((float) $invoice['pagado'], 2);
+            $invoice['saldo'] = round((float) $invoice['saldo'], 2);
+            $invoice['siguiente_parcialidad'] = (int) $invoice['siguiente_parcialidad'];
+        }
+        unset($invoice);
+
+        return [
+            'invoices' => $invoices,
+            'maximum' => (float) $payment['maximum'],
+        ];
+    }
+
     private function findInvoice(string $condition, string|int $value): ?array
     {
         $query = $this->pdo->prepare('SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,

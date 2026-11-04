@@ -1250,6 +1250,167 @@ tbody tr:hover {
     color: var(--color-danger);
 }
 
+.complement-pending-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.complement-pending-trigger svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.pending-invoices-panel {
+    margin: 0 22px 20px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--color-primary-soft) 52%, var(--color-surface));
+    box-shadow: 0 12px 30px rgba(58, 37, 24, 0.07);
+}
+
+.pending-invoices-panel[hidden] {
+    display: none;
+}
+
+.pending-invoices-panel:focus {
+    outline: 3px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+    outline-offset: 2px;
+}
+
+.pending-invoices-panel > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px 12px;
+}
+
+.pending-invoices-panel h3,
+.pending-invoices-panel p {
+    margin: 0;
+}
+
+.pending-invoices-panel h3 {
+    margin-top: 2px;
+    font-size: 18px;
+}
+
+.pending-invoices-panel header > div > span {
+    display: block;
+    margin-top: 3px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+}
+
+.pending-invoices-close {
+    display: grid;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--color-border-control);
+    border-radius: 9px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+}
+
+.pending-invoices-close:hover,
+.pending-invoices-close:focus-visible {
+    border-color: var(--color-primary);
+    outline: 0;
+    color: var(--color-primary-dark);
+}
+
+.pending-invoices-close svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 2;
+}
+
+.pending-invoices-status {
+    min-height: 33px;
+    padding: 8px 18px;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+}
+
+.pending-invoices-table {
+    min-width: 760px;
+}
+
+.pending-invoices-table td,
+.pending-invoices-table th {
+    padding: 11px 13px;
+}
+
+.pending-invoices-table td:first-child {
+    min-width: 220px;
+}
+
+.pending-invoices-table td strong,
+.pending-invoices-table td small {
+    display: block;
+}
+
+.pending-invoices-table td small {
+    max-width: 310px;
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--color-muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pending-invoice-money {
+    font-variant-numeric: tabular-nums;
+    font-weight: 720;
+    white-space: nowrap;
+}
+
+.pending-invoices-table td:nth-last-child(2) {
+    color: var(--color-primary-dark);
+}
+
+.pending-invoices-empty {
+    padding: 22px !important;
+    color: var(--color-text-secondary);
+    text-align: center;
+}
+
+@media (max-width: 700px) {
+    .complement-payment-context,
+    .pending-invoices-panel {
+        margin-right: 14px;
+        margin-left: 14px;
+    }
+
+    .invoice-concepts-panel .panel-actions {
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .invoice-concepts-panel .panel-actions .button {
+        justify-content: center;
+        width: 100%;
+    }
+}
+
 .record-context-item:hover,
 .record-context-item:focus {
     outline: 0;
