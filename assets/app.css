@@ -35,6 +35,18 @@ code {
     color: var(--color-primary-dark);
 }
 
+.movement-kind {
+    font-weight: 750;
+}
+
+.movement-kind.is-withdrawal {
+    color: var(--color-danger-dark);
+}
+
+.movement-kind.is-deposit {
+    color: var(--color-success);
+}
+
 /* 2. Navegación lateral -------------------------------------------------- */
 
 .sidebar {

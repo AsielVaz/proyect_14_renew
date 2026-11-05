@@ -3639,6 +3639,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 })();
 </script>
 <script src="assets/ui-motion.js"></script>
+<script src="assets/movement-highlights.js"></script>
 <script src="assets/wallet-balance.js"></script>
 <script src="assets/global-search.js"></script>
 <script src="assets/company-directory.js"></script>

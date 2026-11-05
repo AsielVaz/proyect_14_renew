@@ -70,6 +70,7 @@
     </section>
 </main>
 <script src="assets/ui-motion.js"></script>
+<script src="assets/movement-highlights.js"></script>
 <?php if (webauthn_service()->isEnabled()): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>
 </html>
