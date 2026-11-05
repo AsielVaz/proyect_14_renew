@@ -25,16 +25,39 @@ function load_env(string $path): void
         throw new RuntimeException('No se encontró el archivo de configuración .env.');
     }
 
-    $values = parse_ini_file($path, false, INI_SCANNER_RAW);
-    if ($values === false) {
+    $lines = file($path, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
         throw new RuntimeException('No fue posible leer el archivo de configuración .env.');
     }
 
-    foreach ($values as $key => $value) {
-        if (!is_string($key) || !preg_match('/^[A-Z][A-Z0-9_]*$/', $key)) {
+    foreach ($lines as $index => $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
             continue;
         }
-        $value = (string) $value;
+        if (str_starts_with($line, 'export ')) {
+            $line = ltrim(substr($line, 7));
+        }
+
+        $separator = strpos($line, '=');
+        if ($separator === false) {
+            throw new RuntimeException('La línea ' . ($index + 1) . ' del archivo .env no tiene un formato válido.');
+        }
+        $key = trim(substr($line, 0, $separator));
+        if (!preg_match('/^[A-Z][A-Z0-9_]*$/', $key)) {
+            throw new RuntimeException('La variable de la línea ' . ($index + 1) . ' del archivo .env no es válida.');
+        }
+
+        $value = trim(substr($line, $separator + 1));
+        if ($value !== '' && ($value[0] === '"' || $value[0] === "'")) {
+            $quote = $value[0];
+            if (strlen($value) < 2 || substr($value, -1) !== $quote) {
+                throw new RuntimeException('La variable ' . $key . ' tiene comillas sin cerrar en el archivo .env.');
+            }
+            $value = substr($value, 1, -1);
+            $value = str_replace(['\\' . $quote, '\\\\'], [$quote, '\\'], $value);
+        }
+
         if (getenv($key) === false) {
             putenv($key . '=' . $value);
             $_ENV[$key] = $value;
