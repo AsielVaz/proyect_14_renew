@@ -1067,7 +1067,8 @@ textarea:focus {
 }
 
 .movement-document-filters legend,
-.movement-type-filter > span {
+.movement-type-filter > span,
+.movement-page-size > span {
     margin-bottom: 4px;
     padding: 0;
     color: var(--color-muted);
@@ -1172,6 +1173,16 @@ textarea:focus {
 
 .movement-type-filter select {
     min-width: 170px;
+    min-height: 40px;
+}
+
+.movement-page-size {
+    display: grid;
+    gap: 4px;
+}
+
+.movement-page-size select {
+    width: 105px;
     min-height: 40px;
 }
 
@@ -4749,11 +4760,14 @@ body.has-invoice-email-modal {
     }
 
     .movement-type-filter,
-    .movement-type-filter select {
+    .movement-type-filter select,
+    .movement-page-size,
+    .movement-page-size select {
         width: 100%;
     }
 
-    .movement-type-filter select {
+    .movement-type-filter select,
+    .movement-page-size select {
         min-height: 44px;
     }
 

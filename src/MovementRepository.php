@@ -110,16 +110,26 @@ final class MovementRepository
             $queryText .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
-        $page = max(1, $page);
-        $offset = ($page - 1) * $perPage;
-        $fetchLimit = $perPage + 1;
+        $showAll = $view === 'cartera'
+            && $perPage <= 0
+            && ($search !== '' || $dateFrom !== '' || $dateTo !== '');
+        if (!$showAll) {
+            $perPage = $perPage > 0 ? $perPage : 25;
+        }
+        $page = $showAll ? 1 : max(1, $page);
         $order = $normalizedSearchAmount !== null
             ? "(`monto` = :search_amount_sort) DESC, {$sort}"
             : $sort;
-        $query = $this->pdo->prepare($queryText . " ORDER BY {$order} LIMIT {$fetchLimit} OFFSET {$offset}");
+        $pageClause = '';
+        if (!$showAll) {
+            $offset = ($page - 1) * $perPage;
+            $fetchLimit = $perPage + 1;
+            $pageClause = " LIMIT {$fetchLimit} OFFSET {$offset}";
+        }
+        $query = $this->pdo->prepare($queryText . " ORDER BY {$order}" . $pageClause);
         $query->execute($params);
         $rows = $query->fetchAll();
-        $hasNext = count($rows) > $perPage;
+        $hasNext = !$showAll && count($rows) > $perPage;
         if ($hasNext) {
             array_pop($rows);
         }
