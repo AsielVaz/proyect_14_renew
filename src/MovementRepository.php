@@ -22,7 +22,8 @@ final class MovementRepository
         int $page,
         int $perPage = 25,
         ?int $clientId = null,
-        array|string $documentFilters = []
+        array|string $documentFilters = [],
+        string $movementTypeFilter = ''
     ): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
@@ -30,15 +31,20 @@ final class MovementRepository
         $documentFilters = $view === 'asignados'
             ? array_values(array_unique(array_intersect(
                 array_map('strval', $documentFilters),
-                ['internal', 'complement', 'invoice', 'none']
+                ['internal', 'document', 'none']
             )))
             : [];
+        $movementTypeFilter = $view === 'asignados'
+            && in_array($movementTypeFilter, ['deposit', 'withdrawal'], true)
+                ? $movementTypeFilter
+                : '';
         // Las vistas sin filtro conservan su límite rápido; una búsqueda explícita
         // debe consultar el histórico completo para que un resultado global sea localizable.
         [$source, $sort] = $this->source(
             $view,
-            $filterByClient || $search !== '' || $documentFilters !== [],
-            $documentFilters
+            $filterByClient || $search !== '' || $documentFilters !== [] || $movementTypeFilter !== '',
+            $documentFilters,
+            $movementTypeFilter
         );
         $columns = array_keys($definition['columns']);
         $searchableColumns = $columns;
@@ -801,15 +807,20 @@ final class MovementRepository
         return (int) $this->pdo->lastInsertId();
     }
 
-    private function source(string $view, bool $filterByClient = false, array $documentFilters = []): array
+    private function source(
+        string $view,
+        bool $filterByClient = false,
+        array $documentFilters = [],
+        string $movementTypeFilter = ''
+    ): array
     {
         $documentConditions = [];
         foreach ($documentFilters as $documentFilter) {
             $documentConditions[] = match ($documentFilter) {
                 'internal' => "p.nombre = '13'",
-                'complement' => "TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
-                    AND CAST(TRIM(p.id_factura_res) AS UNSIGNED) > 0",
-                'invoice' => 'COALESCE(p.id_factura, 0) > 0',
+                'document' => "(COALESCE(p.id_factura, 0) > 0
+                    OR (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                        AND CAST(TRIM(p.id_factura_res) AS UNSIGNED) > 0))",
                 'none' => "COALESCE(p.nombre, '') <> '13'
                     AND COALESCE(p.id_factura, 0) <= 0
                     AND NOT (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
@@ -819,6 +830,11 @@ final class MovementRepository
         $assignedDocumentCondition = $documentConditions === []
             ? ''
             : ' AND ((' . implode(') OR (', $documentConditions) . '))';
+        $assignedMovementTypeCondition = match ($movementTypeFilter) {
+            'deposit' => " AND p.tipo_movimiento = 'Deposito'",
+            'withdrawal' => " AND p.tipo_movimiento = 'Retiro'",
+            default => '',
+        };
         $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
@@ -844,7 +860,7 @@ final class MovementRepository
             ],
             'asignados', 'reasignar' => [
                 $base . " WHERE p.status = 'asignado' AND p.tipo_movimiento <> 'Abono por comisión'
-                          AND p.banco <> 'STP' AND p.banco <> '99'" . $assignedDocumentCondition
+                          AND p.banco <> 'STP' AND p.banco <> '99'" . $assignedDocumentCondition . $assignedMovementTypeCondition
                     . ($filterByClient ? '' : ' ORDER BY p.id DESC LIMIT 500'),
                 '`id` DESC',
             ],

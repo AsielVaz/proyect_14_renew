@@ -1208,9 +1208,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         $movementSearch = trim((string) ($_GET['q'] ?? ''));
         $movementDocumentFilterLabels = [
             'internal' => 'Interno',
-            'complement' => 'Con complemento',
-            'invoice' => 'Con factura',
+            'document' => 'Con documento',
             'none' => 'Sin documento',
+        ];
+        $movementTypeFilterLabels = [
+            '' => 'Todos',
+            'deposit' => 'Depósitos',
+            'withdrawal' => 'Retiros',
         ];
         $requestedDocumentFilters = $_GET['doc_filter'] ?? [];
         $requestedDocumentFilters = is_array($requestedDocumentFilters)
@@ -1222,6 +1226,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 array_keys($movementDocumentFilterLabels)
             )))
             : [];
+        $requestedMovementTypeFilter = (string) ($_GET['movement_type'] ?? '');
+        $movementTypeFilter = $movementKey === 'asignados'
+            && array_key_exists($requestedMovementTypeFilter, $movementTypeFilterLabels)
+                ? $requestedMovementTypeFilter
+                : '';
         $movementClientId = filter_input(INPUT_GET, 'client', FILTER_VALIDATE_INT) ?: null;
         $movementClient = $movementClientId ? movement_repository()->client($movementClientId) : null;
         $isTransferForm = $movementAction === 'transfer' && $action === 'form';
@@ -1233,13 +1242,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $movementPage,
             25,
             $movementClient ? $movementClientId : null,
-            $movementDocumentFilters
+            $movementDocumentFilters,
+            $movementTypeFilter
         );
         $movementClients = in_array($movementAction, ['assign', 'reassign', 'transfer'], true) ? movement_repository()->clients() : [];
         ?>
         <section class="report-intro movement-intro">
             <p><?= e($movementClient ? 'Movimientos de la cartera ' . $movementClient['nombre'] . ' (#' . $movementClient['id'] . ').' : $movement['description']) ?></p>
-            <?php if ($movementClient): ?><a class="button" href="?<?= e(http_build_query(['movement'=>$movementKey,'doc_filter'=>$movementDocumentFilters ?: null])) ?>">Quitar filtro de cartera</a><?php endif; ?>
+            <?php if ($movementClient): ?><a class="button" href="?<?= e(http_build_query(['movement'=>$movementKey,'doc_filter'=>$movementDocumentFilters ?: null,'movement_type'=>$movementTypeFilter ?: null])) ?>">Quitar filtro de cartera</a><?php endif; ?>
             <?php if (in_array($movementAction, ['assign', 'reassign', 'unassign', 'transfer'], true)): ?>
                 <span class="operation-badge">Operación transaccional y auditada</span>
             <?php endif; ?>
@@ -1306,6 +1316,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
                     <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar movimientos…">
+                    <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type"><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><label><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?>><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Sin selección se muestran todos.</small></fieldset><?php endif; ?>
                     <button class="button" type="submit">Buscar</button>
                 </form>
@@ -1450,8 +1461,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <div class="pagination">
                 <span>Página <?= $movementResult['page'] ?><?= $movementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span>
                 <div>
-                    <?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilters ?: null, 'page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
-                    <?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilters ?: null, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
+                    <?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilters ?: null, 'movement_type' => $movementTypeFilter ?: null, 'page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
+                    <?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilters ?: null, 'movement_type' => $movementTypeFilter ?: null, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
                 </div>
             </div>
         </section>

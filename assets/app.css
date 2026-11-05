@@ -1060,7 +1060,8 @@ textarea:focus {
     border: 0;
 }
 
-.movement-document-filters legend {
+.movement-document-filters legend,
+.movement-type-filter > span {
     margin-bottom: 4px;
     padding: 0;
     color: var(--color-muted);
@@ -1068,6 +1069,16 @@ textarea:focus {
     font-weight: 750;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+}
+
+.movement-type-filter {
+    display: grid;
+    gap: 4px;
+}
+
+.movement-type-filter select {
+    min-width: 170px;
+    min-height: 40px;
 }
 
 .movement-document-filters > div {
@@ -4589,6 +4600,15 @@ body.has-invoice-email-modal {
 
     .movement-document-filters {
         width: 100%;
+    }
+
+    .movement-type-filter,
+    .movement-type-filter select {
+        width: 100%;
+    }
+
+    .movement-type-filter select {
+        min-height: 44px;
     }
 
     .movement-document-filters label {
