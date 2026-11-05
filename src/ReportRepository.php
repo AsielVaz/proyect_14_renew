@@ -150,7 +150,11 @@ final class ReportRepository
             'facturas-eliminadas' => [$this->invoiceQuery('eliminadas'), [], '`id` DESC'],
             'facturas-captura-eliminada' => [$this->invoiceQuery('captura'), [], '`id` DESC'],
             'facturas-canceladas' => [$this->invoiceQuery('canceladas'), [], '`id` DESC'],
-            'banking' => [$this->bankingQuery(), [], '`empresa_origen`, `porcentaje_real` DESC'],
+            'banking' => [
+                $this->bankingQuery(),
+                ['date_from' => $from, 'date_to' => $to],
+                '`empresa_origen`, `porcentaje_real` DESC',
+            ],
             'correos-factura' => [
                 'SELECT fc.id, e1.razon AS origen, e2.razon AS destino, fc.tamplate AS peticion,
                         fc.respuesta, fc.fecha_envia, fc.fecha_recibe
@@ -224,7 +228,7 @@ final class ReportRepository
                         INNER JOIN facturas f ON f.id_clave_corta = cl.id
                         INNER JOIN empresas provider ON provider.id = f.razon
                         INNER JOIN proveedores_14 p14 ON p14.id_empresa = cl.id AND p14.id_proveedor = provider.id
-                        WHERE f.metodo_pago = 1 AND DATE(f.fecha) = CURDATE()
+                        WHERE f.metodo_pago = 1 AND DATE(f.fecha) BETWEEN :date_from AND :date_to
                           AND f.razon <> 132 AND provider.comodin = 0 AND origin.id <> 132
                         GROUP BY origin.razon, provider.razon, p14.porcentaje_sugerido
                     ) daily

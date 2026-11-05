@@ -16,6 +16,7 @@ use App\GlobalSearchRepository;
 use App\ManualEmailService;
 use App\PdfDocumentService;
 use App\InvoiceEmailService;
+use App\XlsxExportService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -228,6 +229,12 @@ function payment_complement_repository(): PaymentComplementRepository
     return $repository ??= new PaymentComplementRepository(db());
 }
 
+function xlsx_export_service(): XlsxExportService
+{
+    static $service;
+    return $service ??= new XlsxExportService();
+}
+
 function company_panel_repository(): CompanyPanelRepository
 {
     static $repository;
@@ -353,6 +360,43 @@ function report_value(mixed $value, string $format = 'text'): string
         'percent' => number_format((float) $value, 2) . '%',
         default => (string) $value,
     };
+}
+
+function display_date(mixed $value, bool $includeTime = false): string
+{
+    $raw = trim((string) $value);
+    if ($raw === '' || str_starts_with($raw, '0000-00-00')) {
+        return '—';
+    }
+    try {
+        $date = new DateTimeImmutable($raw);
+    } catch (Throwable) {
+        return $raw;
+    }
+    $showTime = $includeTime
+        && preg_match('/(?:T|\s)(\d{2}):(\d{2})/', $raw, $matches) === 1
+        && ($matches[1] !== '00' || $matches[2] !== '00');
+    return $date->format($showTime ? 'd/m/Y H:i' : 'd/m/Y');
+}
+
+function filter_date_value(mixed $value): string
+{
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return '';
+    }
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+    return $date instanceof DateTimeImmutable && $date->format('Y-m-d') === $raw ? $raw : '';
+}
+
+function filter_date_range(mixed $from, mixed $to): array
+{
+    $from = filter_date_value($from);
+    $to = filter_date_value($to);
+    if ($from !== '' && $to !== '' && $from > $to) {
+        [$from, $to] = [$to, $from];
+    }
+    return [$from, $to];
 }
 
 function e(mixed $value): string

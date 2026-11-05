@@ -152,6 +152,80 @@ $dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$c
 $action = (string) ($_GET['action'] ?? 'list');
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
+    && (($invoiceModule && $invoiceView === 'list') || ($complementModule && $complementView === 'list'))) {
+    try {
+        $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 160);
+        [$dateFrom, $dateTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? '');
+        if ($invoiceModule) {
+            $sourceRows = invoice_repository()->exportRows($search, $dateFrom, $dateTo);
+            $headers = [
+                'id' => 'ID', 'fecha' => 'Fecha', 'serie' => 'Serie', 'folio' => 'Folio',
+                'uuid' => 'UUID', 'empresa' => 'Empresa emisora', 'cliente' => 'Cliente',
+                'rfc' => 'RFC receptor', 'receptor' => 'Razón social receptora',
+                'metodo_pago' => 'Método de pago', 'forma_pago' => 'Forma de pago',
+                'status_pago' => 'Estado del pago', 'total' => 'Total',
+                'saldo_pendiente' => 'Saldo pendiente', 'estado_fiscal' => 'Estado fiscal',
+                'usuario' => 'Usuario',
+            ];
+            $rows = array_map(static fn (array $row): array => [
+                'id' => (int) $row['id'], 'fecha' => (string) $row['fecha'],
+                'serie' => (string) ($row['serie'] ?? ''), 'folio' => (string) ($row['folio'] ?? ''),
+                'uuid' => (string) ($row['uuid'] ?? ''), 'empresa' => (string) ($row['empresa'] ?? ''),
+                'cliente' => (string) ($row['cliente'] ?? ''), 'rfc' => (string) ($row['rfc'] ?? ''),
+                'receptor' => (string) ($row['receptor'] ?? ''),
+                'metodo_pago' => (string) ($row['metodo_pago'] ?? ''),
+                'forma_pago' => (string) ($row['forma_pago'] ?? ''),
+                'status_pago' => (string) ($row['status_pago'] ?? ''),
+                'total' => (float) ($row['total_iva'] ?? 0),
+                'saldo_pendiente' => (float) ($row['saldo_pendiente'] ?? 0),
+                'estado_fiscal' => (string) (($row['status'] ?? '') ?: (($row['uuid'] ?? '') !== '' ? 'Timbrada' : (($row['status_error'] ?? '') ?: 'Pendiente'))),
+                'usuario' => (string) ($row['usuario'] ?? ''),
+            ], $sourceRows);
+            $sheet = 'Facturas';
+            $fileName = 'facturas-' . date('Y-m-d') . '.xlsx';
+        } else {
+            $sourceRows = payment_complement_repository()->exportRows($search, $dateFrom, $dateTo);
+            $headers = [
+                'id' => 'ID', 'fecha_pago' => 'Fecha de pago', 'fecha_timbrado' => 'Fecha de timbrado',
+                'serie' => 'Serie', 'folio' => 'Folio', 'folio_interno' => 'Folio interno',
+                'uuid' => 'UUID', 'empresa' => 'Empresa emisora', 'cliente' => 'Cliente',
+                'rfc' => 'RFC receptor', 'receptor' => 'Razón social receptora',
+                'forma_pago' => 'Forma de pago', 'tratamiento' => 'Tratamiento',
+                'total' => 'Total', 'facturas' => 'Facturas relacionadas', 'estado' => 'Estado',
+            ];
+            $rows = array_map(static fn (array $row): array => [
+                'id' => (int) $row['id'], 'fecha_pago' => (string) ($row['fecha_pago'] ?? ''),
+                'fecha_timbrado' => (string) ($row['fecha_timbrado'] ?? ''),
+                'serie' => (string) ($row['serie'] ?? ''), 'folio' => (string) ($row['folio'] ?? ''),
+                'folio_interno' => (string) ($row['folio_interno'] ?? ''),
+                'uuid' => (string) ($row['uuid'] ?? ''), 'empresa' => (string) ($row['empresa'] ?? ''),
+                'cliente' => (string) ($row['cliente'] ?? ''), 'rfc' => (string) ($row['rfc'] ?? ''),
+                'receptor' => (string) ($row['receptor'] ?? ''),
+                'forma_pago' => (string) ($row['forma_pago'] ?? ''),
+                'tratamiento' => (string) (($row['tipo_complemento'] ?? '') ?: 'T'),
+                'total' => (float) ($row['total_factura'] ?? 0),
+                'facturas' => (int) ($row['facturas_relacionadas'] ?? 0),
+                'estado' => (string) (($row['uuid'] ?? '') !== '' ? 'Timbrado' : (($row['status'] ?? '') ?: (($row['status_error'] ?? '') ?: 'Pendiente'))),
+            ], $sourceRows);
+            $sheet = 'Complementos de pago';
+            $fileName = 'complementos-de-pago-' . date('Y-m-d') . '.xlsx';
+        }
+        $bytes = xlsx_export_service()->create($sheet, $headers, $rows);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . strlen($bytes));
+        header('Cache-Control: private, no-store, max-age=0');
+        echo $bytes;
+    } catch (Throwable $exception) {
+        error_log('Excel fiscal: ' . $exception->getMessage());
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'No fue posible generar el archivo de Excel.';
+    }
+    exit;
+}
+
 if ($movementKey === 'correos-manuales' && isset($_GET['mail_action']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=UTF-8');
     try {
@@ -571,11 +645,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <summary><span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6m-6 4h4"/></svg></span> Facturación</span><span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span></summary>
             <div class="catalog-links">
                 <a class="<?= $invoiceView === 'list' ? 'active' : '' ?>" href="?invoice=list"><span></span>Facturas</a>
-                <a class="<?= $invoiceView === 'create' ? 'active' : '' ?>" href="?invoice=create"><span></span>Crear factura</a>
                 <a class="<?= $complementModule ? 'active' : '' ?>" href="?complement=list"><span></span>Complementos de pago</a>
             </div>
         </details>
-        <details class="catalog-menu report-menu" <?= $report || in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
+        <details class="catalog-menu report-menu" <?= ($report && !in_array($reportKey, ['correos-factura', 'correos-contexto'], true)) || in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm3 5h6m-6 4h6m-6 4h4"/></svg></span> Reportes</span>
                 <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
@@ -584,8 +657,22 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <a class="<?= $movementKey === 'totales' ? 'active' : '' ?>" href="?movement=totales"><span></span>Log de movimientos</a>
                 <a class="<?= $movementKey === 'stp' ? 'active' : '' ?>" href="?movement=stp"><span></span>Movimientos STP</a>
                 <?php foreach ($reports as $navKey => $item): ?>
+                    <?php if (in_array($navKey, ['conta', 'disparador', 'facturas-canceladas', 'correos-factura', 'correos-contexto'], true)) continue; ?>
                     <a class="<?= $reportKey === $navKey ? 'active' : '' ?>" href="?report=<?= e($navKey) ?>">
                         <span></span><?= e($item['label']) ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </details>
+        <details class="catalog-menu dev-menu" <?= in_array($reportKey, ['correos-factura', 'correos-contexto'], true) ? 'open' : '' ?>>
+            <summary>
+                <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3m8-6 4 3-4 3m-2-9-4 12"/></svg></span> Dev</span>
+                <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
+            </summary>
+            <div class="catalog-links">
+                <?php foreach (['correos-factura', 'correos-contexto'] as $navKey): ?>
+                    <a class="<?= $reportKey === $navKey ? 'active' : '' ?>" href="?report=<?= e($navKey) ?>">
+                        <span></span><?= e($reports[$navKey]['label']) ?>
                     </a>
                 <?php endforeach; ?>
             </div>
@@ -948,7 +1035,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <dl class="complement-detail-grid">
                         <div><dt>Empresa emisora</dt><dd><?= e($complement['empresa'] ?: '—') ?></dd></div><div><dt>Cliente</dt><dd><?= e($complement['cliente'] ?: '—') ?></dd></div>
                         <div><dt>Receptor</dt><dd><?= e($complement['receptor'] ?: '—') ?><small><?= e($complement['rfc'] ?: '') ?></small></dd></div><div><dt>Forma de pago</dt><dd><?= e(trim((string) ($complement['forma_pago'] ?? '—'))) ?></dd></div>
-                        <div><dt>Fecha del pago</dt><dd><?= e(substr((string) $complement['fecha_pago'], 0, 10)) ?></dd></div><div><dt>Tratamiento</dt><dd><?= e($complement['cadena'] ?: 'T') ?></dd></div>
+                        <div><dt>Fecha del pago</dt><dd><time datetime="<?= e($complement['fecha_pago']) ?>"><?= e(display_date($complement['fecha_pago'], true)) ?></time></dd></div><div><dt>Tratamiento</dt><dd><?= e($complement['cadena'] ?: 'T') ?></dd></div>
                         <div><dt>Movimiento asociado</dt><dd><?= (int) ($complement['id_pago'] ?? 0) > 0 ? '#' . e($complement['id_pago']) : '—' ?></dd></div><div><dt>Total</dt><dd><?= e(report_value($complement['total_factura'], 'money')) ?></dd></div>
                     </dl>
                     <div class="table-wrap"><table class="movement-table"><thead><tr><th>Factura</th><th>UUID</th><th>Saldo anterior</th><th>Pago / parcialidad</th><th>Saldo restante</th></tr></thead><tbody><?php foreach ($complement['relations'] as $relation): ?><tr>
@@ -959,11 +1046,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </section>
             <?php endif; ?>
         <?php else: ?>
-            <?php $complementPage = max(1, (int) ($_GET['page'] ?? 1)); $complementSearch = trim((string) ($_GET['q'] ?? '')); $complementResult = payment_complement_repository()->paginate($complementSearch, $complementPage); ?>
+            <?php $complementPage = max(1, (int) ($_GET['page'] ?? 1)); $complementSearch = trim((string) ($_GET['q'] ?? '')); [$complementFrom, $complementTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? ''); $complementResult = payment_complement_repository()->paginate($complementSearch, $complementPage, 30, $complementFrom, $complementTo); $complementFilters = ['complement'=>'list','q'=>$complementSearch,'from'=>$complementFrom,'to'=>$complementTo]; ?>
             <section class="report-intro"><p>Complementos de recepción de pagos, sus facturas relacionadas y estado fiscal.</p><span class="operation-badge">CFDI tipo P</span></section>
-            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Complementos de pago</h2><p class="panel-copy"><?= number_format(count($complementResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="search"><input type="hidden" name="complement" value="list"><input type="search" name="q" value="<?= e($complementSearch) ?>" placeholder="ID, UUID, RFC, cliente…"><button class="button">Buscar</button></form></div>
+            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Complementos de pago</h2><p class="panel-copy"><?= number_format(count($complementResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="report-filters document-filters"><input type="hidden" name="complement" value="list"><input type="search" name="q" value="<?= e($complementSearch) ?>" placeholder="ID, UUID, RFC, cliente…" aria-label="Buscar complementos"><label><span>Desde</span><input type="date" name="from" value="<?= e($complementFrom) ?>"></label><label><span>Hasta</span><input type="date" name="to" value="<?= e($complementTo) ?>"></label><button class="button">Filtrar</button><a class="button" href="?<?= e(http_build_query($complementFilters + ['export'=>'xlsx'])) ?>">Exportar a Excel</a><?php if ($complementSearch !== '' || $complementFrom !== '' || $complementTo !== ''): ?><a class="button subtle" href="?complement=list">Limpiar</a><?php endif; ?></form></div>
                 <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado / acciones</th></tr></thead><tbody><?php foreach ($complementResult['rows'] as $row): ?><?php $complementStamped = trim((string) ($row['uuid'] ?? '')) !== ''; ?><tr data-record-row data-record-kind="complement" data-record-id="<?= e($row['id']) ?>">
-                    <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? 'P') . ($row['folio_interno'] ?? $row['folio'] ?? '')) ?> · <?= e(substr((string) ($row['fecha_pago'] ?? ''), 0, 10)) ?></span></td>
+                    <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? 'P') . ($row['folio_interno'] ?? $row['folio'] ?? '')) ?></span><span class="movement-cell-secondary"><b>Fecha:</b> <time datetime="<?= e($row['fecha_pago'] ?? '') ?>"><?= e(display_date($row['fecha_pago'] ?? '', true)) ?></time></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['facturas_relacionadas']) ?> factura(s)</span></td>
                     <td><span class="movement-cell-main"><?= e($row['cliente'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['rfc'] ?: '') ?> · <?= e($row['receptor'] ?: '') ?></span></td>
                     <td><span class="movement-cell-main"><?= e(trim((string) ($row['forma_pago'] ?? '—'))) ?></span><span class="movement-cell-secondary">Tratamiento <?= e($row['tipo_complemento'] ?: 'T') ?></span></td>
@@ -989,7 +1076,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </div>
                     </td>
                 </tr><?php endforeach; ?><?php if ($complementResult['rows'] === []): ?><tr><td colspan="6" class="empty">No hay complementos para mostrar.</td></tr><?php endif; ?></tbody></table></div>
-                <div class="pagination"><span>Página <?= $complementResult['page'] ?><?= $complementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($complementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['complement'=>'list','q'=>$complementSearch,'page'=>$complementResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($complementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['complement'=>'list','q'=>$complementSearch,'page'=>$complementResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
+                <div class="pagination"><span>Página <?= $complementResult['page'] ?><?= $complementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($complementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query($complementFilters + ['page'=>$complementResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($complementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query($complementFilters + ['page'=>$complementResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
             </section>
         <?php endif; ?>
     <?php elseif ($invoiceModule): ?>
@@ -1035,17 +1122,17 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <div><dt>Saldo restante</dt><dd><?= e(report_value($invoiceComplements['balance'], 'money')) ?></dd></div>
                     </dl>
                     <div class="table-wrap"><table class="movement-table"><thead><tr><th>Complemento</th><th>UUID</th><th>Fecha de pago</th><th>Pago / parcialidad</th><th>Saldo restante</th><th>Estado</th></tr></thead><tbody><?php foreach ($invoiceComplements['complements'] as $relation): ?><tr>
-                        <td><a href="?complement=detail&amp;id=<?= e($relation['id_complemento']) ?>">#<?= e($relation['id_complemento']) ?> · <?= e(($relation['serie'] ?? 'P') . ($relation['folio'] ?? '')) ?></a></td><td><?= e($relation['uuid'] ?: 'Sin UUID') ?></td><td><?= e(substr((string) $relation['fecha_pago'], 0, 10)) ?></td>
+                        <td><a href="?complement=detail&amp;id=<?= e($relation['id_complemento']) ?>">#<?= e($relation['id_complemento']) ?> · <?= e(($relation['serie'] ?? 'P') . ($relation['folio'] ?? '')) ?></a></td><td><?= e($relation['uuid'] ?: 'Sin UUID') ?></td><td><time datetime="<?= e($relation['fecha_pago']) ?>"><?= e(display_date($relation['fecha_pago'], true)) ?></time></td>
                         <td><span class="movement-cell-main"><?= e(report_value($relation['monto'], 'money')) ?></span><span class="movement-cell-secondary">Parcialidad <?= e($relation['num_pago']) ?></span></td><td><?= e(report_value($relation['restante'], 'money')) ?></td><td><?= e(trim((string) $relation['uuid']) !== '' ? 'Timbrado' : ($relation['status'] ?: ($relation['status_error'] ?: 'Pendiente'))) ?></td>
                     </tr><?php endforeach; ?><?php if ($invoiceComplements['complements'] === []): ?><tr><td colspan="6" class="empty">Esta factura todavía no tiene complementos asociados.</td></tr><?php endif; ?></tbody></table></div>
                 </section>
             <?php endif; ?>
         <?php else: ?>
-            <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage); ?>
+            <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); [$invoiceFrom, $invoiceTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? ''); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage, 25, $invoiceFrom, $invoiceTo); $invoiceFilters = ['invoice'=>'list','q'=>$invoiceSearch,'from'=>$invoiceFrom,'to'=>$invoiceTo]; ?>
             <section class="report-intro"><p>Facturas guardadas en la tabla original, con emisor, receptor, relación de pago y estado fiscal.</p></section>
-            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Facturas</h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="search"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente…"><button class="button">Buscar</button></form></div>
+            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Facturas</h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="report-filters document-filters"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente…" aria-label="Buscar facturas"><label><span>Desde</span><input type="date" name="from" value="<?= e($invoiceFrom) ?>"></label><label><span>Hasta</span><input type="date" name="to" value="<?= e($invoiceTo) ?>"></label><button class="button">Filtrar</button><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['export'=>'xlsx'])) ?>">Exportar a Excel</a><?php if ($invoiceSearch !== '' || $invoiceFrom !== '' || $invoiceTo !== ''): ?><a class="button subtle" href="?invoice=list">Limpiar</a><?php endif; ?></form></div>
                 <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Estado fiscal / acciones</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><?php $invoiceStamped = trim((string) ($row['uuid'] ?? '')) !== ''; ?><tr data-record-row data-record-kind="invoice" data-record-id="<?= e($row['id']) ?>">
-                    <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? '') . ($row['folio'] ?? '')) ?> · <?= e($row['fecha']) ?></span></td>
+                    <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? '') . ($row['folio'] ?? '')) ?></span><span class="movement-cell-secondary"><b>Fecha:</b> <time datetime="<?= e($row['fecha']) ?>"><?= e(display_date($row['fecha'], true)) ?></time></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa']) ?></span><span class="movement-cell-secondary"><?= e($row['usuario']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['rfc']) ?> · <?= e($row['receptor']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['metodo_pago']) ?></span><span class="movement-cell-secondary"><?= e($row['forma_pago']) ?> · <?= e($row['status_pago']) ?><?= $row['id_pago'] ? ' · Pago #' . e($row['id_pago']) : '' ?></span></td>
@@ -1075,7 +1162,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </div>
                     </td>
                 </tr><?php endforeach; ?><?php if ($invoiceResult['rows'] === []): ?><tr><td colspan="6" class="empty">No hay facturas para mostrar.</td></tr><?php endif; ?></tbody></table></div>
-                <div class="pagination"><span>Página <?= $invoiceResult['page'] ?><?= $invoiceResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($invoiceResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($invoiceResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['invoice'=>'list','q'=>$invoiceSearch,'page'=>$invoiceResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
+                <div class="pagination"><span>Página <?= $invoiceResult['page'] ?><?= $invoiceResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($invoiceResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['page'=>$invoiceResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($invoiceResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['page'=>$invoiceResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
             </section>
         <?php endif; ?>
     <?php elseif ($movement): ?>
@@ -3125,7 +3212,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <script src="assets/searchable-select.js"></script>
 <script src="assets/manual-email.js"></script>
 <script src="assets/transfer.js"></script>
-<script src="<?= e(legacy_asset_url('assets/js/apexcharts.js')) ?>"></script>
+<script src="assets/apexcharts.js"></script>
 <script src="assets/statistics.js"></script>
 <?php if ($securityModule): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>

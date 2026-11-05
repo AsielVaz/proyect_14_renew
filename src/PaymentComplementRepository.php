@@ -16,17 +16,31 @@ final class PaymentComplementRepository
     {
     }
 
-    public function paginate(string $search, int $page, int $perPage = 30): array
+    public function paginate(
+        string $search,
+        int $page,
+        int $perPage = 30,
+        string $dateFrom = '',
+        string $dateTo = ''
+    ): array
     {
         $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
         $limit = $perPage + 1;
-        $where = '';
+        $where = ' WHERE 1 = 1';
         $params = [];
         if ($search !== '') {
-            $where = " WHERE CONCAT_WS(' ', CAST(fc.id AS CHAR), fc.uuid, c.nombre,
+            $where .= " AND CONCAT_WS(' ', CAST(fc.id AS CHAR), fc.uuid, c.nombre,
                 e.razon, cc.rfc, CAST(fc.folio AS CHAR)) LIKE :search";
             $params['search'] = '%' . $search . '%';
+        }
+        if ($dateFrom !== '') {
+            $where .= ' AND fc.fecha_pago >= :date_from';
+            $params['date_from'] = $dateFrom . ' 00:00:00';
+        }
+        if ($dateTo !== '') {
+            $where .= ' AND fc.fecha_pago < :date_to';
+            $params['date_to'] = (new \DateTimeImmutable($dateTo))->modify('+1 day')->format('Y-m-d') . ' 00:00:00';
         }
 
         $query = $this->pdo->prepare("SELECT fc.id, fc.serie, fc.folio, fc.total_factura,
@@ -50,6 +64,11 @@ final class PaymentComplementRepository
             array_pop($rows);
         }
         return ['rows' => $rows, 'page' => $page, 'hasNext' => $hasNext];
+    }
+
+    public function exportRows(string $search, string $dateFrom = '', string $dateTo = ''): array
+    {
+        return $this->paginate($search, 1, 10000, $dateFrom, $dateTo)['rows'];
     }
 
     public function formData(): array

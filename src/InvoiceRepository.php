@@ -14,13 +14,27 @@ final class InvoiceRepository
     {
     }
 
-    public function page(string $search, int $page, int $perPage = 25): array
+    public function page(
+        string $search,
+        int $page,
+        int $perPage = 25,
+        string $dateFrom = '',
+        string $dateTo = ''
+    ): array
     {
         $where = 'WHERE f.razon <> 132';
         $params = [];
         if ($search !== '') {
             $where .= " AND CONCAT_WS(' ', f.id, f.folio, f.serie, f.uuid, c.nombre, e.razon, cc.rfc, cc.razon_social) LIKE :search";
             $params['search'] = '%' . $search . '%';
+        }
+        if ($dateFrom !== '') {
+            $where .= ' AND f.fecha >= :date_from';
+            $params['date_from'] = $dateFrom . ' 00:00:00';
+        }
+        if ($dateTo !== '') {
+            $where .= ' AND f.fecha < :date_to';
+            $params['date_to'] = (new \DateTimeImmutable($dateTo))->modify('+1 day')->format('Y-m-d') . ' 00:00:00';
         }
         $joins = ' FROM facturas f
             INNER JOIN clientes c ON c.id = f.nombre
@@ -51,6 +65,11 @@ final class InvoiceRepository
             'rows' => $rows, 'total' => count($rows), 'page' => $page,
             'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
         ];
+    }
+
+    public function exportRows(string $search, string $dateFrom = '', string $dateTo = ''): array
+    {
+        return $this->page($search, 1, 10000, $dateFrom, $dateTo)['rows'];
     }
 
     public function formData(): array

@@ -19,7 +19,7 @@ final class Reports
                 ],
             ],
             'bitacora' => [
-                'label' => 'Bitácora general',
+                'label' => 'Log Capturas',
                 'description' => 'Actividad registrada por usuario y empresa.',
                 'columns' => [
                     'usuario' => 'Usuario', 'hora' => 'Hora', 'fecha' => 'Fecha', 'accion' => 'Acción',
@@ -59,7 +59,7 @@ final class Reports
                 ],
             ],
             'pagos-saldo' => [
-                'label' => 'Pagos con cuenta pendiente',
+                'label' => 'Relación depósitos documentos',
                 'description' => 'Pagos relacionados con facturas y su importe restante.',
                 'columns' => [
                     'id' => 'ID', 'empresa' => 'Empresa', 'banco' => 'Banco',
@@ -70,7 +70,7 @@ final class Reports
                 ],
             ],
             'timbres' => [
-                'label' => 'Timbres',
+                'label' => 'Log Timbres',
                 'description' => 'Intentos de timbrado agrupados por factura.',
                 'columns' => [
                     'id' => 'ID', 'id_factura' => 'ID factura', 'uuid' => 'Folio fiscal timbrado',
@@ -79,7 +79,7 @@ final class Reports
                 ],
             ],
             'facturas-eliminadas' => [
-                'label' => 'Facturas eliminadas',
+                'label' => 'Facturas canceladas',
                 'description' => 'Últimas 1,000 facturas trasladadas al histórico de eliminadas.',
                 'columns' => self::invoiceColumns(true),
             ],
@@ -95,7 +95,8 @@ final class Reports
             ],
             'banking' => [
                 'label' => 'Banking',
-                'description' => 'Distribución diaria real contra el porcentaje sugerido por proveedor.',
+                'description' => 'Distribución real del periodo contra el porcentaje sugerido por proveedor.',
+                'dateFilter' => true,
                 'columns' => [
                     'empresa_origen' => 'Empresa', 'proveedor' => 'Proveedor',
                     'total' => ['label' => 'Total facturado', 'format' => 'money'],
@@ -105,7 +106,7 @@ final class Reports
                 ],
             ],
             'correos-factura' => [
-                'label' => 'Correos de facturas',
+                'label' => 'Log de correos de facturas',
                 'description' => 'Peticiones y respuestas del procesamiento de facturas por correo.',
                 'columns' => [
                     'origen' => 'Correo de origen', 'destino' => 'Correo destino',
@@ -114,7 +115,7 @@ final class Reports
                 ],
             ],
             'correos-contexto' => [
-                'label' => 'Correos contextuales',
+                'label' => 'Log de correos contextuales',
                 'description' => 'Mensajes contextuales separados en petición y respuesta.',
                 'columns' => [
                     'empresa_origen' => 'Empresa origen', 'empresa_destino' => 'Empresa destino',

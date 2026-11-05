@@ -899,6 +899,16 @@ textarea:focus {
     width: 155px;
 }
 
+.document-filters {
+    flex: 1 1 720px;
+    justify-content: flex-end;
+}
+
+.document-filters > input[type="search"] {
+    flex: 1 1 220px;
+    min-width: 190px;
+}
+
 .search {
     display: flex;
     gap: 8px;
