@@ -465,7 +465,7 @@ try {
             redirect('?movement=' . rawurlencode($movementKey));
         } elseif ($catalog) {
             if ($postAction === 'save') {
-                $savedId = repository()->save($catalog, $_POST, filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT) ?: null);
+                $savedId = repository()->save($catalog, $_POST, filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT) ?: null, $_FILES);
                 flash('success', 'Registro guardado correctamente (ID ' . $savedId . ').');
             } elseif ($postAction === 'delete') {
                 repository()->delete($catalog, (int) ($_POST['id'] ?? 0));
@@ -966,7 +966,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <?php if ($isCaptures): ?>
                             <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e(trim((string) ($row['fecha'] . ' ' . $row['hora']))) ?></td><td><span class="movement-cell-main"><?= e($row['nombre_corto'] ?: ('Cuenta #' . $row['cuenta_id'])) ?></span><span class="movement-cell-secondary"><?= e(($row['banco'] ?: 'Banco no identificado') . ' · ' . ($row['moneda'] ?: 'MXN')) ?></span></td><td><?= number_format((int) $row['movimientos']) ?></td><td><?= e(report_value($row['depositos'], 'money')) ?></td><td><?= e(report_value($row['retiros'], 'money')) ?></td><td><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id']) ?>">Ver detalle</a></td>
                         <?php elseif ($isAccount): ?>
-                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary movement-description-text"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
                         <?php else: ?>
                             <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e($row['fecha_banco'] ?: ($row['fecha_operacion'] ?: $row['fecha_captura'])) ?></td><td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['cuenta'] ?: 'Sin cuenta') ?></span></td><td><span class="movement-cell-main"><?= e($row['tipo_movimiento'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['status'] ?: 'Sin estado') ?></span></td><td><span class="movement-cell-main"><?= e(report_value($row['monto'], 'money')) ?></span><span class="movement-cell-secondary">Acreditable: <?= e(report_value($row['saldo_acreditable'], 'money')) ?></span></td><td><?= e($row['factura'] ?: '—') ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
                         <?php endif; ?>
@@ -980,7 +980,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <section class="report-intro"><p><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Capturas de <?= e($companyData['razon']) ?></a> · Captura #<?= e($companyCapture['id']) ?></p><span class="operation-badge"><?= e(($companyCapture['banco'] ?: 'Banco') . ' · ' . ($companyCapture['nombre_corto'] ?: ('Cuenta #' . $companyCapture['cuenta_id']))) ?></span></section>
             <div class="company-summary-grid capture-summary"><article><span>Movimientos</span><strong><?= number_format((int) ($companyCapture['summary']['movimientos'] ?? 0)) ?></strong></article><article><span>Depósitos</span><strong><?= e(report_value($companyCapture['summary']['depositos'] ?? 0, 'money')) ?></strong></article><article><span>Retiros</span><strong><?= e(report_value($companyCapture['summary']['retiros'] ?? 0, 'money')) ?></strong></article><article><span>Fecha de captura</span><strong><?= e(trim((string) ($companyCapture['fecha'] . ' ' . $companyCapture['hora']))) ?></strong></article></div>
             <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Contenido importado</p><h2>Archivo bancario original</h2><p class="panel-copy"><?php if ((int) $companyCapture['captura_longitud'] > 50000): ?>Vista limitada a los primeros 50,000 caracteres de <?= number_format((int) $companyCapture['captura_longitud']) ?>.<?php else: ?>Contenido completo almacenado por el sistema legado.<?php endif; ?></p></div><a class="button" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Volver</a></div><pre class="capture-raw"><?= e($companyCapture['captura']) ?></pre></section>
-            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Desglose</p><h2>Movimientos de la captura</h2></div></div><div class="table-wrap"><table class="movement-table"><thead><tr><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Tipo</th></tr></thead><tbody><?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr><td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?= e($row['tipo_movimiento'] ?: '—') ?></td></tr><?php endforeach; ?><?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">La captura no contiene movimientos desglosados.</td></tr><?php endif; ?></tbody></table></div><div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div></section>
+            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Desglose</p><h2>Movimientos de la captura</h2></div></div><div class="table-wrap"><table class="movement-table"><thead><tr><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Tipo</th></tr></thead><tbody><?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr><td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary movement-description-text"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?= e($row['tipo_movimiento'] ?: '—') ?></td></tr><?php endforeach; ?><?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">La captura no contiene movimientos desglosados.</td></tr><?php endif; ?></tbody></table></div><div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div></section>
         <?php endif; ?>
     <?php elseif ($complementModule): ?>
         <?php if ($complementView === 'create'): ?>
@@ -1445,7 +1445,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                 }
                                 ?>
                                 <td<?= $movementKey === 'cartera' && $columnKey === 'fecha_banco' ? ' class="movement-date-cell"' : '' ?> title="<?= e(implode(' · ', $titleParts)) ?>">
-                                    <span class="movement-cell-main">
+                                    <span class="movement-cell-main<?= in_array($columnKey, ['detalles', 'detalle', 'descripcion', 'descripcion_detallada'], true) ? ' movement-detail-text' : '' ?>">
                                     <?php if ($columnKey === 'cep' && filter_var($row[$columnKey] ?? '', FILTER_VALIDATE_URL)): ?>
                                         <a href="<?= e($row[$columnKey]) ?>" target="_blank" rel="noopener">Abrir comprobante</a>
                                     <?php else: ?>
@@ -1463,7 +1463,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             continue;
                                         }
                                         ?>
-                                        <span class="movement-cell-secondary">
+                                        <span class="movement-cell-secondary<?= in_array($secondaryKey, ['detalles', 'detalle', 'descripcion', 'descripcion_detallada'], true) ? ' movement-detail-text' : '' ?>">
                                             <?php if ($secondaryLabel !== ''): ?><b><?= e($secondaryLabel) ?>:</b><?php endif; ?>
                                             <?= e(report_value($secondaryRaw, $secondaryFormats[$secondaryKey] ?? 'text')) ?>
                                         </span>
@@ -1811,41 +1811,56 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <div><p class="eyebrow"><?= $record ? 'Edición' : 'Alta' ?></p><h2><?= $record ? e($record[$catalog['title']] ?? ('Registro ' . $id)) : 'Nuevo registro' ?></h2></div>
                 <a class="button" href="?catalog=<?= e($key) ?>">Cancelar</a>
             </div>
-            <form method="post" class="form-grid">
+            <form method="post" class="form-grid" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="save">
                 <input type="hidden" name="id" value="<?= e($record['id'] ?? '') ?>">
                 <?php foreach ($catalog['fields'] as $name => $field): ?>
                     <?php
-                    $value = ($field['writeOnly'] ?? false) ? '' : ($record[$name] ?? '');
+                    $column = (string) ($field['column'] ?? $name);
+                    $value = ($field['writeOnly'] ?? false) ? '' : ($record[$column] ?? '');
                     $required = ($field['required'] ?? false) && !($record && ($field['writeOnly'] ?? false));
                     $wide = ($field['type'] ?? '') === 'textarea';
+                    $inputId = 'catalog-field-' . preg_replace('/[^a-zA-Z0-9_-]/', '-', (string) $name);
                     ?>
-                    <label class="field <?= $wide ? 'wide' : '' ?>">
+                    <?php if (!empty($field['section'])): ?>
+                        <div class="catalog-form-section wide"><h3><?= e($field['section']) ?></h3></div>
+                    <?php endif; ?>
+                    <label class="field <?= $wide ? 'wide' : '' ?><?= ($field['type'] ?? '') === 'checkbox' ? ' checkbox-field' : '' ?>" for="<?= e($inputId) ?>">
                         <span><?= e($field['label']) ?><?= $required ? ' *' : '' ?></span>
                         <?php if ($field['type'] === 'textarea'): ?>
-                            <textarea name="<?= e($name) ?>" rows="4" <?= $required ? 'required' : '' ?>><?= e($value) ?></textarea>
+                            <textarea id="<?= e($inputId) ?>" name="<?= e($name) ?>" rows="4" <?= $required ? 'required' : '' ?>><?= e($value) ?></textarea>
                         <?php elseif ($field['type'] === 'select'): ?>
-                            <select name="<?= e($name) ?>" <?= $required ? 'required' : '' ?>>
+                            <select id="<?= e($inputId) ?>" name="<?= e($name) ?>" <?= $required ? 'required' : '' ?>>
                                 <option value="">Seleccionar…</option>
                                 <?php foreach ($field['options'] as $optionValue => $optionLabel): ?>
-                                    <option value="<?= e($optionValue) ?>" <?= (string) $value === (string) $optionValue ? 'selected' : '' ?>><?= e($optionLabel) ?></option>
+                                    <?php $optionSelected = (string) $value === (string) $optionValue || (($field['caseInsensitiveOptions'] ?? false) && strcasecmp((string) $value, (string) $optionValue) === 0); ?>
+                                    <option value="<?= e($optionValue) ?>" <?= $optionSelected ? 'selected' : '' ?>><?= e($optionLabel) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         <?php elseif ($field['type'] === 'relation'): ?>
-                            <select name="<?= e($name) ?>" <?= $required ? 'required' : '' ?>>
+                            <select id="<?= e($inputId) ?>" name="<?= e($name) ?>" <?= $required ? 'required' : '' ?>>
                                 <option value="">Seleccionar…</option>
                                 <?php foreach (repository()->options($field['relation']) as $option): ?>
-                                    <option value="<?= e($option['option_value']) ?>" <?= (string) $value === (string) $option['option_value'] ? 'selected' : '' ?>><?= e($option['option_label']) ?> (#<?= e($option['option_value']) ?>)</option>
+                                    <option value="<?= e($option['option_value']) ?>" <?= (string) $value === (string) $option['option_value'] ? 'selected' : '' ?>><?= e($option['option_label']) ?><?= ($field['showId'] ?? true) ? ' (#' . e($option['option_value']) . ')' : '' ?></option>
                                 <?php endforeach; ?>
                             </select>
+                        <?php elseif ($field['type'] === 'checkbox'): ?>
+                            <span class="checkbox-control">
+                                <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($name) ?>" value="<?= e($field['checkedValue'] ?? '1') ?>" <?= in_array((string) $value, ['1', 'true', 'on', 'si', 'Sí'], true) ? 'checked' : '' ?>>
+                                <span>Habilitado</span>
+                            </span>
+                        <?php elseif ($field['type'] === 'file'): ?>
+                            <input id="<?= e($inputId) ?>" type="file" name="<?= e($name) ?>" <?= !empty($field['accept']) ? 'accept="' . e($field['accept']) . '"' : '' ?> <?= $required ? 'required' : '' ?>>
+                            <?php if ((string) $value !== ''): ?><small>Hay una imagen guardada. Selecciona otra únicamente para reemplazarla.</small><?php endif; ?>
                         <?php else: ?>
-                            <input type="<?= e($field['type']) ?>" name="<?= e($name) ?>" value="<?= e($value) ?>"
+                            <input id="<?= e($inputId) ?>" type="<?= e($field['type']) ?>" name="<?= e($name) ?>" value="<?= e($value) ?>"
                                 <?= $required ? 'required' : '' ?>
                                 <?= isset($field['maxlength']) && $field['maxlength'] ? 'maxlength="' . e($field['maxlength']) . '"' : '' ?>
                                 <?= isset($field['step']) ? 'step="' . e($field['step']) . '"' : '' ?>
                                 <?= isset($field['min']) && $field['min'] !== null ? 'min="' . e($field['min']) . '"' : '' ?>
                                 <?= isset($field['max']) && $field['max'] !== null ? 'max="' . e($field['max']) . '"' : '' ?>
+                                <?= isset($field['inputMode']) ? 'inputmode="' . e($field['inputMode']) . '"' : '' ?>
                                 <?= ($field['writeOnly'] ?? false) && $record ? 'placeholder="Dejar vacío para conservar"' : '' ?>>
                         <?php endif; ?>
                     </label>
@@ -3157,6 +3172,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         icon.innerHTML = captureSummaryIcons[kind] || captureSummaryIcons.detected;
         labelNode.textContent = label;
         valueNode.textContent = String(value);
+        detailNode.className = 'movement-detail-text';
         detailNode.textContent = detail;
         copy.append(labelNode, valueNode, detailNode);
         card.append(icon, copy);
@@ -3262,6 +3278,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 cells.forEach((value, cellIndex) => {
                     const cell = document.createElement('td');
                     cell.textContent = value;
+                    if (cellIndex === 2) cell.classList.add('movement-description-text');
                     if (cellIndex === 6) cell.className = match.associated ? 'short-key-found' : 'short-key-missing';
                     row.appendChild(cell);
                 });

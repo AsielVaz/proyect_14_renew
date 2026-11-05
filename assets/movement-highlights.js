@@ -3,6 +3,7 @@
 
     const movementPattern = /\b(Retiros?|Dep[oó]sitos?)\b/giu;
     const movementTest = /\b(Retiros?|Dep[oó]sitos?)\b/iu;
+    const movementExact = /^(Retiros?|Dep[oó]sitos?)$/iu;
     const withdrawalTest = /^Retiros?$/iu;
     const ignoredSelector = [
         'script',
@@ -14,6 +15,10 @@
         'template',
         '[contenteditable="true"]',
         '.movement-kind',
+        '.movement-detail-text',
+        '.movement-description-text',
+        '.global-search-result-description',
+        '.invoice-line-description',
     ].join(',');
 
     const movementClass = (value) => withdrawalTest.test(value)
@@ -22,8 +27,8 @@
 
     const syncSelect = (select) => {
         select.classList.remove('movement-kind', 'is-withdrawal', 'is-deposit');
-        const selectedText = select.selectedOptions[0]?.textContent || '';
-        const match = selectedText.match(movementTest);
+        const selectedText = (select.selectedOptions[0]?.textContent || '').trim();
+        const match = selectedText.match(movementExact);
         if (match) select.classList.add('movement-kind', movementClass(match[0]));
     };
 
@@ -57,7 +62,7 @@
         }
         options.forEach((option) => {
             option.classList.remove('movement-kind', 'is-withdrawal', 'is-deposit');
-            const match = option.textContent?.match(movementTest);
+            const match = option.textContent?.trim().match(movementExact);
             if (match) option.classList.add('movement-kind', movementClass(match[0]));
         });
         const selects = [];

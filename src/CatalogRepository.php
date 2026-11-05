@@ -54,18 +54,38 @@ final class CatalogRepository
         return $query->fetch() ?: null;
     }
 
-    public function save(array $catalog, array $input, ?int $id): int
+    public function save(array $catalog, array $input, ?int $id, array $files = []): int
     {
         $values = [];
         foreach ($catalog['fields'] as $name => $field) {
-            $value = isset($input[$name]) && is_scalar($input[$name]) ? trim((string) $input[$name]) : '';
+            $column = (string) ($field['column'] ?? $name);
+            $type = (string) ($field['type'] ?? 'text');
+
+            if ($type === 'file') {
+                $file = $files[$name] ?? null;
+                $error = is_array($file) ? (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+                if ($error === UPLOAD_ERR_NO_FILE) {
+                    if (($field['required'] ?? false) && $id === null) {
+                        throw new RuntimeException('El campo “' . $field['label'] . '” es obligatorio.');
+                    }
+                    continue;
+                }
+                $values[$column] = $this->storeUploadedImage($file, $field);
+                continue;
+            }
+
+            if ($type === 'checkbox') {
+                $value = isset($input[$name]) ? (string) ($field['checkedValue'] ?? '1') : (string) ($field['uncheckedValue'] ?? '0');
+            } else {
+                $value = isset($input[$name]) && is_scalar($input[$name]) ? trim((string) $input[$name]) : '';
+            }
             if (($field['required'] ?? false) && $value === '' && !($id && ($field['writeOnly'] ?? false))) {
                 throw new RuntimeException('El campo “' . $field['label'] . '” es obligatorio.');
             }
             if ($id && ($field['writeOnly'] ?? false) && $value === '') {
                 continue;
             }
-            $values[$name] = $value === '' ? null : $value;
+            $values[$column] = $value === '' ? null : $value;
         }
 
         if ($id === null) {
@@ -83,12 +103,15 @@ final class CatalogRepository
         $table = $this->identifier($catalog['table']);
         if ($id !== null) {
             $assignments = [];
-            foreach (array_keys($values) as $name) {
-                $assignments[] = $this->identifier($name) . ' = :' . $name;
+            $params = [];
+            foreach ($values as $name => $value) {
+                $parameter = 'value_' . count($params);
+                $assignments[] = $this->identifier($name) . ' = :' . $parameter;
+                $params[$parameter] = $value;
             }
-            $values['id'] = $id;
-            $query = $this->pdo->prepare("UPDATE {$table} SET " . implode(', ', $assignments) . ' WHERE id = :id');
-            $query->execute($values);
+            $params['record_id'] = $id;
+            $query = $this->pdo->prepare("UPDATE {$table} SET " . implode(', ', $assignments) . ' WHERE id = :record_id');
+            $query->execute($params);
             return $id;
         }
 
@@ -99,12 +122,65 @@ final class CatalogRepository
             }
         }
         $columns = array_merge(array_keys($values), array_keys($sqlDefaults));
-        $placeholders = array_map(static fn (string $name): string => isset($sqlDefaults[$name]) ? $sqlDefaults[$name] : ':' . $name, $columns);
+        $params = [];
+        $placeholders = [];
+        foreach ($columns as $name) {
+            if (isset($sqlDefaults[$name])) {
+                $placeholders[] = $sqlDefaults[$name];
+                continue;
+            }
+            $parameter = 'value_' . count($params);
+            $placeholders[] = ':' . $parameter;
+            $params[$parameter] = $values[$name];
+        }
         $query = $this->pdo->prepare(
             "INSERT INTO {$table} (" . implode(', ', array_map([$this, 'identifier'], $columns)) . ') VALUES (' . implode(', ', $placeholders) . ')'
         );
-        $query->execute($values);
+        $query->execute($params);
         return (int) $this->pdo->lastInsertId();
+    }
+
+    private function storeUploadedImage(mixed $file, array $field): string
+    {
+        if (!is_array($file)) {
+            throw new RuntimeException('La imagen recibida no es válida.');
+        }
+
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('No fue posible cargar la imagen del cliente.');
+        }
+
+        $temporaryPath = (string) ($file['tmp_name'] ?? '');
+        $size = (int) ($file['size'] ?? 0);
+        if ($temporaryPath === '' || !is_uploaded_file($temporaryPath) || $size <= 0 || $size > 5 * 1024 * 1024) {
+            throw new RuntimeException('La imagen debe ser un archivo válido de hasta 5 MB.');
+        }
+
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($temporaryPath);
+        $extensions = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/gif' => 'gif',
+        ];
+        if (!is_string($mime) || !isset($extensions[$mime])) {
+            throw new RuntimeException('La imagen debe estar en formato JPG, PNG, WebP o GIF.');
+        }
+
+        $directory = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($field['uploadDirectory'] ?? 'catalogs')) ?: 'catalogs';
+        $relativeDirectory = 'assets/uploads/' . $directory;
+        $absoluteDirectory = APP_ROOT . '/' . $relativeDirectory;
+        if (!is_dir($absoluteDirectory) && !mkdir($absoluteDirectory, 0775, true) && !is_dir($absoluteDirectory)) {
+            throw new RuntimeException('No fue posible preparar la carpeta para imágenes.');
+        }
+
+        $filename = bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
+        if (!move_uploaded_file($temporaryPath, $absoluteDirectory . '/' . $filename)) {
+            throw new RuntimeException('No fue posible guardar la imagen del cliente.');
+        }
+
+        return \app_url($relativeDirectory . '/' . $filename);
     }
 
     public function delete(array $catalog, int $id): void

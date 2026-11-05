@@ -8,9 +8,6 @@ final class Catalogs
 {
     public static function all(): array
     {
-        $yesNo = ['1' => 'Sí', '0' => 'No'];
-        $active = ['1' => 'Activo', '0' => 'Inactivo'];
-
         return [
             'empresas' => [
                 'label' => 'Empresas', 'table' => 'empresas', 'title' => 'razon',
@@ -55,22 +52,56 @@ final class Catalogs
                 'label' => 'Carteras / clientes', 'table' => 'clientes', 'title' => 'nombre',
                 'list' => ['id', 'nombre', 'razon_social', 'rfc', 'correo', 'telefono', 'activo'],
                 'fields' => [
-                    'nombre' => self::text('Nombre', false, 150),
-                    'razon_social' => self::text('Razón social', false, 250),
+                    'nombre' => self::text('Nombre', false, 150) + ['section' => 'Datos básicos'],
+                    'telefono' => self::text('Teléfono', false, 15) + ['inputMode' => 'tel'],
+                    'esquema_comision' => self::select('Esquema de comisión', [
+                        'Total' => 'Total',
+                        'Total Invertido' => 'Total Invertido',
+                        'Subtotal' => 'Subtotal',
+                    ]),
+                    'porcentajeCom' => self::number('Comisión', false, '0.01') + ['column' => 'comision'],
+                    'color' => self::select('Color', [
+                        'FFEB84' => 'Amarillo',
+                        '74C7DA' => 'Azul',
+                        '000080' => 'Azul Marino',
+                        'C683EA' => 'Morado',
+                        'FF9D35' => 'Naranja',
+                        'FF5C5C' => 'Rojo',
+                        '7ADA74' => 'Verde',
+                        'A53636' => 'Vino',
+                    ]),
+                    'texto' => self::select('Color de texto', [
+                        'fff' => 'Blanco',
+                        'adadad' => 'Gris',
+                        '000' => 'Negro',
+                    ]),
+                    'archivo' => self::file('Imagen del cliente', 'image/jpeg,image/png,image/webp,image/gif') + ['column' => 'imagen', 'uploadDirectory' => 'clients'],
+                    'activo' => self::checkbox('Activo'),
+                    'revision' => self::checkbox('En revisión'),
+
+                    'sub_com1' => self::relation('Comisión adicional (1)', 'clientes', 'id', 'nombre') + ['column' => '1_subcomision', 'section' => 'Comisiones adicionales', 'showId' => false],
+                    'porcentaje1' => self::number('Porcentaje de comisión (1)', false, '0.01') + ['column' => 'porc_1_subcomision'],
+                    'sub_com2' => self::relation('Comisión adicional (2)', 'clientes', 'id', 'nombre') + ['column' => '2_subcomision', 'showId' => false],
+                    'porcentaje2' => self::number('Porcentaje de comisión (2)', false, '0.01') + ['column' => 'porc_2_subcomision'],
+                    'sub_com3' => self::relation('Comisión adicional (3)', 'clientes', 'id', 'nombre') + ['column' => '3_subcomision', 'showId' => false],
+                    'porcentaje3' => self::number('Porcentaje de comisión (3)', false, '0.01') + ['column' => 'porc_3_subcomision'],
+
+                    'correo' => self::email('Correo de saldos (1)', false, 100) + ['section' => 'Correos de saldos'],
+                    'correoSaldos2' => self::email('Correo de saldos (2)', false, 100) + ['column' => 'correo_2_s'],
+                    'correoSaldos3' => self::email('Correo de saldos (3)', false, 100) + ['column' => 'correo_3_s'],
+
+                    'correo2' => self::email('Correo de facturas (1)', false, 100) + ['section' => 'Correos para envío de facturas'],
+                    'correoF2' => self::email('Correo de facturas (2)', false, 100) + ['column' => 'correo2_2_f'],
+                    'correoF3' => self::email('Correo de facturas (3)', false, 100) + ['column' => 'correo2_3_f'],
+
+                    'fact_auto' => self::select('Facturación automática', ['No' => 'No', 'Si' => 'Sí']) + ['column' => 'facturacion_automatica', 'section' => 'Información adicional', 'caseInsensitiveOptions' => true],
+                    'grupo' => self::relation('Grupo de cliente', 'grupo', 'id', 'nombre') + ['showId' => false],
+                    'notificar_saldo' => self::checkbox('Notificar saldos'),
+                    'lidera' => self::checkbox('Lidera grupo'),
+
+                    'razon_social' => self::text('Razón social', false, 250) + ['section' => 'Información de facturación'],
                     'rfc' => self::text('RFC', false, 50),
-                    'telefono' => self::text('Teléfono', false, 15),
-                    'correo' => self::email('Correo principal'),
-                    'correo2' => self::email('Correo 2'),
-                    'correo3' => self::email('Correo 3'),
-                    'tipo_cliente' => self::text('Tipo de cliente', false, 50),
                     'domicilio' => self::textarea('Domicilio'),
-                    'clave_corta' => self::text('Clave corta', false, 10),
-                    'empresa' => self::relation('Empresa', 'empresas', 'id', 'razon'),
-                    'grupo' => self::relation('Grupo', 'grupo', 'id', 'nombre'),
-                    'facturacion_automatica' => self::select('Facturación automática', ['si' => 'Sí', 'no' => 'No']),
-                    'comision' => self::number('Comisión', false, '0.01'),
-                    'notificar_saldo' => self::select('Notificar saldo', $yesNo),
-                    'activo' => self::select('Estado', $active),
                 ],
             ],
             'grupos' => [
@@ -197,6 +228,8 @@ final class Catalogs
     private static function textarea(string $label, bool $required = false): array { return compact('label', 'required') + ['type' => 'textarea']; }
     private static function date(string $label, bool $required = false): array { return compact('label', 'required') + ['type' => 'date']; }
     private static function color(string $label, bool $required = false): array { return compact('label', 'required') + ['type' => 'color']; }
+    private static function checkbox(string $label): array { return compact('label') + ['type' => 'checkbox', 'required' => false]; }
+    private static function file(string $label, string $accept = ''): array { return compact('label', 'accept') + ['type' => 'file', 'required' => false]; }
     private static function password(string $label, bool $required = false): array { return compact('label', 'required') + ['type' => 'password', 'writeOnly' => true]; }
     private static function number(string $label, bool $required = false, string $step = '1', ?int $min = null, ?int $max = null): array { return compact('label', 'required', 'step', 'min', 'max') + ['type' => 'number']; }
     private static function select(string $label, array $options, bool $required = false): array { return compact('label', 'options', 'required') + ['type' => 'select']; }

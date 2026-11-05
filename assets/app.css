@@ -2498,6 +2498,54 @@ tbody tr:hover {
     font-weight: 750;
 }
 
+.catalog-form-section {
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border);
+}
+
+.catalog-form-section:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.catalog-form-section h3 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 16px;
+}
+
+.field > small {
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+.checkbox-field {
+    align-content: start;
+}
+
+.checkbox-control {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    gap: 10px;
+    padding: 0 13px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.checkbox-control input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--color-primary);
+}
+
 .field.wide,
 .form-actions.wide {
     grid-column: 1 / -1;
