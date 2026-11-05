@@ -83,6 +83,40 @@
         return link;
     };
 
+    const createInvoiceResult = (item, letter) => {
+        const block = document.createElement('div');
+        block.className = 'global-search-result-block';
+        block.appendChild(createResult(item, 'invoices', letter));
+        if (!item.isPpd) return block;
+
+        const complements = Array.isArray(item.complements) ? item.complements : [];
+        const related = document.createElement('div');
+        related.className = 'global-search-related';
+        const heading = document.createElement('div');
+        heading.className = 'global-search-related-heading';
+        appendText(heading, 'strong', 'Complementos relacionados');
+        appendText(heading, 'span', String(complements.length));
+        related.appendChild(heading);
+
+        if (!complements.length) {
+            appendText(related, 'p', 'Esta factura PPD todavía no tiene complementos.', 'global-search-related-empty');
+        } else {
+            complements.forEach((complement) => {
+                const link = document.createElement('a');
+                link.className = 'global-search-related-item';
+                link.href = complement.url;
+                const copy = document.createElement('span');
+                appendText(copy, 'strong', complement.title || 'Complemento');
+                appendText(copy, 'small', [complement.meta, complement.date].filter(Boolean).join(' · '));
+                link.appendChild(copy);
+                appendText(link, 'span', complement.value || '', 'global-search-related-value');
+                related.appendChild(link);
+            });
+        }
+        block.appendChild(related);
+        return block;
+    };
+
     const render = (payload) => {
         results.replaceChildren();
         let total = 0;
@@ -99,7 +133,9 @@
             section.appendChild(heading);
             const list = document.createElement('div');
             list.className = 'global-search-result-list';
-            items.forEach((item) => list.appendChild(createResult(item, key, letter)));
+            items.forEach((item) => list.appendChild(
+                key === 'invoices' ? createInvoiceResult(item, letter) : createResult(item, key, letter)
+            ));
             section.appendChild(list);
             results.appendChild(section);
         });

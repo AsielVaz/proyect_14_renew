@@ -89,7 +89,7 @@ final class GlobalSearchRepository
             $params = ['search' => '%' . $term . '%', 'exact' => $term];
         }
         $query = $this->pdo->prepare("SELECT f.id, f.serie, f.folio, f.uuid, f.total_iva,
-            f.fecha, f.status, c.nombre AS cliente, e.razon AS empresa,
+            f.fecha, f.status, f.metodo_pago, c.nombre AS cliente, e.razon AS empresa,
             cc.razon_social AS receptor, cc.rfc
             FROM facturas f
             LEFT JOIN clientes c ON c.id = f.nombre
@@ -99,18 +99,74 @@ final class GlobalSearchRepository
             ORDER BY (CAST(f.id AS CHAR) = :exact) DESC, f.id DESC LIMIT {$limit}");
         $query->execute($params);
 
-        return array_map(static function (array $row): array {
+        $rows = $query->fetchAll();
+        $ppdInvoiceIds = array_map(
+            static fn (array $row): int => (int) $row['id'],
+            array_filter($rows, static fn (array $row): bool => (int) $row['metodo_pago'] === 2)
+        );
+        $complementsByInvoice = $this->invoiceComplements($ppdInvoiceIds);
+
+        return array_map(static function (array $row) use ($complementsByInvoice): array {
             $folio = trim((string) ($row['serie'] ?? '') . (string) ($row['folio'] ?? ''));
+            $invoiceId = (int) $row['id'];
+            $isPpd = (int) $row['metodo_pago'] === 2;
             return [
-                'id' => (int) $row['id'],
+                'id' => $invoiceId,
                 'title' => 'Factura #' . $row['id'] . ($folio !== '' ? ' · ' . $folio : ''),
                 'description' => self::firstText($row['receptor'], $row['rfc'], $row['uuid']),
-                'meta' => trim((string) ($row['cliente'] ?: 'Sin cliente')) . ' · ' . trim((string) ($row['empresa'] ?: 'Sin empresa')),
+                'meta' => trim((string) ($row['cliente'] ?: 'Sin cliente')) . ' · '
+                    . trim((string) ($row['empresa'] ?: 'Sin empresa')) . ($isPpd ? ' · PPD' : ''),
                 'value' => self::money($row['total_iva']),
                 'date' => (string) ($row['fecha'] ?? ''),
-                'url' => '?invoice=list&q=' . rawurlencode((string) $row['id']),
+                'url' => $isPpd
+                    ? '?invoice=complements&id=' . rawurlencode((string) $invoiceId)
+                    : '?invoice=list&q=' . rawurlencode((string) $invoiceId),
+                'isPpd' => $isPpd,
+                'complements' => $complementsByInvoice[$invoiceId] ?? [],
             ];
-        }, $query->fetchAll());
+        }, $rows);
+    }
+
+    /**
+     * @param list<int> $invoiceIds
+     * @return array<int, list<array<string, mixed>>>
+     */
+    private function invoiceComplements(array $invoiceIds): array
+    {
+        $invoiceIds = array_values(array_unique(array_filter($invoiceIds, static fn (int $id): bool => $id > 0)));
+        if ($invoiceIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($invoiceIds), '?'));
+        $query = $this->pdo->prepare("SELECT rel.id_factura, rel.id_complemento, rel.monto,
+                rel.num_pago, rel.fecha_pago, fc.serie, fc.folio, fc.uuid, fc.status, fc.status_error
+            FROM facturar_rel_complementos rel
+            INNER JOIN facturas_complementos fc ON fc.id = rel.id_complemento
+            WHERE rel.id_factura IN ({$placeholders})
+            ORDER BY rel.id_factura, rel.num_pago ASC, rel.id ASC");
+        $query->execute($invoiceIds);
+
+        $result = [];
+        foreach ($query->fetchAll() as $row) {
+            $invoiceId = (int) $row['id_factura'];
+            $folio = trim((string) ($row['serie'] ?? '') . (string) ($row['folio'] ?? ''));
+            $uuid = trim((string) ($row['uuid'] ?? ''));
+            $status = $uuid !== ''
+                ? 'Timbrado'
+                : self::firstText($row['status'], $row['status_error'], 'Pendiente');
+            $result[$invoiceId][] = [
+                'id' => (int) $row['id_complemento'],
+                'title' => 'Complemento #' . $row['id_complemento'] . ($folio !== '' ? ' · ' . $folio : ''),
+                'description' => $uuid !== '' ? $uuid : 'Sin UUID',
+                'meta' => 'Parcialidad ' . ((int) ($row['num_pago'] ?? 0) ?: '—') . ' · ' . $status,
+                'value' => self::money($row['monto']),
+                'date' => (string) ($row['fecha_pago'] ?? ''),
+                'url' => '?complement=detail&id=' . rawurlencode((string) $row['id_complemento']),
+            ];
+        }
+
+        return $result;
     }
 
     private function captures(string $term, int $operatorId, int $limit): array
