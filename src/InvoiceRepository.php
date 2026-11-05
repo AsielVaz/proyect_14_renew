@@ -89,7 +89,7 @@ final class InvoiceRepository
         if ($paymentId <= 0) {
             throw new RuntimeException('El movimiento seleccionado no es válido.');
         }
-        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.id_factura,
+        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.id_factura, p.id_factura_res,
                 CAST(p.nombre AS UNSIGNED) AS client_id,
                 CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
                 cl.nombre AS cliente, e.razon AS empresa
@@ -108,6 +108,9 @@ final class InvoiceRepository
         }
         if ((int) ($payment['id_factura'] ?? 0) > 0) {
             throw new RuntimeException('El movimiento ya está relacionado con una factura.');
+        }
+        if (self::positiveIntegerReference($payment['id_factura_res'] ?? null) > 0) {
+            throw new RuntimeException('El movimiento ya está relacionado con un complemento de pago.');
         }
         if ((int) $payment['client_id'] <= 0 || (int) $payment['company_id'] <= 0) {
             throw new RuntimeException('El movimiento no tiene empresa y cliente válidos para crear la factura.');
@@ -282,7 +285,7 @@ final class InvoiceRepository
                     'description' => $detail['description'], 'tax' => $detail['tax']]);
             }
             if ($paymentId > 0) {
-                $payment = $this->pdo->prepare('SELECT id, id_factura FROM pagos WHERE id = :id FOR UPDATE');
+                $payment = $this->pdo->prepare('SELECT id, id_factura, id_factura_res FROM pagos WHERE id = :id FOR UPDATE');
                 $payment->execute(['id' => $paymentId]);
                 $row = $payment->fetch();
                 if (!$row) {
@@ -290,6 +293,9 @@ final class InvoiceRepository
                 }
                 if ((int) ($row['id_factura'] ?? 0) > 0) {
                     throw new RuntimeException('El pago seleccionado ya está relacionado con otra factura.');
+                }
+                if (self::positiveIntegerReference($row['id_factura_res'] ?? null) > 0) {
+                    throw new RuntimeException('El pago seleccionado ya está relacionado con un complemento de pago.');
                 }
                 $this->pdo->prepare('UPDATE pagos SET id_factura = :invoice WHERE id = :payment')->execute(['invoice' => $invoiceId, 'payment' => $paymentId]);
                 $this->pdo->prepare('UPDATE facturas SET id_pago = :payment WHERE id = :invoice')->execute(['payment' => $paymentId, 'invoice' => $invoiceId]);
@@ -344,5 +350,11 @@ final class InvoiceRepository
         $query = $this->pdo->prepare("SELECT id FROM {$table} WHERE id = :id");
         $query->execute(['id' => $id]);
         return (bool) $query->fetchColumn();
+    }
+
+    private static function positiveIntegerReference(mixed $value): int
+    {
+        $value = trim((string) $value);
+        return preg_match('/^[0-9]+$/D', $value) && (int) $value > 0 ? (int) $value : 0;
     }
 }

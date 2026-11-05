@@ -111,7 +111,8 @@ final class PaymentComplementRepository
             throw new RuntimeException('El movimiento seleccionado no es válido.');
         }
 
-        $query = $this->pdo->prepare("SELECT p.id, ABS(p.monto) AS movement_amount,
+        $query = $this->pdo->prepare("SELECT p.id, p.id_factura, p.id_factura_res,
+                ABS(p.monto) AS movement_amount,
                 CAST(p.nombre AS UNSIGNED) AS client_id,
                 CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
                 cl.nombre AS cliente, e.razon AS empresa,
@@ -133,6 +134,12 @@ final class PaymentComplementRepository
         $payment = $query->fetch();
         if (!$payment) {
             throw new RuntimeException('El movimiento ya no está asignado o no está disponible para complementos.');
+        }
+        if ((int) ($payment['id_factura'] ?? 0) > 0) {
+            throw new RuntimeException('El movimiento ya está relacionado con una factura.');
+        }
+        if (self::positiveIntegerReference($payment['id_factura_res'] ?? null) > 0) {
+            throw new RuntimeException('El movimiento ya está relacionado con un complemento de pago.');
         }
 
         $clientId = (int) $payment['client_id'];
@@ -308,7 +315,8 @@ final class PaymentComplementRepository
             }
             $paymentMaximum = null;
             if ($paymentId > 0) {
-                $payment = $this->pdo->prepare("SELECT p.id, CAST(p.nombre AS UNSIGNED) AS client_id,
+                $payment = $this->pdo->prepare("SELECT p.id, p.id_factura, p.id_factura_res,
+                        CAST(p.nombre AS UNSIGNED) AS client_id,
                         CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
                         ABS(p.monto) AS movement_amount
                     FROM pagos p
@@ -321,6 +329,12 @@ final class PaymentComplementRepository
                 $paymentRow = $payment->fetch();
                 if (!$paymentRow) {
                     throw new RuntimeException('El movimiento de pago ya no está asignado o no está disponible.');
+                }
+                if ((int) ($paymentRow['id_factura'] ?? 0) > 0) {
+                    throw new RuntimeException('El movimiento ya está relacionado con una factura.');
+                }
+                if (self::positiveIntegerReference($paymentRow['id_factura_res'] ?? null) > 0) {
+                    throw new RuntimeException('El movimiento ya está relacionado con un complemento de pago.');
                 }
                 $used = $this->pdo->prepare("SELECT COALESCE(SUM(total_factura), 0)
                     FROM facturas_complementos
@@ -473,5 +487,11 @@ final class PaymentComplementRepository
         if (!$query->fetchColumn()) {
             throw new RuntimeException('Selecciona un valor válido para ' . $label . '.');
         }
+    }
+
+    private static function positiveIntegerReference(mixed $value): int
+    {
+        $value = trim((string) $value);
+        return preg_match('/^[0-9]+$/D', $value) && (int) $value > 0 ? (int) $value : 0;
     }
 }

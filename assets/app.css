@@ -1047,16 +1047,22 @@ textarea:focus {
     gap: 8px;
 }
 
-.search input {
+.search > input {
     width: min(340px, 50vw);
 }
 
-.movement-document-filter {
+.movement-document-filters {
     display: grid;
     gap: 4px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
 }
 
-.movement-document-filter > span {
+.movement-document-filters legend {
+    margin-bottom: 4px;
+    padding: 0;
     color: var(--color-muted);
     font-size: 10px;
     font-weight: 750;
@@ -1064,8 +1070,49 @@ textarea:focus {
     text-transform: uppercase;
 }
 
-.movement-document-filter select {
-    min-width: 190px;
+.movement-document-filters > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.movement-document-filters label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 7px 11px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 10px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.movement-document-filters label:hover,
+.movement-document-filters label:has(input:focus-visible) {
+    border-color: var(--color-primary-border);
+}
+
+.movement-document-filters label:has(input:checked) {
+    border-color: var(--color-primary-border);
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+}
+
+.movement-document-filters input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    accent-color: var(--color-primary);
+}
+
+.movement-document-filters small {
+    color: var(--color-muted);
+    font-size: 10px;
 }
 
 .table-wrap {
@@ -4536,13 +4583,17 @@ body.has-invoice-email-modal {
         right: 16px;
     }
 
-    .search input {
+    .search > input {
         width: 100%;
     }
 
-    .movement-document-filter,
-    .movement-document-filter select {
+    .movement-document-filters {
         width: 100%;
+    }
+
+    .movement-document-filters label {
+        flex: 1 1 calc(50% - 6px);
+        min-height: 44px;
     }
 
     .form-grid {

@@ -22,17 +22,24 @@ final class MovementRepository
         int $page,
         int $perPage = 25,
         ?int $clientId = null,
-        string $documentFilter = ''
+        array|string $documentFilters = []
     ): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
-        $documentFilter = $view === 'asignados'
-            && in_array($documentFilter, ['internal', 'complement', 'invoice', 'none'], true)
-                ? $documentFilter
-                : '';
+        $documentFilters = is_array($documentFilters) ? $documentFilters : [$documentFilters];
+        $documentFilters = $view === 'asignados'
+            ? array_values(array_unique(array_intersect(
+                array_map('strval', $documentFilters),
+                ['internal', 'complement', 'invoice', 'none']
+            )))
+            : [];
         // Las vistas sin filtro conservan su límite rápido; una búsqueda explícita
         // debe consultar el histórico completo para que un resultado global sea localizable.
-        [$source, $sort] = $this->source($view, $filterByClient || $search !== '' || $documentFilter !== '');
+        [$source, $sort] = $this->source(
+            $view,
+            $filterByClient || $search !== '' || $documentFilters !== [],
+            $documentFilters
+        );
         $columns = array_keys($definition['columns']);
         $searchableColumns = $columns;
         foreach ($definition['columns'] as $column) {
@@ -51,18 +58,6 @@ final class MovementRepository
         if ($filterByClient) {
             $conditions[] = 'client_id = :client_id';
             $params['client_id'] = $clientId;
-        }
-        if ($documentFilter !== '') {
-            $conditions[] = match ($documentFilter) {
-                'internal' => 'CAST(client_id AS UNSIGNED) = 13',
-                'complement' => "TRIM(COALESCE(id_factura_res, '')) REGEXP '^[0-9]+$'
-                    AND CAST(TRIM(id_factura_res) AS UNSIGNED) > 0",
-                'invoice' => 'COALESCE(id_factura, 0) > 0',
-                'none' => "CAST(COALESCE(client_id, 0) AS UNSIGNED) <> 13
-                    AND COALESCE(id_factura, 0) <= 0
-                    AND NOT (TRIM(COALESCE(id_factura_res, '')) REGEXP '^[0-9]+$'
-                        AND CAST(TRIM(id_factura_res) AS UNSIGNED) > 0)",
-            };
         }
         if ($search !== '') {
             $searchColumns = implode(', ', array_map([$this, 'identifier'], $searchableColumns));
@@ -124,11 +119,22 @@ final class MovementRepository
      */
     private function attachPortfolioThirteenInvoices(array $rows): array
     {
-        $targetRows = array_filter(
-            $rows,
-            static fn (array $row): bool => (int) ($row['client_id'] ?? 0) === 13
-                && abs((float) ($row['monto'] ?? 0)) > 0.005
-        );
+        $targetRows = [];
+        foreach ($rows as &$row) {
+            if ((int) ($row['client_id'] ?? 0) !== 13) {
+                continue;
+            }
+            $linkedInvoiceId = (int) ($row['id_factura'] ?? 0);
+            if ($linkedInvoiceId > 0) {
+                $row['matched_invoice_id'] = $linkedInvoiceId;
+                $row['matched_invoice_count'] = 1;
+                continue;
+            }
+            if (abs((float) ($row['monto'] ?? 0)) > 0.005) {
+                $targetRows[] = $row;
+            }
+        }
+        unset($row);
         if ($targetRows === []) {
             return $rows;
         }
@@ -142,8 +148,12 @@ final class MovementRepository
         $query = $this->pdo->prepare("SELECT f.id, f.id_pago, f.razon AS company_id,
                 f.total_iva, f.serie, f.folio, f.uuid, f.metodo_pago, f.fecha
             FROM facturas f
-            WHERE CAST(f.nombre AS UNSIGNED) = 13
-              AND ROUND(f.total_iva, 2) IN ({$placeholders})
+            INNER JOIN (
+                SELECT MAX(id) AS id
+                FROM facturas
+                WHERE nombre = 13 AND total_iva IN ({$placeholders})
+                GROUP BY total_iva, razon
+            ) latest ON latest.id = f.id
             ORDER BY f.id DESC");
         $query->execute(array_values($amounts));
 
@@ -192,7 +202,7 @@ final class MovementRepository
             $row['matched_invoice_id'] = (int) $match['id'];
             $row['matched_invoice_folio'] = trim((string) ($match['serie'] ?? '') . (string) ($match['folio'] ?? ''));
             $row['matched_invoice_uuid'] = trim((string) ($match['uuid'] ?? ''));
-            $row['matched_invoice_count'] = count($candidates);
+            $row['matched_invoice_count'] = 1;
         }
         unset($row);
 
@@ -791,8 +801,24 @@ final class MovementRepository
         return (int) $this->pdo->lastInsertId();
     }
 
-    private function source(string $view, bool $filterByClient = false): array
+    private function source(string $view, bool $filterByClient = false, array $documentFilters = []): array
     {
+        $documentConditions = [];
+        foreach ($documentFilters as $documentFilter) {
+            $documentConditions[] = match ($documentFilter) {
+                'internal' => "p.nombre = '13'",
+                'complement' => "TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                    AND CAST(TRIM(p.id_factura_res) AS UNSIGNED) > 0",
+                'invoice' => 'COALESCE(p.id_factura, 0) > 0',
+                'none' => "COALESCE(p.nombre, '') <> '13'
+                    AND COALESCE(p.id_factura, 0) <= 0
+                    AND NOT (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                        AND CAST(TRIM(p.id_factura_res) AS UNSIGNED) > 0)",
+            };
+        }
+        $assignedDocumentCondition = $documentConditions === []
+            ? ''
+            : ' AND ((' . implode(') OR (', $documentConditions) . '))';
         $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
@@ -818,7 +844,8 @@ final class MovementRepository
             ],
             'asignados', 'reasignar' => [
                 $base . " WHERE p.status = 'asignado' AND p.tipo_movimiento <> 'Abono por comisión'
-                          AND p.banco <> 'STP' AND p.banco <> '99'" . ($filterByClient ? '' : ' ORDER BY p.id DESC LIMIT 500'),
+                          AND p.banco <> 'STP' AND p.banco <> '99'" . $assignedDocumentCondition
+                    . ($filterByClient ? '' : ' ORDER BY p.id DESC LIMIT 500'),
                 '`id` DESC',
             ],
             'totales' => [
@@ -835,7 +862,7 @@ final class MovementRepository
                 '`id` DESC',
             ],
             'cartera' => [
-                "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura,
+                "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.monto,
