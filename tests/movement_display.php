@@ -28,4 +28,18 @@ if (!isset($reassignmentAmount['secondary']['saldo_acreditable'])) {
     throw new RuntimeException('Reasignación debe conservar el saldo acreditable.');
 }
 
-echo (count($cases) + 2) . " comprobaciones de presentación de movimientos superadas.\n";
+$invoiceReferences = [
+    [null, 0],
+    [0, 0],
+    [2, 0],
+    ['2', 0],
+    [3, 3],
+];
+foreach ($invoiceReferences as [$value, $expected]) {
+    $actual = App\Movements::invoiceDocumentId($value);
+    if ($actual !== $expected) {
+        throw new RuntimeException("La referencia de factura no se normalizó correctamente.");
+    }
+}
+
+echo (count($cases) + 2 + count($invoiceReferences)) . " comprobaciones de presentación de movimientos superadas.\n";

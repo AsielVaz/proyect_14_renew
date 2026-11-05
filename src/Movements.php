@@ -117,6 +117,12 @@ final class Movements
         return implode(' ', $unique);
     }
 
+    public static function invoiceDocumentId(mixed $value): int
+    {
+        $id = (int) $value;
+        return $id > 0 && $id !== 2 ? $id : 0;
+    }
+
     private static function baseColumns(bool $assigned, bool $showCreditable = true): array
     {
         $columns = ['id' => 'ID'];

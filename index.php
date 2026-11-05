@@ -1445,6 +1445,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
                 </form>
             </div>
+            <?php if ($movementAction === 'assign' && $movementResult['rows'] !== []): ?>
+                <div class="batch-assignment-bar">
+                    <div><strong>Asignación por lote</strong><span>Selecciona una o más carteras. Los movimientos sin selección permanecerán sin asignar.</span></div>
+                    <button class="button primary" type="submit" form="assignmentBatchForm">Guardar asignaciones seleccionadas</button>
+                </div>
+            <?php endif; ?>
             <?php if (in_array($movementAction, ['assign', 'reassign'], true)): ?>
                 <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
             <?php endif; ?>
@@ -1458,8 +1464,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             trim((string) ($row['tipo_movimiento'] ?? '')),
                             'Retiro'
                         ) === 0;
-                        $movementInvoiceId = (int) ($row['id_factura'] ?? 0);
-                        $movementInvoiceId = $movementInvoiceId > 0 ? $movementInvoiceId : 0;
+                        $movementInvoiceId = Movements::invoiceDocumentId($row['id_factura'] ?? null);
                         $rawMovementComplementId = trim((string) ($row['id_factura_res'] ?? ''));
                         $movementComplementId = preg_match('/^[0-9]+$/D', $rawMovementComplementId)
                             && (int) $rawMovementComplementId > 0
