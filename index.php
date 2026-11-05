@@ -1293,18 +1293,23 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction || $hasMovementContextActions): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
                     <tbody>
                     <?php foreach ($movementResult['rows'] as $row): ?>
+                        <?php $matchedMovementInvoiceId = (int) ($row['client_id'] ?? 0) === 13
+                            ? (int) ($row['matched_invoice_id'] ?? 0)
+                            : 0; ?>
                         <?php $canCreateMovementComplement = $hasMovementContextActions
                             && (string) ($row['status'] ?? '') === 'asignado'
                             && abs((float) ($row['monto'] ?? 0)) > 0.005
                             && (int) ($row['client_id'] ?? 0) > 0
-                            && (int) ($row['company_id'] ?? 0) > 0; ?>
+                            && (int) ($row['company_id'] ?? 0) > 0
+                            && $matchedMovementInvoiceId <= 0; ?>
                         <?php $canCreateMovementInvoice = $hasMovementContextActions
                             && (string) ($row['status'] ?? '') === 'asignado'
                             && (int) ($row['client_id'] ?? 0) > 0
                             && (int) ($row['company_id'] ?? 0) > 0
-                            && (int) ($row['id_factura'] ?? 0) <= 0;
-                        $hasMovementDocumentActions = $canCreateMovementComplement || $canCreateMovementInvoice; ?>
-                        <tr<?= $hasMovementDocumentActions ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?>>
+                            && (int) ($row['id_factura'] ?? 0) <= 0
+                            && $matchedMovementInvoiceId <= 0;
+                        $hasMovementContextMenu = $canCreateMovementComplement || $canCreateMovementInvoice; ?>
+                        <tr<?= $hasMovementContextMenu ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?>>
                             <?php foreach ($movement['columns'] as $columnKey => $column): ?>
                                 <?php
                                 $columnConfig = is_array($column) ? $column : [];
@@ -1369,7 +1374,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="movement_unassign"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
                                                 <button class="button danger" type="submit">Desasignar</button>
                                             </form>
-                                            <?php if ($hasMovementDocumentActions): ?>
+                                            <?php if ($matchedMovementInvoiceId > 0): ?>
+                                                <a class="button primary" href="?document=invoice_pdf&amp;id=<?= e($matchedMovementInvoiceId) ?>" target="_blank" rel="noopener" title="Factura <?= e(($row['matched_invoice_folio'] ?? '') ?: ('#' . $matchedMovementInvoiceId)) ?>">Mostrar factura</a>
+                                            <?php elseif ($hasMovementContextMenu): ?>
                                                 <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
                                                 <div class="record-action-source" hidden><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?></div>
                                             <?php endif; ?>
@@ -1379,7 +1386,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="transfer_delete"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
                                             <button class="button danger" type="submit">Eliminar par</button>
                                         </form>
-                                    <?php elseif ($hasMovementDocumentActions): ?>
+                                    <?php elseif ($matchedMovementInvoiceId > 0): ?>
+                                        <a class="button primary" href="?document=invoice_pdf&amp;id=<?= e($matchedMovementInvoiceId) ?>" target="_blank" rel="noopener" title="Factura <?= e(($row['matched_invoice_folio'] ?? '') ?: ('#' . $matchedMovementInvoiceId)) ?>">Mostrar factura</a>
+                                    <?php elseif ($hasMovementContextMenu): ?>
                                         <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
                                         <div class="record-action-source" hidden><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?></div>
                                     <?php else: ?>

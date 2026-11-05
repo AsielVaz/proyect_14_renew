@@ -55,17 +55,22 @@ final class GlobalSearchRepository
             FROM pagos p
             LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
             LEFT JOIN empresas e ON e.id = CAST(p.empresa AS UNSIGNED)
-            WHERE {$condition} AND COALESCE(p.tipo_movimiento, '') <> 'Abono por comisión'{$access}
+            WHERE {$condition} AND LOWER(COALESCE(p.tipo_movimiento, '')) NOT LIKE 'abono por comisi%'{$access}
             ORDER BY (CAST(p.id AS CHAR) = :exact) DESC, p.id DESC LIMIT {$limit}");
         $query->execute($params);
 
         return array_map(static function (array $row): array {
             $description = self::firstText($row['descripcion'], $row['descripcion_detallada'], $row['detalle'], $row['factura']);
+            $rawMovementType = trim((string) ($row['tipo_movimiento'] ?? ''));
+            $normalizedMovementType = mb_strtolower($rawMovementType, 'UTF-8');
+            $movementType = str_starts_with($normalizedMovementType, 'abono')
+                ? 'Abono'
+                : ($normalizedMovementType === 'deposito' ? 'Depósito' : ($rawMovementType ?: 'Sin tipo'));
             return [
                 'id' => (int) $row['id'],
-                'title' => 'Pago #' . $row['id'],
+                'title' => 'Pago #' . $row['id'] . ' · ' . $movementType,
                 'description' => $description !== '' ? $description : ($row['tipo_movimiento'] ?: 'Movimiento sin descripción'),
-                'meta' => trim((string) $row['cliente']) . ' · ' . trim((string) $row['empresa']),
+                'meta' => 'Tipo: ' . $movementType . ' · ' . trim((string) $row['cliente']) . ' · ' . trim((string) $row['empresa']),
                 'value' => self::money($row['monto']),
                 'date' => (string) ($row['fecha'] ?? ''),
                 'url' => '?movement=totales&q=' . rawurlencode((string) $row['id']),

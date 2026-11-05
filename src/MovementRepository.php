@@ -82,10 +82,97 @@ final class MovementRepository
             }
         }
         unset($row);
+        if ($view === 'asignados') {
+            $rows = $this->attachPortfolioThirteenInvoices($rows);
+        }
         return [
             'rows' => $rows, 'total' => count($rows), 'page' => $page,
             'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
         ];
+    }
+
+    /**
+     * Relaciona los movimientos visibles de la cartera 13 con facturas de esa
+     * misma cartera y monto, sin ejecutar una consulta por cada movimiento.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function attachPortfolioThirteenInvoices(array $rows): array
+    {
+        $targetRows = array_filter(
+            $rows,
+            static fn (array $row): bool => (int) ($row['client_id'] ?? 0) === 13
+                && abs((float) ($row['monto'] ?? 0)) > 0.005
+        );
+        if ($targetRows === []) {
+            return $rows;
+        }
+
+        $amounts = [];
+        foreach ($targetRows as $row) {
+            $key = number_format(round((float) $row['monto'], 2), 2, '.', '');
+            $amounts[$key] = (float) $key;
+        }
+        $placeholders = implode(',', array_fill(0, count($amounts), '?'));
+        $query = $this->pdo->prepare("SELECT f.id, f.id_pago, f.razon AS company_id,
+                f.total_iva, f.serie, f.folio, f.uuid, f.metodo_pago, f.fecha
+            FROM facturas f
+            WHERE CAST(f.nombre AS UNSIGNED) = 13
+              AND ROUND(f.total_iva, 2) IN ({$placeholders})
+            ORDER BY f.id DESC");
+        $query->execute(array_values($amounts));
+
+        $byAmount = [];
+        foreach ($query->fetchAll() as $invoice) {
+            $key = number_format(round((float) $invoice['total_iva'], 2), 2, '.', '');
+            $byAmount[$key][] = $invoice;
+        }
+
+        foreach ($rows as &$row) {
+            if ((int) ($row['client_id'] ?? 0) !== 13) {
+                continue;
+            }
+            $key = number_format(round((float) ($row['monto'] ?? 0), 2), 2, '.', '');
+            $candidates = $byAmount[$key] ?? [];
+            if ($candidates === []) {
+                continue;
+            }
+            $linkedInvoiceId = (int) ($row['id_factura'] ?? 0);
+            $paymentId = (int) ($row['id'] ?? 0);
+            $companyId = (int) ($row['company_id'] ?? 0);
+            $match = null;
+            foreach ($candidates as $candidate) {
+                if ($linkedInvoiceId > 0 && (int) $candidate['id'] === $linkedInvoiceId) {
+                    $match = $candidate;
+                    break;
+                }
+            }
+            if ($match === null) {
+                foreach ($candidates as $candidate) {
+                    if ($paymentId > 0 && (int) ($candidate['id_pago'] ?? 0) === $paymentId) {
+                        $match = $candidate;
+                        break;
+                    }
+                }
+            }
+            if ($match === null && $companyId > 0) {
+                foreach ($candidates as $candidate) {
+                    if ((int) ($candidate['company_id'] ?? 0) === $companyId) {
+                        $match = $candidate;
+                        break;
+                    }
+                }
+            }
+            $match ??= $candidates[0];
+            $row['matched_invoice_id'] = (int) $match['id'];
+            $row['matched_invoice_folio'] = trim((string) ($match['serie'] ?? '') . (string) ($match['folio'] ?? ''));
+            $row['matched_invoice_uuid'] = trim((string) ($match['uuid'] ?? ''));
+            $row['matched_invoice_count'] = count($candidates);
+        }
+        unset($row);
+
+        return $rows;
     }
 
     public function clients(): array
