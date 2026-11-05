@@ -410,6 +410,10 @@ final class PaymentComplementRepository
                     'series' => (string) ($invoice['serie'] ?? ''),
                     'payment_date' => $paymentDate . ' 00:00:00']);
             }
+            if ($paymentId > 0) {
+                $this->pdo->prepare('UPDATE pagos SET id_factura_res = :complement WHERE id = :payment')
+                    ->execute(['complement' => $complementId, 'payment' => $paymentId]);
+            }
             $this->pdo->commit();
             return $complementId;
         } catch (Throwable $exception) {
@@ -424,7 +428,7 @@ final class PaymentComplementRepository
     {
         $this->pdo->beginTransaction();
         try {
-            $query = $this->pdo->prepare('SELECT id, uuid FROM facturas_complementos WHERE id = :id FOR UPDATE');
+            $query = $this->pdo->prepare('SELECT id, uuid, id_pago FROM facturas_complementos WHERE id = :id FOR UPDATE');
             $query->execute(['id' => $id]);
             $row = $query->fetch();
             if (!$row) {
@@ -436,6 +440,19 @@ final class PaymentComplementRepository
             $this->pdo->prepare('DELETE FROM facturar_rel_complementos WHERE id_complemento = :id')->execute(['id' => $id]);
             $this->pdo->prepare('DELETE FROM complementos_folio WHERE id_factura = :id')->execute(['id' => $id]);
             $this->pdo->prepare('DELETE FROM facturas_complementos WHERE id = :id')->execute(['id' => $id]);
+            $paymentId = (int) ($row['id_pago'] ?? 0);
+            if ($paymentId > 0) {
+                $replacement = $this->pdo->prepare("SELECT id FROM facturas_complementos
+                    WHERE id_pago = :payment AND COALESCE(status, '') <> 'Cancelado'
+                    ORDER BY id DESC LIMIT 1");
+                $replacement->execute(['payment' => $paymentId]);
+                $replacementId = (int) ($replacement->fetchColumn() ?: 0);
+                $this->pdo->prepare('UPDATE pagos SET id_factura_res = :complement WHERE id = :payment')
+                    ->execute([
+                        'complement' => $replacementId > 0 ? (string) $replacementId : null,
+                        'payment' => $paymentId,
+                    ]);
+            }
             $this->pdo->commit();
         } catch (Throwable $exception) {
             if ($this->pdo->inTransaction()) {

@@ -15,12 +15,24 @@ final class MovementRepository
         $this->ensureSupportTables();
     }
 
-    public function page(string $view, array $definition, string $search, int $page, int $perPage = 25, ?int $clientId = null): array
+    public function page(
+        string $view,
+        array $definition,
+        string $search,
+        int $page,
+        int $perPage = 25,
+        ?int $clientId = null,
+        string $documentFilter = ''
+    ): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
+        $documentFilter = $view === 'asignados'
+            && in_array($documentFilter, ['internal', 'complement', 'invoice', 'none'], true)
+                ? $documentFilter
+                : '';
         // Las vistas sin filtro conservan su límite rápido; una búsqueda explícita
         // debe consultar el histórico completo para que un resultado global sea localizable.
-        [$source, $sort] = $this->source($view, $filterByClient || $search !== '');
+        [$source, $sort] = $this->source($view, $filterByClient || $search !== '' || $documentFilter !== '');
         $columns = array_keys($definition['columns']);
         $searchableColumns = $columns;
         foreach ($definition['columns'] as $column) {
@@ -39,6 +51,18 @@ final class MovementRepository
         if ($filterByClient) {
             $conditions[] = 'client_id = :client_id';
             $params['client_id'] = $clientId;
+        }
+        if ($documentFilter !== '') {
+            $conditions[] = match ($documentFilter) {
+                'internal' => 'CAST(client_id AS UNSIGNED) = 13',
+                'complement' => "TRIM(COALESCE(id_factura_res, '')) REGEXP '^[0-9]+$'
+                    AND CAST(TRIM(id_factura_res) AS UNSIGNED) > 0",
+                'invoice' => 'COALESCE(id_factura, 0) > 0',
+                'none' => "CAST(COALESCE(client_id, 0) AS UNSIGNED) <> 13
+                    AND COALESCE(id_factura, 0) <= 0
+                    AND NOT (TRIM(COALESCE(id_factura_res, '')) REGEXP '^[0-9]+$'
+                        AND CAST(TRIM(id_factura_res) AS UNSIGNED) > 0)",
+            };
         }
         if ($search !== '') {
             $searchColumns = implode(', ', array_map([$this, 'identifier'], $searchableColumns));
@@ -769,7 +793,7 @@ final class MovementRepository
 
     private function source(string $view, bool $filterByClient = false): array
     {
-        $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura,
+        $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.banco, p.monto,

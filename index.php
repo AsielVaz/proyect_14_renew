@@ -1206,16 +1206,35 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php
         $movementPage = max(1, (int) ($_GET['page'] ?? 1));
         $movementSearch = trim((string) ($_GET['q'] ?? ''));
+        $movementDocumentFilters = [
+            '' => 'Todos los movimientos',
+            'internal' => 'Interno',
+            'complement' => 'Con complemento',
+            'invoice' => 'Con factura',
+            'none' => 'Sin documento',
+        ];
+        $movementDocumentFilter = $movementKey === 'asignados'
+            && array_key_exists((string) ($_GET['doc_filter'] ?? ''), $movementDocumentFilters)
+                ? (string) ($_GET['doc_filter'] ?? '')
+                : '';
         $movementClientId = filter_input(INPUT_GET, 'client', FILTER_VALIDATE_INT) ?: null;
         $movementClient = $movementClientId ? movement_repository()->client($movementClientId) : null;
         $isTransferForm = $movementAction === 'transfer' && $action === 'form';
         $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
-        $movementResult = $isTransferForm ? null : movement_repository()->page($movementKey, $movement, $movementSearch, $movementPage, 25, $movementClient ? $movementClientId : null);
+        $movementResult = $isTransferForm ? null : movement_repository()->page(
+            $movementKey,
+            $movement,
+            $movementSearch,
+            $movementPage,
+            25,
+            $movementClient ? $movementClientId : null,
+            $movementDocumentFilter
+        );
         $movementClients = in_array($movementAction, ['assign', 'reassign', 'transfer'], true) ? movement_repository()->clients() : [];
         ?>
         <section class="report-intro movement-intro">
             <p><?= e($movementClient ? 'Movimientos de la cartera ' . $movementClient['nombre'] . ' (#' . $movementClient['id'] . ').' : $movement['description']) ?></p>
-            <?php if ($movementClient): ?><a class="button" href="?movement=<?= e($movementKey) ?>">Quitar filtro de cartera</a><?php endif; ?>
+            <?php if ($movementClient): ?><a class="button" href="?<?= e(http_build_query(['movement'=>$movementKey,'doc_filter'=>$movementDocumentFilter ?: null])) ?>">Quitar filtro de cartera</a><?php endif; ?>
             <?php if (in_array($movementAction, ['assign', 'reassign', 'unassign', 'transfer'], true)): ?>
                 <span class="operation-badge">Operación transaccional y auditada</span>
             <?php endif; ?>
@@ -1282,6 +1301,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
                     <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar movimientos…">
+                    <?php if ($movementKey === 'asignados'): ?><label class="movement-document-filter"><span>Documento</span><select name="doc_filter" aria-label="Filtrar movimientos asignados por documento"><?php foreach ($movementDocumentFilters as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementDocumentFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <button class="button" type="submit">Buscar</button>
                 </form>
             </div>
@@ -1408,8 +1428,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <div class="pagination">
                 <span>Página <?= $movementResult['page'] ?><?= $movementResult['hasNext'] ? ' · Hay más resultados' : '' ?></span>
                 <div>
-                    <?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
-                    <?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
+                    <?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilter ?: null, 'page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
+                    <?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilter ?: null, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
                 </div>
             </div>
         </section>
