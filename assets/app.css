@@ -1121,6 +1121,47 @@ textarea:focus {
     accent-color: var(--color-primary);
 }
 
+.movement-document-filters label.is-switch input[type="checkbox"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.movement-document-filters .switch-track {
+    position: relative;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 22px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 999px;
+    background: var(--color-muted);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.movement-document-filters .switch-track::after {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-surface);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.24);
+    content: "";
+    transition: transform var(--transition-fast);
+}
+
+.movement-document-filters .is-switch input:checked + .switch-track {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+}
+
+.movement-document-filters .is-switch input:checked + .switch-track::after {
+    transform: translateX(16px);
+}
+
 .movement-document-filters small {
     color: var(--color-muted);
     font-size: 10px;
