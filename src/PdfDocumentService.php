@@ -15,14 +15,41 @@ final class PdfDocumentService
 
     public function __construct(private readonly PDO $pdo)
     {
-        $library = dirname((string) (realpath(APP_ROOT) ?: APP_ROOT)) . '/sistema/documentos/api/FPDF/fpdf.php';
-        if (!is_file($library)) {
-            throw new RuntimeException('No se encontró el motor PDF local.');
+        if (!class_exists(\FPDF::class, true)) {
+            $configuredPath = trim((string) (getenv('FPDF_PATH') ?: ''));
+            $legacyPath = dirname((string) (realpath(APP_ROOT) ?: APP_ROOT))
+                . '/sistema/documentos/api/FPDF/fpdf.php';
+            $candidates = array_filter([
+                $configuredPath,
+                APP_ROOT . '/vendor/setasign/fpdf/fpdf.php',
+                $legacyPath,
+            ]);
+            foreach ($candidates as $library) {
+                if (is_file($library) && is_readable($library)) {
+                    require_once $library;
+                    if (class_exists(\FPDF::class, false)) {
+                        break;
+                    }
+                }
+            }
         }
-        require_once $library;
-        $qrAutoload = 'C:/laragon/www/sistema14/optimizado/runtime/vendor/autoload.php';
-        if (is_file($qrAutoload)) {
-            require_once $qrAutoload;
+        if (!class_exists(\FPDF::class, false)) {
+            throw new RuntimeException(
+                'No se encontró el motor PDF. Ejecuta composer install --no-dev --optimize-autoloader.'
+            );
+        }
+
+        if (!class_exists(\BaconQrCode\Encoder\Encoder::class, true)) {
+            $configuredQrAutoload = trim((string) (getenv('PDF_QR_AUTOLOAD') ?: ''));
+            foreach (array_filter([
+                $configuredQrAutoload,
+                'C:/laragon/www/sistema14/optimizado/runtime/vendor/autoload.php',
+            ]) as $qrAutoload) {
+                if (is_file($qrAutoload) && is_readable($qrAutoload)) {
+                    require_once $qrAutoload;
+                    break;
+                }
+            }
         }
     }
 

@@ -1103,8 +1103,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <label class="field"><span>Cliente *</span><select name="client_id" id="invoiceClient" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $invoiceInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Razón social *</span><select name="receiver_id" id="invoiceReceiver" required disabled><option value="">Selecciona primero un cliente…</option></select></label>
                         <label class="field"><span>Método de pago *</span><select name="method_id" required><?php foreach ($invoiceData['methods'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['clave']) ?> · <?= e($item['metodo_pago']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Forma de pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['forms'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e($item['forma_pago']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Uso CFDI *</span><select name="use_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['uses'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['cod_sat']) ?> · <?= e($item['uso_cfdi']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Forma de pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e($item['forma_pago']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Uso CFDI *</span><select name="use_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['uses'] as $item): ?><option value="<?= e($item['id']) ?>" <?= strtoupper(trim((string) $item['cod_sat'])) === 'G03' ? 'selected' : '' ?>><?= e($item['cod_sat']) ?> · <?= e($item['uso_cfdi']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Moneda *</span><select name="currency_id" required><?php foreach ($invoiceData['currencies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['clave_moneda']) ?> · <?= e($item['moneda']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Tipo de comprobante *</span><select name="voucher_type" required><option value="I">Ingreso</option><option value="E">Egreso</option><option value="T">Traslado</option><option value="N">Nómina</option><option value="P">Pago</option></select></label>
                         <label class="field"><span>Estatus de pago *</span><select name="status_payment"><option value="Pagado">Pagado</option><option value="No Pagado">No pagado</option></select></label>
@@ -1114,11 +1114,31 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($invoicePaymentPrefill): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($invoicePaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren automáticamente, pero ambos permanecen editables.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Partidas</p><h2>Conceptos de factura</h2></div><div class="invoice-add-concept"><select id="invoiceConcept" disabled><option value="">Selecciona primero una empresa…</option></select><button type="button" class="button" id="addInvoiceConcept">+ Agregar</button></div></div>
-                    <div class="table-wrap"><table class="invoice-lines"><thead><tr><th>Concepto</th><th>Cantidad</th><th>P/U con IVA</th><th>IVA</th><th>Total</th><th></th></tr></thead><tbody id="invoiceLines"><tr class="invoice-empty"><td colspan="6" class="empty">Agrega al menos un concepto.</td></tr></tbody></table></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Partidas</p><h2>Conceptos de factura</h2><p class="panel-copy">Aquí se muestra el resumen. La configuración de cada partida se realiza en una ventana independiente.</p></div><div class="panel-actions"><button type="button" class="button primary" id="addInvoiceConcept" aria-haspopup="dialog" aria-controls="invoiceConceptModal" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Agregar concepto</span></button></div></div>
+                    <div class="table-wrap"><table class="invoice-lines"><thead><tr><th>Concepto / descripción</th><th>Cantidad</th><th>P/U con IVA</th><th>IVA</th><th>Total</th><th>Acciones</th></tr></thead><tbody id="invoiceLines"><tr class="invoice-empty"><td colspan="6" class="empty">Selecciona una empresa y agrega al menos un concepto.</td></tr></tbody></table></div>
                     <div class="invoice-summary"><div><span>Subtotal</span><strong id="invoiceSubtotal">$0.00</strong></div><div><span>IVA</span><strong id="invoiceTax">$0.00</strong></div><div><span>Total</span><strong id="invoiceTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar factura</button></div>
                 </section>
             </form>
+                <div class="glass-modal-backdrop invoice-concept-modal" id="invoiceConceptModal" hidden>
+                    <section class="glass-modal invoice-concept-dialog" role="dialog" aria-modal="true" aria-labelledby="invoiceConceptTitle" aria-describedby="invoiceConceptHelp">
+                        <header class="invoice-concept-modal-header">
+                            <div><p class="eyebrow">Partida de factura</p><h2 id="invoiceConceptTitle">Agregar concepto</h2><p id="invoiceConceptHelp">Selecciona el concepto y configura sus datos antes de incorporarlo al resumen.</p></div>
+                            <button type="button" class="invoice-concept-close" id="invoiceConceptClose" aria-label="Cerrar configuración de concepto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+                        </header>
+                        <div class="invoice-concept-form-grid">
+                            <label class="field invoice-concept-select"><span>Concepto *</span><select id="invoiceConcept" disabled required><option value="">Selecciona primero una empresa…</option></select><small id="invoiceConceptLimits">Los límites permitidos se aplicarán según el concepto seleccionado.</small></label>
+                            <label class="field invoice-concept-description"><span>Descripción *</span><textarea id="invoiceConceptDescription" rows="3" maxlength="1000" required></textarea></label>
+                            <label class="field"><span>Cantidad *</span><input type="number" id="invoiceConceptQuantity" min="0.000001" step="0.000001" value="1" required></label>
+                            <label class="field"><span>Precio unitario con IVA *</span><input type="number" id="invoiceConceptPrice" min="0" step="0.000001" value="0" required></label>
+                            <label class="field"><span>IVA *</span><select id="invoiceConceptTax"><option value="16">16%</option><option value="0">0%</option></select></label>
+                            <div class="invoice-concept-preview" aria-live="polite"><span>Total de la partida</span><strong id="invoiceConceptPreviewTotal">$0.00</strong></div>
+                        </div>
+                        <div class="glass-modal-actions">
+                            <button type="button" class="button" id="invoiceConceptCancel">Cancelar</button>
+                            <button type="button" class="button primary" id="saveInvoiceConcept">Agregar al resumen</button>
+                        </div>
+                    </section>
+                </div>
         <?php elseif ($invoiceView === 'complements'): ?>
             <?php $invoiceComplements = invoice_repository()->associatedComplements((int) ($id ?? 0)); ?>
             <?php if (!$invoiceComplements): ?>
@@ -2113,7 +2133,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const invoiceLines = document.getElementById('invoiceLines');
     const invoiceForm = document.getElementById('invoiceForm');
     const addInvoiceConcept = document.getElementById('addInvoiceConcept');
+    const invoiceConceptModal = document.getElementById('invoiceConceptModal');
+    const invoiceConceptClose = document.getElementById('invoiceConceptClose');
+    const invoiceConceptCancel = document.getElementById('invoiceConceptCancel');
+    const saveInvoiceConcept = document.getElementById('saveInvoiceConcept');
+    const invoiceConceptTitle = document.getElementById('invoiceConceptTitle');
+    const invoiceConceptDescription = document.getElementById('invoiceConceptDescription');
+    const invoiceConceptQuantity = document.getElementById('invoiceConceptQuantity');
+    const invoiceConceptPrice = document.getElementById('invoiceConceptPrice');
+    const invoiceConceptTax = document.getElementById('invoiceConceptTax');
+    const invoiceConceptLimits = document.getElementById('invoiceConceptLimits');
+    const invoiceConceptPreviewTotal = document.getElementById('invoiceConceptPreviewTotal');
     const invoiceMoney = new Intl.NumberFormat('es-MX', {style: 'currency', currency: 'MXN'});
+    let editingInvoiceLine = null;
+    let invoiceConceptPreviousFocus = null;
 
     const movementClientOptions = document.getElementById('movementClientOptions');
     if (movementClientOptions) {
@@ -2151,6 +2184,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     const loadInvoiceCatalog = async (type, id, select) => {
         select.disabled = true;
+        if (type === 'concepts' && addInvoiceConcept) addInvoiceConcept.disabled = true;
         select.innerHTML = '<option value="">Cargando…</option>';
         if (!id) {
             select.innerHTML = `<option value="">Selecciona primero ${type === 'receivers' ? 'un cliente' : 'una empresa'}…</option>`;
@@ -2181,15 +2215,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 select.appendChild(option);
             });
             select.disabled = result.data.length === 0;
+            if (type === 'concepts' && addInvoiceConcept) addInvoiceConcept.disabled = result.data.length === 0;
             if (result.data.length === 0) select.options[0].textContent = 'No hay opciones disponibles';
         } catch (error) {
             select.innerHTML = '<option value="">Error al cargar</option>';
-            showToast(error instanceof Error ? error.message : 'No fue posible cargar el catálogo.');
+            if (type === 'concepts' && addInvoiceConcept) addInvoiceConcept.disabled = true;
+            showToast(error instanceof Error ? error.message : 'No fue posible cargar el catálogo.', 'error');
         }
     };
 
     invoiceClient?.addEventListener('change', () => loadInvoiceCatalog('receivers', invoiceClient.value, invoiceReceiver));
     invoiceCompany?.addEventListener('change', () => {
+        if (invoiceConceptModal && !invoiceConceptModal.hidden) closeInvoiceConceptModal();
         loadInvoiceCatalog('concepts', invoiceCompany.value, invoiceConcept);
         invoiceLines.querySelectorAll('tr[data-invoice-line]').forEach((row) => row.remove());
         if (!invoiceLines.querySelector('.invoice-empty')) {
@@ -2215,55 +2252,209 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         });
     }
 
-    addInvoiceConcept?.addEventListener('click', () => {
-        const option = invoiceConcept.options[invoiceConcept.selectedIndex];
-        if (!option || !option.value) {
-            showToast('Selecciona un concepto disponible para la empresa.', 'error');
+    const updateInvoiceConceptPreview = () => {
+        if (!invoiceConceptPreviewTotal) return;
+        const quantity = Number(invoiceConceptQuantity?.value) || 0;
+        const price = Number(invoiceConceptPrice?.value) || 0;
+        invoiceConceptPreviewTotal.textContent = invoiceMoney.format(quantity * price);
+    };
+
+    const configureInvoiceConcept = (useDefaults = true) => {
+        const option = invoiceConcept?.options[invoiceConcept.selectedIndex];
+        if (!option?.value) {
+            if (useDefaults && invoiceConceptDescription) invoiceConceptDescription.value = '';
+            if (invoiceConceptLimits) invoiceConceptLimits.textContent = 'Selecciona un concepto para consultar sus límites permitidos.';
+            updateInvoiceConceptPreview();
+            return;
+        }
+        const minimumPrice = Number(option.dataset.price) || 0;
+        const maximumPrice = Number(option.dataset.maxPrice) || 0;
+        const maximumUnits = Number(option.dataset.maxUnits) || 0;
+        if (invoiceConceptQuantity) {
+            invoiceConceptQuantity.max = maximumUnits > 0 ? String(maximumUnits) : '';
+            if (useDefaults) invoiceConceptQuantity.value = '1';
+        }
+        if (invoiceConceptPrice) {
+            invoiceConceptPrice.min = String(Math.max(0, minimumPrice));
+            invoiceConceptPrice.max = maximumPrice > 0 ? String(maximumPrice) : '';
+            if (useDefaults) invoiceConceptPrice.value = String(minimumPrice);
+        }
+        if (useDefaults && invoiceConceptDescription) invoiceConceptDescription.value = option.dataset.description || '';
+        if (invoiceConceptTax) {
+            const appliesTax = String(option.dataset.applies).toLowerCase() !== 'no';
+            invoiceConceptTax.disabled = !appliesTax;
+            if (!appliesTax) invoiceConceptTax.value = '0';
+            else if (useDefaults) invoiceConceptTax.value = option.dataset.tax || '16';
+        }
+        if (invoiceConceptLimits) {
+            const limits = [
+                minimumPrice > 0 ? `Precio mínimo ${invoiceMoney.format(minimumPrice)}` : '',
+                maximumPrice > 0 ? `máximo ${invoiceMoney.format(maximumPrice)}` : '',
+                maximumUnits > 0 ? `cantidad máxima ${maximumUnits}` : '',
+            ].filter(Boolean);
+            invoiceConceptLimits.textContent = limits.length ? limits.join(' · ') : 'Sin límites adicionales para este concepto.';
+        }
+        updateInvoiceConceptPreview();
+    };
+
+    function closeInvoiceConceptModal() {
+        if (!invoiceConceptModal || invoiceConceptModal.hidden) return;
+        invoiceConceptModal.classList.remove('is-visible');
+        invoiceConceptModal.hidden = true;
+        editingInvoiceLine = null;
+        if (invoiceConceptPreviousFocus && document.contains(invoiceConceptPreviousFocus)) invoiceConceptPreviousFocus.focus();
+    }
+
+    const openInvoiceConceptModal = (row = null) => {
+        if (!invoiceConceptModal || !invoiceConcept || invoiceConcept.disabled) {
+            showToast('Selecciona una empresa con conceptos disponibles.', 'error');
+            return;
+        }
+        editingInvoiceLine = row;
+        invoiceConceptPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : addInvoiceConcept;
+        if (row) {
+            invoiceConcept.value = row.querySelector('[name="concept_id[]"]')?.value || '';
+            configureInvoiceConcept(false);
+            invoiceConceptDescription.value = row.querySelector('[name="description[]"]')?.value || '';
+            invoiceConceptQuantity.value = row.querySelector('[name="quantity[]"]')?.value || '1';
+            invoiceConceptPrice.value = row.querySelector('[name="unit_price[]"]')?.value || '0';
+            invoiceConceptTax.value = row.querySelector('[name="tax_rate[]"]')?.value || '16';
+            invoiceConceptTitle.textContent = 'Editar concepto';
+            saveInvoiceConcept.textContent = 'Guardar cambios';
+        } else {
+            invoiceConcept.value = '';
+            configureInvoiceConcept(true);
+            invoiceConceptQuantity.value = '1';
+            invoiceConceptPrice.value = '0';
+            invoiceConceptTax.value = '16';
+            invoiceConceptTitle.textContent = 'Agregar concepto';
+            saveInvoiceConcept.textContent = 'Agregar al resumen';
+        }
+        updateInvoiceConceptPreview();
+        invoiceConceptModal.hidden = false;
+        window.requestAnimationFrame(() => {
+            invoiceConceptModal.classList.add('is-visible');
+            invoiceConcept.focus();
+        });
+    };
+
+    const hiddenInvoiceInput = (name, value) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        return input;
+    };
+
+    const renderInvoiceLine = (row, option, values) => {
+        row.replaceChildren();
+        row.dataset.invoiceLine = 'true';
+        const conceptCell = document.createElement('td');
+        const conceptName = document.createElement('strong');
+        conceptName.className = 'invoice-line-title';
+        conceptName.textContent = `${option.dataset.code} · ${option.dataset.unit}`;
+        const descriptionText = document.createElement('span');
+        descriptionText.className = 'invoice-line-description';
+        descriptionText.textContent = values.description;
+        conceptCell.append(
+            hiddenInvoiceInput('concept_id[]', option.value),
+            hiddenInvoiceInput('description[]', values.description),
+            conceptName,
+            descriptionText
+        );
+
+        const quantityCell = document.createElement('td');
+        quantityCell.append(hiddenInvoiceInput('quantity[]', values.quantity), document.createTextNode(values.quantity));
+        const priceCell = document.createElement('td');
+        priceCell.append(hiddenInvoiceInput('unit_price[]', values.price), document.createTextNode(invoiceMoney.format(Number(values.price))));
+        const taxCell = document.createElement('td');
+        taxCell.append(hiddenInvoiceInput('tax_rate[]', values.tax), document.createTextNode(`${values.tax}%`));
+        const totalCell = document.createElement('td');
+        const total = document.createElement('strong');
+        total.dataset.lineTotal = 'true';
+        totalCell.appendChild(total);
+
+        const actionCell = document.createElement('td');
+        actionCell.className = 'invoice-line-actions';
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'button compact';
+        edit.textContent = 'Editar';
+        edit.addEventListener('click', () => openInvoiceConceptModal(row));
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'button danger compact invoice-remove-line';
+        remove.textContent = 'Quitar';
+        remove.addEventListener('click', () => {
+            row.remove();
+            if (!invoiceLines.querySelector('tr[data-invoice-line]')) {
+                invoiceLines.innerHTML = '<tr class="invoice-empty"><td colspan="6" class="empty">Agrega al menos un concepto.</td></tr>';
+            }
+            recalculateInvoice();
+        });
+        actionCell.append(edit, remove);
+        row.append(conceptCell, quantityCell, priceCell, taxCell, totalCell, actionCell);
+        recalculateInvoice();
+    };
+
+    addInvoiceConcept?.addEventListener('click', () => openInvoiceConceptModal());
+    invoiceConcept?.addEventListener('change', () => configureInvoiceConcept(true));
+    [invoiceConceptQuantity, invoiceConceptPrice].forEach((control) => control?.addEventListener('input', updateInvoiceConceptPreview));
+    invoiceConceptClose?.addEventListener('click', closeInvoiceConceptModal);
+    invoiceConceptCancel?.addEventListener('click', closeInvoiceConceptModal);
+    invoiceConceptModal?.addEventListener('click', (event) => {
+        if (event.target === invoiceConceptModal) closeInvoiceConceptModal();
+    });
+    invoiceConceptModal?.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeInvoiceConceptModal();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(invoiceConceptModal.querySelectorAll('button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled])'));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+    saveInvoiceConcept?.addEventListener('click', () => {
+        const option = invoiceConcept?.options[invoiceConcept.selectedIndex];
+        if (!option?.value) {
+            invoiceConcept?.focus();
+            showToast('Selecciona un concepto.', 'error');
+            return;
+        }
+        const controls = [invoiceConceptDescription, invoiceConceptQuantity, invoiceConceptPrice];
+        const invalid = controls.find((control) => !control?.checkValidity());
+        if (invalid) {
+            invalid.reportValidity();
+            invalid.focus();
+            return;
+        }
+        const description = invoiceConceptDescription.value.trim();
+        if (!description) {
+            invoiceConceptDescription.setCustomValidity('Captura la descripción del concepto.');
+            invoiceConceptDescription.reportValidity();
+            invoiceConceptDescription.setCustomValidity('');
             return;
         }
         invoiceLines.querySelector('.invoice-empty')?.remove();
-        const row = document.createElement('tr');
-        row.dataset.invoiceLine = 'true';
-
-        const conceptCell = document.createElement('td');
-        const conceptId = document.createElement('input');
-        conceptId.type = 'hidden'; conceptId.name = 'concept_id[]'; conceptId.value = option.value;
-        const conceptName = document.createElement('strong');
-        conceptName.textContent = `${option.dataset.code} · ${option.dataset.unit}`;
-        const description = document.createElement('textarea');
-        description.name = 'description[]'; description.rows = 2; description.required = true; description.value = option.dataset.description || '';
-        conceptCell.append(conceptId, conceptName, description);
-
-        const quantityCell = document.createElement('td');
-        const quantity = document.createElement('input');
-        quantity.type = 'number'; quantity.name = 'quantity[]'; quantity.min = '0.000001'; quantity.step = '0.000001'; quantity.value = '1'; quantity.required = true;
-        if (Number(option.dataset.maxUnits) > 0) quantity.max = option.dataset.maxUnits;
-        quantityCell.appendChild(quantity);
-
-        const priceCell = document.createElement('td');
-        const price = document.createElement('input');
-        price.type = 'number'; price.name = 'unit_price[]'; price.min = '0'; price.step = '0.000001'; price.value = option.dataset.price || '0'; price.required = true;
-        if (Number(option.dataset.price) > 0) price.min = option.dataset.price;
-        if (Number(option.dataset.maxPrice) > 0) price.max = option.dataset.maxPrice;
-        priceCell.appendChild(price);
-
-        const taxCell = document.createElement('td');
-        const tax = document.createElement('select');
-        tax.name = 'tax_rate[]';
-        [['16', '16%'], ['0', '0%']].forEach(([value, label]) => { const item = document.createElement('option'); item.value = value; item.textContent = label; tax.appendChild(item); });
-        tax.value = String(option.dataset.applies).toLowerCase() === 'no' ? '0' : (option.dataset.tax || '16');
-        taxCell.appendChild(tax);
-
-        const totalCell = document.createElement('td');
-        const total = document.createElement('strong'); total.dataset.lineTotal = 'true'; totalCell.appendChild(total);
-        const actionCell = document.createElement('td');
-        const remove = document.createElement('button');
-        remove.type = 'button'; remove.className = 'button danger invoice-remove-line'; remove.textContent = '×';
-        remove.addEventListener('click', () => { row.remove(); if (!invoiceLines.querySelector('tr[data-invoice-line]')) { invoiceLines.innerHTML = '<tr class="invoice-empty"><td colspan="6" class="empty">Agrega al menos un concepto.</td></tr>'; } recalculateInvoice(); });
-        actionCell.appendChild(remove);
-        row.append(conceptCell, quantityCell, priceCell, taxCell, totalCell, actionCell);
-        invoiceLines.appendChild(row);
-        [quantity, price, tax].forEach((control) => control.addEventListener('input', recalculateInvoice));
+        const row = editingInvoiceLine || document.createElement('tr');
+        renderInvoiceLine(row, option, {
+            description,
+            quantity: invoiceConceptQuantity.value,
+            price: invoiceConceptPrice.value,
+            tax: invoiceConceptTax.value,
+        });
+        if (!editingInvoiceLine) invoiceLines.appendChild(row);
+        closeInvoiceConceptModal();
         recalculateInvoice();
     });
 

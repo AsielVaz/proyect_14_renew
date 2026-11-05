@@ -813,28 +813,159 @@ textarea:focus {
 
 .invoice-lines th:first-child,
 .invoice-lines td:first-child {
-    width: 42%;
+    width: 38%;
 }
 
 .invoice-lines th:last-child,
 .invoice-lines td:last-child {
-    width: 58px;
+    width: 142px;
 }
 
 .invoice-lines td {
-    vertical-align: top;
+    vertical-align: middle;
 }
 
-.invoice-lines td textarea {
-    margin-top: 6px;
-    resize: vertical;
+.invoice-line-title,
+.invoice-line-description {
+    display: block;
+}
+
+.invoice-line-title {
+    color: var(--color-text);
+    font-size: 12px;
+}
+
+.invoice-line-description {
+    margin-top: 4px;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.invoice-line-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .invoice-remove-line {
-    width: 38px;
-    min-height: 38px;
+    min-width: auto;
+}
+
+.invoice-concept-modal {
+    z-index: 1380;
+}
+
+.invoice-concept-dialog {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    width: min(760px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow: auto;
+}
+
+.invoice-concept-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+}
+
+.invoice-concept-modal-header h2,
+.invoice-concept-modal-header p {
+    margin-top: 0;
+}
+
+.invoice-concept-modal-header h2 {
+    margin-bottom: 6px;
+}
+
+.invoice-concept-modal-header p:last-child {
+    max-width: 610px;
+    margin-bottom: 0;
+    color: var(--color-muted);
+}
+
+.invoice-concept-close {
+    display: grid;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
     padding: 0;
+    place-items: center;
+    border: 1px solid var(--color-border-control);
+    border-radius: 12px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 23px;
+    cursor: pointer;
+}
+
+.invoice-concept-close:hover,
+.invoice-concept-close:focus-visible {
+    border-color: var(--color-primary-border);
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+}
+
+#addInvoiceConcept svg,
+.invoice-concept-close svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.invoice-concept-form-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.invoice-concept-select,
+.invoice-concept-description {
+    grid-column: 1 / -1;
+}
+
+.invoice-concept-select small {
+    color: var(--color-muted);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.invoice-concept-description textarea {
+    min-height: 86px;
+    resize: vertical;
+}
+
+.invoice-concept-preview {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 58px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-primary-border);
+    border-radius: 13px;
+    background: var(--color-primary-soft);
+}
+
+.invoice-concept-preview span {
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.invoice-concept-preview strong {
+    color: var(--color-primary-dark);
     font-size: 20px;
+    font-variant-numeric: tabular-nums;
 }
 
 .invoice-summary {
@@ -1440,6 +1571,36 @@ tbody tr:hover {
 
     .invoice-concepts-panel .panel-actions .button {
         justify-content: center;
+        width: 100%;
+    }
+
+    .invoice-concept-dialog {
+        max-height: calc(100vh - 24px);
+        padding: 18px;
+    }
+
+    .invoice-concept-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .invoice-concept-select,
+    .invoice-concept-description,
+    .invoice-concept-preview {
+        grid-column: auto;
+    }
+
+    .invoice-concept-modal-header {
+        gap: 12px;
+    }
+
+    .invoice-concept-dialog .glass-modal-actions {
+        align-items: stretch;
+        flex-direction: column-reverse;
+    }
+
+    .invoice-concept-dialog .glass-modal-actions .button {
+        justify-content: center;
+        min-height: 44px;
         width: 100%;
     }
 }

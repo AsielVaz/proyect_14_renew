@@ -3,6 +3,7 @@
     "description": "Interfaz renovada de administración financiera para Sistema 14",
     "license": "proprietary",
     "require": {
-        "lbuchs/webauthn": "^2.2"
+        "lbuchs/webauthn": "^2.2",
+        "setasign/fpdf": "^1.8.6"
     }
 }
