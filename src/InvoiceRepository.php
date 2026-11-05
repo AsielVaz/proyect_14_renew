@@ -150,7 +150,7 @@ final class InvoiceRepository
 
     public function concepts(int $companyId): array
     {
-        $query = $this->pdo->prepare('SELECT id, concepto, clave_sat, clave_unidad_medida, precio_min, precio_max, unidades_max, aplica_iva, impuesto FROM conceptos WHERE razon = :company ORDER BY concepto');
+        $query = $this->pdo->prepare('SELECT id, concepto, clave_sat, clave_unidad_medida, aplica_iva, impuesto FROM conceptos WHERE razon = :company ORDER BY concepto');
         $query->execute(['company' => $companyId]);
         return $query->fetchAll();
     }
@@ -244,17 +244,6 @@ final class InvoiceRepository
             $tax = (int) ($taxRates[$index] ?? $concept['impuesto'] ?? 16);
             if ($quantity <= 0 || $grossUnit < 0 || !in_array($tax, [0, 16], true)) {
                 throw new RuntimeException('Revisa cantidad, precio e IVA de los conceptos.');
-            }
-            $minimumPrice = (float) ($concept['precio_min'] ?? 0);
-            $maximumPrice = (float) ($concept['precio_max'] ?? 0);
-            if ($minimumPrice > 0 && $grossUnit < $minimumPrice) {
-                throw new RuntimeException('El precio de ' . $concept['concepto'] . ' es menor al mínimo permitido.');
-            }
-            if ($maximumPrice > 0 && $grossUnit > $maximumPrice) {
-                throw new RuntimeException('El precio de ' . $concept['concepto'] . ' excede el máximo permitido.');
-            }
-            if ((float) $concept['unidades_max'] > 0 && $quantity > (float) $concept['unidades_max']) {
-                throw new RuntimeException('La cantidad excede el máximo del concepto ' . $concept['concepto'] . '.');
             }
             $description = trim((string) ($descriptions[$index] ?? $concept['concepto']));
             if ($description === '') {

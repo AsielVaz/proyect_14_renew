@@ -1183,7 +1183,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <button type="button" class="invoice-concept-close" id="invoiceConceptClose" aria-label="Cerrar configuración de concepto"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
                         </header>
                         <div class="invoice-concept-form-grid">
-                            <label class="field invoice-concept-select"><span>Concepto *</span><select id="invoiceConcept" disabled required><option value="">Selecciona primero una empresa…</option></select><small id="invoiceConceptLimits">Los límites permitidos se aplicarán según el concepto seleccionado.</small></label>
+                            <label class="field invoice-concept-select"><span>Concepto *</span><select id="invoiceConcept" disabled required><option value="">Selecciona primero una empresa…</option></select><small id="invoiceConceptHint">El precio y la cantidad son libres; no se aplican los mínimos ni máximos configurados en el catálogo.</small></label>
                             <label class="field invoice-concept-description"><span>Descripción *</span><textarea id="invoiceConceptDescription" rows="3" maxlength="1000" required></textarea></label>
                             <label class="field"><span>Cantidad *</span><input type="number" id="invoiceConceptQuantity" min="0.000001" step="0.000001" value="1" required></label>
                             <label class="field"><span>Precio unitario con IVA *</span><input type="number" id="invoiceConceptPrice" min="0" step="0.000001" value="0" required></label>
@@ -2365,7 +2365,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const invoiceConceptQuantity = document.getElementById('invoiceConceptQuantity');
     const invoiceConceptPrice = document.getElementById('invoiceConceptPrice');
     const invoiceConceptTax = document.getElementById('invoiceConceptTax');
-    const invoiceConceptLimits = document.getElementById('invoiceConceptLimits');
+    const invoiceConceptHint = document.getElementById('invoiceConceptHint');
     const invoiceConceptPreviewTotal = document.getElementById('invoiceConceptPreviewTotal');
     const invoiceMoney = new Intl.NumberFormat('es-MX', {style: 'currency', currency: 'MXN'});
     let editingInvoiceLine = null;
@@ -2429,9 +2429,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     option.dataset.description = item.concepto;
                     option.dataset.code = item.clave_sat;
                     option.dataset.unit = item.clave_unidad_medida;
-                    option.dataset.price = item.precio_min;
-                    option.dataset.maxPrice = item.precio_max;
-                    option.dataset.maxUnits = item.unidades_max;
                     option.dataset.tax = item.impuesto;
                     option.dataset.applies = item.aplica_iva;
                 }
@@ -2486,21 +2483,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const option = invoiceConcept?.options[invoiceConcept.selectedIndex];
         if (!option?.value) {
             if (useDefaults && invoiceConceptDescription) invoiceConceptDescription.value = '';
-            if (invoiceConceptLimits) invoiceConceptLimits.textContent = 'Selecciona un concepto para consultar sus límites permitidos.';
+            if (invoiceConceptHint) invoiceConceptHint.textContent = 'Selecciona un concepto para capturar su cantidad y precio libremente.';
             updateInvoiceConceptPreview();
             return;
         }
-        const minimumPrice = Number(option.dataset.price) || 0;
-        const maximumPrice = Number(option.dataset.maxPrice) || 0;
-        const maximumUnits = Number(option.dataset.maxUnits) || 0;
         if (invoiceConceptQuantity) {
-            invoiceConceptQuantity.max = maximumUnits > 0 ? String(maximumUnits) : '';
+            invoiceConceptQuantity.removeAttribute('max');
             if (useDefaults) invoiceConceptQuantity.value = '1';
         }
         if (invoiceConceptPrice) {
-            invoiceConceptPrice.min = String(Math.max(0, minimumPrice));
-            invoiceConceptPrice.max = maximumPrice > 0 ? String(maximumPrice) : '';
-            if (useDefaults) invoiceConceptPrice.value = String(minimumPrice);
+            invoiceConceptPrice.min = '0';
+            invoiceConceptPrice.removeAttribute('max');
+            if (useDefaults) invoiceConceptPrice.value = '0';
         }
         if (useDefaults && invoiceConceptDescription) invoiceConceptDescription.value = option.dataset.description || '';
         if (invoiceConceptTax) {
@@ -2509,14 +2503,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             if (!appliesTax) invoiceConceptTax.value = '0';
             else if (useDefaults) invoiceConceptTax.value = option.dataset.tax || '16';
         }
-        if (invoiceConceptLimits) {
-            const limits = [
-                minimumPrice > 0 ? `Precio mínimo ${invoiceMoney.format(minimumPrice)}` : '',
-                maximumPrice > 0 ? `máximo ${invoiceMoney.format(maximumPrice)}` : '',
-                maximumUnits > 0 ? `cantidad máxima ${maximumUnits}` : '',
-            ].filter(Boolean);
-            invoiceConceptLimits.textContent = limits.length ? limits.join(' · ') : 'Sin límites adicionales para este concepto.';
-        }
+        if (invoiceConceptHint) invoiceConceptHint.textContent = 'Cantidad y precio libres; no se aplican mínimos ni máximos del catálogo.';
         updateInvoiceConceptPreview();
     };
 
