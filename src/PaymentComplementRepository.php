@@ -157,10 +157,13 @@ final class PaymentComplementRepository
         ];
     }
 
-    public function pendingInvoicesForPayment(int $paymentId, int $companyId): array
+    public function pendingInvoicesForPayment(int $paymentId, int $companyId, int $receiverId): array
     {
         if ($companyId <= 0) {
             throw new RuntimeException('Selecciona una empresa emisora para consultar sus facturas pendientes.');
+        }
+        if ($receiverId <= 0) {
+            throw new RuntimeException('Selecciona una clave corta para consultar sus facturas pendientes.');
         }
 
         $payment = $this->paymentPrefill($paymentId);
@@ -183,6 +186,7 @@ final class PaymentComplementRepository
                 GROUP BY id_factura
             ) rel ON rel.id_factura = f.id
             WHERE f.razon = :company
+              AND f.id_clave_corta = :receiver
               AND f.metodo_pago = 2
               AND COALESCE(f.uuid, '') <> ''
               AND COALESCE(f.status, '') <> 'Cancelado'
@@ -191,6 +195,7 @@ final class PaymentComplementRepository
             ORDER BY f.fecha_timbrado ASC, f.id ASC");
         $query->execute([
             'company' => $companyId,
+            'receiver' => $receiverId,
             'movement_amount' => $movementAmount,
         ]);
         $invoices = $query->fetchAll();

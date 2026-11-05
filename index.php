@@ -330,7 +330,8 @@ if ($complementModule && isset($_GET['data'])) {
             'invoice' => payment_complement_repository()->invoiceByUuid((string) ($_GET['uuid'] ?? '')),
             'pending_invoices' => payment_complement_repository()->pendingInvoicesForPayment(
                 (int) ($_GET['payment_id'] ?? 0),
-                (int) ($_GET['company_id'] ?? 0)
+                (int) ($_GET['company_id'] ?? 0),
+                (int) ($_GET['receiver_id'] ?? 0)
             ),
             default => throw new RuntimeException('Consulta de complementos desconocida.'),
         };
@@ -1021,10 +1022,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren desde el movimiento, pero puedes cambiarlos. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta todas las facturas con saldo pendiente de la empresa emisora.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $complementInitialCompanyId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas pendientes relacionadas con la clave corta seleccionada.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
                     <?php if ($paymentComplementContext): ?>
                         <section class="pending-invoices-panel" id="pendingInvoicesPanel" aria-labelledby="pendingInvoicesTitle" tabindex="-1" hidden>
-                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes de la empresa</h3><span id="pendingInvoicesSummary">Consulta todas las facturas PPD con saldo pendiente.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes de la clave corta</h3><span id="pendingInvoicesSummary">Consulta las facturas PPD relacionadas con la clave seleccionada.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
                             <div class="pending-invoices-status" id="pendingInvoicesStatus" role="status" aria-live="polite">Preparado para consultar.</div>
                             <div class="table-wrap"><table class="pending-invoices-table"><thead><tr><th>Factura</th><th>Fecha</th><th>Total</th><th>Pagado</th><th>Saldo pendiente</th><th><span class="sr-only">Acción</span></th></tr></thead><tbody id="pendingInvoicesBody"></tbody></table></div>
                         </section>
@@ -2414,13 +2415,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (!pendingInvoicesBody || !pendingInvoicesSummary) return;
         pendingInvoicesBody.replaceChildren();
         const amountMatches = invoices.filter((invoice) => invoice.matches_movement_amount).length;
-        pendingInvoicesSummary.textContent = `${invoices.length} factura${invoices.length === 1 ? '' : 's'} encontrada${invoices.length === 1 ? '' : 's'} en la empresa${amountMatches > 0 ? ` · ${amountMatches} coincide${amountMatches === 1 ? '' : 'n'} con el total del movimiento` : ''}.`;
+        pendingInvoicesSummary.textContent = `${invoices.length} factura${invoices.length === 1 ? '' : 's'} encontrada${invoices.length === 1 ? '' : 's'} para la clave corta${amountMatches > 0 ? ` · ${amountMatches} coincide${amountMatches === 1 ? '' : 'n'} con el total del movimiento` : ''}.`;
         if (invoices.length === 0) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
             cell.colSpan = 6;
             cell.className = 'pending-invoices-empty';
-            cell.textContent = 'No hay facturas PPD pendientes ni coincidencias por total para esta empresa.';
+            cell.textContent = 'No hay facturas PPD pendientes ni coincidencias por total para esta clave corta.';
             row.appendChild(cell);
             pendingInvoicesBody.appendChild(row);
             return;
@@ -2534,8 +2535,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const loadPendingInvoices = async () => {
         const paymentId = complementForm?.querySelector('[name="payment_id"]')?.value || '';
         const companyId = complementCompany?.value || '';
-        if (!paymentId || !companyId || !pendingInvoicesPanel || !pendingInvoicesBody) {
-            showToast('Selecciona una empresa emisora para consultar sus facturas pendientes.');
+        const receiverId = complementReceiver?.value || '';
+        if (!paymentId || !companyId || !receiverId || !pendingInvoicesPanel || !pendingInvoicesBody) {
+            showToast('Selecciona una empresa emisora y una clave corta para consultar sus facturas pendientes.');
             return;
         }
 
@@ -2553,6 +2555,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             url.searchParams.set('data', 'pending_invoices');
             url.searchParams.set('payment_id', paymentId);
             url.searchParams.set('company_id', companyId);
+            url.searchParams.set('receiver_id', receiverId);
             const response = await fetch(url, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
             const result = await response.json().catch(() => null);
             if (!response.ok || !result?.ok) throw new Error(result?.message || 'No fue posible consultar las facturas pendientes.');
@@ -2566,7 +2569,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             pendingInvoicesStatus.textContent = error instanceof Error ? error.message : 'No fue posible consultar las facturas pendientes.';
             renderPendingInvoices([]);
         } finally {
-            viewPendingInvoices.disabled = !complementCompany.value;
+            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
             viewPendingInvoices.removeAttribute('aria-busy');
             viewPendingInvoices.querySelector('span').textContent = 'Ver facturas pendientes';
         }
@@ -2597,14 +2600,17 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         releaseComplementSourceInvoice();
         await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
+        if (viewPendingInvoices) {
+            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
+            hidePendingInvoices();
+            pendingInvoicesBody?.replaceChildren();
+        }
     });
     [complementCompany, complementReceiver].forEach((control) => control?.addEventListener('change', () => {
         releaseComplementSourceInvoice();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
         if (viewPendingInvoices) {
-            viewPendingInvoices.disabled = !complementCompany.value;
-        }
-        if (control === complementCompany && viewPendingInvoices) {
+            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
             hidePendingInvoices();
             pendingInvoicesBody?.replaceChildren();
         }
