@@ -57,11 +57,14 @@ final class MovementRepository
         if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
-        // Las vistas sin filtro conservan su límite rápido; una búsqueda explícita
-        // debe consultar el histórico completo para que un resultado global sea localizable.
+        // Las vistas con paginación completa consultan el histórico necesario para
+        // calcular un total exacto; las demás conservan su límite rápido sin filtros.
+        $supportsFullPagination = in_array($view, ['cartera', 'asignados'], true);
+        $hasAppliedFilter = $filterByClient || $search !== '' || $documentFilters !== []
+            || $movementTypeFilter !== '' || $dateFrom !== '' || $dateTo !== '';
         [$source, $sort] = $this->source(
             $view,
-            $filterByClient || $search !== '' || $documentFilters !== [] || $movementTypeFilter !== '' || $dateFrom !== '' || $dateTo !== '',
+            $view === 'asignados' || $hasAppliedFilter,
             $documentFilters,
             $movementTypeFilter
         );
@@ -110,9 +113,9 @@ final class MovementRepository
             $queryText .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
-        $showAll = $view === 'cartera'
+        $showAll = $supportsFullPagination
             && $perPage <= 0
-            && ($search !== '' || $dateFrom !== '' || $dateTo !== '');
+            && $hasAppliedFilter;
         if (!$showAll) {
             $perPage = $perPage > 0 ? $perPage : 25;
         }
@@ -120,7 +123,7 @@ final class MovementRepository
         $totalExact = false;
         $total = null;
         $lastPage = $page;
-        if ($view === 'cartera' && !$showAll) {
+        if ($supportsFullPagination && !$showAll) {
             $countQueryText = 'SELECT COUNT(*) FROM (' . $source . ') movement_count';
             if ($conditions !== []) {
                 $countQueryText .= ' WHERE ' . implode(' AND ', $conditions);
