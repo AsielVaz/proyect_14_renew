@@ -20,6 +20,7 @@ Los depósitos asignados que todavía no tengan `id_factura` ni una referencia e
 
 - pertenezcan a la misma empresa emisora del movimiento;
 - tengan un total dentro de una tolerancia de ±$10.00 respecto al monto absoluto del pago;
+- pertenezcan a cualquier fecha, sin límite de antigüedad ni rango temporal;
 - no estén cancelados o desactivados;
 - no estén relacionados con otro movimiento.
 

@@ -24,7 +24,7 @@ $documentReturnFields = [
         <div>
             <p class="eyebrow">Asociación manual</p>
             <h2>Asignar documento al movimiento #<?= e($assignmentPayment['id']) ?></h2>
-            <p class="panel-copy">Solo se muestran documentos de <?= e($assignmentPayment['company']) ?> con una diferencia máxima de $10.00.</p>
+            <p class="panel-copy">Se consulta todo el historial, sin restricción de fechas. Solo se muestran documentos de <?= e($assignmentPayment['company']) ?> con una diferencia máxima de $10.00.</p>
         </div>
         <a class="button" href="<?= e($movementReturnUrl) ?>">Volver a movimientos</a>
     </div>
