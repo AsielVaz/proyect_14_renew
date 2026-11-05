@@ -1162,7 +1162,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </form>
             </div>
             <?php if (in_array($movementAction, ['assign', 'reassign'], true)): ?>
-                <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?> (#<?= e($client['id']) ?>)</option><?php endforeach; ?></template>
+                <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
             <?php endif; ?>
             <div class="table-wrap">
                 <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>">

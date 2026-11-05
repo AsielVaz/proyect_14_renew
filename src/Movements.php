@@ -98,6 +98,25 @@ final class Movements
         return self::all()[$key] ?? null;
     }
 
+    public static function uniqueDetailText(mixed ...$values): string
+    {
+        $unique = [];
+        $seen = [];
+        foreach ($values as $value) {
+            $text = preg_replace('/\s+/u', ' ', trim((string) $value)) ?? '';
+            if ($text === '') {
+                continue;
+            }
+            $normalized = mb_strtolower($text, 'UTF-8');
+            if (isset($seen[$normalized])) {
+                continue;
+            }
+            $seen[$normalized] = true;
+            $unique[] = $text;
+        }
+        return implode(' ', $unique);
+    }
+
     private static function baseColumns(bool $assigned): array
     {
         $columns = ['id' => 'ID'];

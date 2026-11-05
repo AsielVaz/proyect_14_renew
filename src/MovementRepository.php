@@ -58,6 +58,17 @@ final class MovementRepository
         if ($hasNext) {
             array_pop($rows);
         }
+        foreach ($rows as &$row) {
+            if (array_key_exists('__detalle', $row)) {
+                $row['detalles'] = Movements::uniqueDetailText(
+                    $row['__detalle'],
+                    $row['__descripcion'],
+                    $row['__descripcion_detallada'],
+                );
+                unset($row['__detalle'], $row['__descripcion'], $row['__descripcion_detallada']);
+            }
+        }
+        unset($row);
         return [
             'rows' => $rows, 'total' => count($rows), 'page' => $page,
             'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
@@ -663,6 +674,8 @@ final class MovementRepository
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.banco, p.monto,
                         COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable, p.tipo_movimiento,
+                        p.detalle AS __detalle, p.descripcion AS __descripcion,
+                        p.descripcion_detallada AS __descripcion_detallada,
                         CONCAT_WS(' ', p.detalle, p.descripcion, p.descripcion_detallada) AS detalles,
                         COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura) AS fecha_banco,
                         p.fecha_asignacion, u.nombre AS asigno
@@ -703,6 +716,8 @@ final class MovementRepository
                         COALESCE(e.razon, p.empresa) AS empresa,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.monto,
                         COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable, p.tipo_movimiento,
+                        p.detalle AS __detalle, p.descripcion AS __descripcion,
+                        p.descripcion_detallada AS __descripcion_detallada,
                         CONCAT_WS(' ', p.detalle, p.descripcion, p.descripcion_detallada) AS detalles,
                         COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura) AS fecha_banco,
                         p.fecha_asignacion, origin.nombre AS origen_comision
