@@ -47,7 +47,7 @@ final class Movements
                     'empresa' => ['label' => 'Origen', 'secondary' => ['cuenta' => 'Cuenta']],
                     'monto' => ['label' => 'Importes', 'format' => 'money', 'secondary' => ['saldo_acreditable' => 'Acreditado'], 'secondaryFormat' => ['saldo_acreditable' => 'money']],
                     'tipo_movimiento' => ['label' => 'Movimiento', 'secondary' => ['detalles' => 'Detalle']],
-                    'fecha_asignacion' => ['label' => 'Fechas', 'secondary' => ['fecha_banco' => 'Banco']],
+                    'fecha_banco' => ['label' => 'Fechas', 'secondary' => ['fecha_asignacion' => 'Asignación']],
                     'origen_comision' => 'Origen comisión',
                 ],
             ],

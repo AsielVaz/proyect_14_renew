@@ -857,13 +857,14 @@ textarea:focus {
     z-index: 1380;
 }
 
-.invoice-concept-dialog {
+.glass-modal.invoice-concept-dialog {
     display: grid;
     grid-template-columns: 1fr;
     gap: 18px;
     width: min(760px, 100%);
     max-height: calc(100vh - 40px);
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .invoice-concept-modal-header {
@@ -871,6 +872,11 @@ textarea:focus {
     align-items: flex-start;
     justify-content: space-between;
     gap: 24px;
+}
+
+.invoice-concept-modal-header > div,
+.invoice-concept-form-grid > * {
+    min-width: 0;
 }
 
 .invoice-concept-modal-header h2,
@@ -1087,6 +1093,76 @@ textarea:focus {
 .movement-date-filter input {
     width: 155px;
     min-height: 40px;
+}
+
+.movement-date-type {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.movement-date-type legend {
+    margin-bottom: 4px;
+    padding: 0;
+    color: var(--color-muted);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.movement-date-type > div {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 40px;
+    padding: 3px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 11px;
+    background: var(--color-surface-subtle);
+}
+
+.movement-date-type label {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    place-items: center;
+    cursor: pointer;
+}
+
+.movement-date-type input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.movement-date-type label > span {
+    display: grid;
+    min-height: 32px;
+    padding: 6px 10px;
+    place-items: center;
+    border-radius: 8px;
+    color: var(--color-muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: center;
+    transition: background-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.movement-date-type input:checked + span {
+    background: var(--color-surface);
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+    color: var(--color-primary-dark);
+}
+
+.movement-date-type input:focus-visible + span {
+    outline: 3px solid var(--color-primary-focus);
+    outline-offset: 1px;
 }
 
 .movement-type-filter {
@@ -1370,6 +1446,16 @@ tbody tr:hover {
 .movement-cell-secondary b {
     color: var(--color-text-secondary);
     font-weight: 700;
+}
+
+.movement-date-cell .movement-cell-main {
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+.movement-date-cell .movement-cell-secondary {
+    margin-top: 4px;
+    font-size: 10px;
 }
 
 .movement-table td a {
@@ -1710,7 +1796,8 @@ tbody tr:hover {
         width: 100%;
     }
 
-    .invoice-concept-dialog {
+    .glass-modal.invoice-concept-dialog {
+        width: min(760px, 100%);
         max-height: calc(100vh - 24px);
         padding: 18px;
     }
@@ -4677,6 +4764,19 @@ body.has-invoice-email-modal {
 
     .movement-date-filter input {
         min-height: 44px;
+    }
+
+    .movement-date-type,
+    .movement-date-type > div {
+        width: 100%;
+    }
+
+    .movement-date-type > div {
+        min-height: 44px;
+    }
+
+    .movement-date-type label > span {
+        min-height: 36px;
     }
 
     .movement-document-filters label {

@@ -25,7 +25,8 @@ final class MovementRepository
         array|string $documentFilters = [],
         string $movementTypeFilter = '',
         string $dateFrom = '',
-        string $dateTo = ''
+        string $dateTo = '',
+        string $dateType = 'assigned'
     ): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
@@ -49,6 +50,10 @@ final class MovementRepository
                 : '';
         $dateFrom = $view === 'cartera' ? self::dateFilterValue($dateFrom) : '';
         $dateTo = $view === 'cartera' ? self::dateFilterValue($dateTo) : '';
+        $dateType = $view === 'cartera' && in_array($dateType, ['bank', 'assigned'], true)
+            ? $dateType
+            : 'assigned';
+        $dateColumn = $dateType === 'bank' ? 'fecha_banco' : 'fecha_asignacion';
         if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
@@ -80,14 +85,12 @@ final class MovementRepository
             $params['client_id'] = $clientId;
         }
         if ($dateFrom !== '') {
-            $conditions[] = 'fecha_asignacion >= :date_from';
-            $params['date_from'] = $dateFrom . ' 00:00:00';
+            $conditions[] = 'DATE(' . $dateColumn . ') >= :date_from';
+            $params['date_from'] = $dateFrom;
         }
         if ($dateTo !== '') {
-            $conditions[] = 'fecha_asignacion < :date_to';
-            $params['date_to'] = (new \DateTimeImmutable($dateTo))
-                ->modify('+1 day')
-                ->format('Y-m-d') . ' 00:00:00';
+            $conditions[] = 'DATE(' . $dateColumn . ') <= :date_to';
+            $params['date_to'] = $dateTo;
         }
         if ($search !== '') {
             $searchColumns = implode(', ', array_map([$this, 'identifier'], $searchableColumns));
