@@ -54,7 +54,7 @@ final class GlobalSearchRepository
             FROM pagos p
             LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
             LEFT JOIN empresas e ON e.id = CAST(p.empresa AS UNSIGNED)
-            WHERE {$condition}{$access}
+            WHERE {$condition} AND COALESCE(p.tipo_movimiento, '') <> 'Abono por comisión'{$access}
             ORDER BY (CAST(p.id AS CHAR) = :exact) DESC, p.id DESC LIMIT {$limit}");
         $query->execute($params);
 
