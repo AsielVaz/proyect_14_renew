@@ -56,11 +56,20 @@
                 </label>
                 <button class="button primary" type="submit">Ingresar</button>
             </form>
+            <?php if (webauthn_service()->isEnabled()): ?>
+                <div class="login-divider"><span>o</span></div>
+                <button class="button passkey-login-button" type="button" data-passkey-login data-identity-field="email">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="3"/><path d="M10.5 13 20 3m-3 3 2 2m-5 1 2 2"/></svg>
+                    Iniciar sesión con Passkey
+                </button>
+                <div class="login-message passkey-message" data-passkey-status role="status" aria-live="polite" hidden></div>
+            <?php endif; ?>
         <?php endif; ?>
 
         <footer class="login-security">Sesión protegida · Los datos de acceso no se modifican al ingresar</footer>
     </section>
 </main>
 <script src="assets/ui-motion.js"></script>
+<?php if (webauthn_service()->isEnabled()): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>
 </html>

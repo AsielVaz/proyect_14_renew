@@ -18,6 +18,7 @@ Para producción, usar HTTPS, cambiar `APP_URL`, generar un `APP_KEY` aleatorio 
 
 - Autenticación con los mismos usuarios y contraseñas legadas, sin modificar datos durante el acceso.
 - Segundo factor TOTP únicamente para cuentas que ya tienen configurado el campo `usuarios.2fa`.
+- Inicio de sesión y administración de WebAuthn/Passkeys, reutilizando credenciales PEM compatibles de `usuarios_passkeys` sin depender del sistema anterior.
 - Sesiones endurecidas, CSRF, rotación del identificador, vencimiento por inactividad y límite de intentos fuera de MariaDB.
 - Catálogos con listado, búsqueda, paginación, alta, edición y eliminación.
 - Reportes operativos con filtros, paginación y exportación CSV.
@@ -55,3 +56,5 @@ El flujo, los catálogos y las reglas de persistencia del módulo de facturació
 La equivalencia del flujo legado de complementos de recepción de pagos y sus validaciones está documentada en `PAYMENT_COMPLEMENTS.md`.
 
 La equivalencia del panel legado de empresas, cuentas, capturas y movimientos está documentada en `COMPANIES.md`.
+
+La configuración, compatibilidad y pruebas de las llaves de acceso están documentadas en `WEBAUTHN.md`.

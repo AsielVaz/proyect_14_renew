@@ -27,6 +27,29 @@ final class AuthService
         return is_array($user) ? $user : null;
     }
 
+    public function findByIdentifier(string $identifier): ?array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT id, nombre, appat, apmat, email, password, usuario, tipo, cliente, `2fa`
+             FROM usuarios
+             WHERE email = :email OR usuario = :username
+             ORDER BY CASE WHEN email = :exact_email THEN 0 ELSE 1 END, id
+             LIMIT 1'
+        );
+        $statement->execute([
+            'email' => $identifier,
+            'username' => $identifier,
+            'exact_email' => $identifier,
+        ]);
+        $user = $statement->fetch();
+        return is_array($user) ? $user : null;
+    }
+
+    public function hasPassword(array $user): bool
+    {
+        return trim((string) ($user['password'] ?? '')) !== '';
+    }
+
     public function findById(int $id): ?array
     {
         $statement = $this->pdo->prepare(

@@ -57,6 +57,11 @@ function env_value(string $key, ?string $default = null): string
 
 load_env(APP_ROOT . '/.env');
 
+$composerAutoload = APP_ROOT . '/vendor/autoload.php';
+if (is_file($composerAutoload)) {
+    require_once $composerAutoload;
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\';
     if (!str_starts_with($class, $prefix)) {
@@ -72,20 +77,23 @@ spl_autoload_register(static function (string $class): void {
 if (session_status() !== PHP_SESSION_ACTIVE) {
     ini_set('session.use_strict_mode', '1');
     ini_set('session.use_only_cookies', '1');
-    ini_set('session.cookie_httponly', '1');
-    ini_set('session.cookie_samesite', 'Lax');
-    $configuredPath = (string) (parse_url(env_value('APP_URL'), PHP_URL_PATH) ?: '/');
-    $configuredPath = rtrim($configuredPath, '/') . '/';
+    $configuredPath = env_value('SESSION_COOKIE_PATH', '');
+    if ($configuredPath === '') {
+        $configuredPath = (string) (parse_url(env_value('APP_URL'), PHP_URL_PATH) ?: '/');
+        $configuredPath = rtrim($configuredPath, '/') . '/';
+    }
     $httpsRequest = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
         || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
     $secureCookie = filter_var(env_value('SESSION_SECURE_COOKIE', $httpsRequest ? 'true' : 'false'), FILTER_VALIDATE_BOOL);
     session_name(env_value('SESSION_NAME', 'proyect_14_session'));
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => max(0, (int) env_value('SESSION_LIFETIME', '0')),
         'path' => $configuredPath,
+        'domain' => env_value('SESSION_COOKIE_DOMAIN', ''),
         'secure' => $secureCookie,
-        'httponly' => true,
-        'samesite' => 'Lax',
+        'httponly' => filter_var(env_value('SESSION_COOKIE_HTTPONLY', 'true'), FILTER_VALIDATE_BOOL),
+        'samesite' => in_array(env_value('SESSION_COOKIE_SAMESITE', 'Lax'), ['Lax', 'Strict', 'None'], true)
+            ? env_value('SESSION_COOKIE_SAMESITE', 'Lax') : 'Lax',
     ]);
     session_start();
 }
@@ -267,6 +275,34 @@ function auth_rate_limiter(): App\AuthRateLimiter
     );
 }
 
+function webauthn_options_rate_limiter(): App\AuthRateLimiter
+{
+    static $limiter;
+    return $limiter ??= new App\AuthRateLimiter(
+        env_value('APP_KEY'),
+        max(10, (int) env_value('WEBAUTHN_MAX_OPTIONS_PER_MINUTE', '30')),
+        60,
+    );
+}
+
+function webauthn_config(): array
+{
+    static $config;
+    return $config ??= require APP_ROOT . '/config/webauthn.php';
+}
+
+function passkey_repository(): App\PasskeyRepository
+{
+    static $repository;
+    return $repository ??= new App\PasskeyRepository(db());
+}
+
+function webauthn_service(): App\WebAuthnService
+{
+    static $service;
+    return $service ??= new App\WebAuthnService(webauthn_config(), passkey_repository());
+}
+
 function dashboard_overview(int $operatorId): array
 {
     $ttl = max(0, (int) env_value('DASHBOARD_CACHE_SECONDS', '30'));
@@ -353,7 +389,7 @@ function send_security_headers(): void
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: DENY');
     header('Referrer-Policy: no-referrer');
-    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=(), publickey-credentials-get=(self), publickey-credentials-create=(self)');
     header('Cross-Origin-Opener-Policy: same-origin');
     header('Cache-Control: no-store, private, max-age=0');
     if ((!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')

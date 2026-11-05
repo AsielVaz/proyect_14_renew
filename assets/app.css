@@ -1739,6 +1739,211 @@ tbody tr:hover {
     color: var(--color-muted);
 }
 
+.login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0;
+    color: var(--color-muted);
+    font-size: 12px;
+}
+
+.login-divider::before,
+.login-divider::after {
+    height: 1px;
+    flex: 1;
+    background: var(--color-border);
+    content: "";
+}
+
+.passkey-login-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+}
+
+.passkey-login-button svg,
+.session-security-link svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.passkey-message {
+    margin: 14px 0 0;
+}
+
+.passkey-message.is-error,
+.passkey-status.is-error {
+    border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border));
+    background: var(--color-danger-bg);
+    color: var(--color-danger-dark);
+}
+
+.session-security-link {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 38px;
+    margin-top: 12px;
+    border-radius: 9px;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.session-security-link:hover,
+.session-security-link.active {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+}
+
+.passkey-shell {
+    display: grid;
+    gap: 20px;
+}
+
+.passkey-hero,
+.passkey-card,
+.passkey-empty,
+.passkey-help {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-panel);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-panel);
+}
+
+.passkey-hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 20px;
+    padding: 26px;
+}
+
+.passkey-hero h2,
+.passkey-card h3 {
+    margin: 0;
+}
+
+.passkey-hero p:not(.eyebrow),
+.passkey-card p,
+.passkey-empty p,
+.passkey-help p {
+    margin: 5px 0 0;
+    color: var(--color-muted);
+}
+
+.passkey-hero-icon,
+.passkey-card-icon {
+    display: grid;
+    place-items: center;
+    border-radius: 16px;
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+}
+
+.passkey-hero-icon {
+    width: 58px;
+    height: 58px;
+}
+
+.passkey-hero-icon svg,
+.passkey-card-icon svg {
+    width: 30px;
+    height: 30px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+}
+
+.passkey-status {
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+}
+
+.passkey-grid {
+    display: grid;
+    gap: 14px;
+}
+
+.passkey-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: 20px;
+}
+
+.passkey-card-icon {
+    width: 48px;
+    height: 48px;
+}
+
+.passkey-card-copy p {
+    font-size: 12px;
+}
+
+.passkey-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.passkey-tags span {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+    font-size: 10px;
+    font-weight: 750;
+    text-transform: capitalize;
+}
+
+.passkey-card-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.passkey-empty,
+.passkey-help {
+    padding: 24px;
+}
+
+.passkey-help {
+    box-shadow: none;
+}
+
+@media (max-width: 760px) {
+    .passkey-hero,
+    .passkey-card {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .passkey-hero .button,
+    .passkey-card-actions {
+        grid-column: 1 / -1;
+    }
+
+    .passkey-card-actions .button {
+        flex: 1;
+    }
+}
+
 .login-card h1 {
     margin: 0;
     font-size: 29px;

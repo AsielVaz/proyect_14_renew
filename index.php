@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 require __DIR__ . '/src/bootstrap.php';
 require __DIR__ . '/src/auth.php';
+require __DIR__ . '/src/webauthn.php';
 
 send_security_headers();
 handle_authentication();
+
+if (isset($_GET['webauthn'])) {
+    handle_webauthn_endpoint((string) $_GET['webauthn']);
+}
 
 use App\Catalogs;
 use App\ManualEmailService;
@@ -141,7 +146,9 @@ $companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture'
 $statisticsKey = (string) ($_GET['statistics'] ?? '');
 $statistic = $statisticsKey !== '' ? Statistics::get($statisticsKey) : null;
 $statisticsModule = $statistic !== null;
-$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$statisticsModule;
+$securityView = (string) ($_GET['security'] ?? '');
+$securityModule = $securityView === 'passkeys';
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$statisticsModule && !$securityModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
@@ -501,6 +508,7 @@ if ($statisticsModule) {
         $statisticsError = $exception->getMessage();
     }
 }
+$passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(current_operator_id()) : [];
 ?>
 <!doctype html>
 <html lang="es">
@@ -508,7 +516,7 @@ if ($statisticsModule) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <base href="<?= e(app_url('/')) ?>">
-    <title><?= e($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14'))))) ?> · Sistema 14</title>
+    <title><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
@@ -596,6 +604,10 @@ if ($statisticsModule) {
     <div class="session-user">
         <span class="session-avatar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0"/></svg></span>
         <div class="session-copy"><span><?= e($signedUser['name'] ?? '') ?></span><small><?= e($signedUser['type'] ?? '') ?></small></div>
+        <a class="session-security-link <?= $securityModule ? 'active' : '' ?>" href="?security=passkeys">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="3"/><path d="M10.5 13 20 3m-3 3 2 2m-5 1 2 2"/></svg>
+            Seguridad
+        </a>
         <form method="post" action="?auth=logout">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <button type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5m4-3 4-4-4-4m4 4H9"/></svg>Cerrar sesión</button>
@@ -607,9 +619,10 @@ if ($statisticsModule) {
 <main id="main-content">
     <header class="topbar">
         <div class="topbar-copy">
-            <p class="eyebrow"><?= $statisticsModule ? 'Análisis operativo' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración')))) ?></p>
-            <h1><?= e($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal'))))))) ?></h1>
+            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))))) ?></p>
+            <h1><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))))) ?></h1>
             <?php if ($dashboardModule): ?><p class="topbar-description">Visión general de saldos, movimientos y carteras de clientes del sistema.</p><?php endif; ?>
+            <?php if ($securityModule): ?><p class="topbar-description">Administra los dispositivos que pueden autenticar tu cuenta sin contraseña.</p><?php endif; ?>
         </div>
         <div class="topbar-actions">
             <button type="button" class="global-search-trigger" data-global-search-open aria-haspopup="dialog" aria-controls="global-search-dialog">
@@ -662,7 +675,9 @@ if ($statisticsModule) {
         </div>
     <?php endif; ?>
 
-    <?php if ($companyModule): ?>
+    <?php if ($securityModule): ?>
+        <?php require APP_ROOT . '/views/passkeys.php'; ?>
+    <?php elseif ($companyModule): ?>
         <?php if ($companyError): ?>
             <section class="panel"><div class="empty"><strong>No se pudo abrir el panel.</strong><br><?= e($companyError) ?><br><a href="?companies=list">Volver a empresas</a></div></section>
         <?php elseif ($companyView === 'list'): ?>
@@ -3108,5 +3123,6 @@ if ($statisticsModule) {
 <script src="assets/transfer.js"></script>
 <script src="<?= e(legacy_asset_url('assets/js/apexcharts.js')) ?>"></script>
 <script src="assets/statistics.js"></script>
+<?php if ($securityModule): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>
 </html>

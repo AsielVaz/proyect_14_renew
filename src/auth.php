@@ -29,7 +29,8 @@ function auth_forget_identity(): void
         $_SESSION['usuario'],
         $_SESSION['tipo_usuario'],
         $_SESSION['id_cliente_14'],
-        $_SESSION['nombre']
+        $_SESSION['nombre'],
+        $_SESSION['webauthn_challenges']
     );
 }
 
@@ -81,7 +82,7 @@ function auth_validate_session(): void
     }
 }
 
-function auth_complete(array $user): never
+function auth_establish_session(array $user, string $method): string
 {
     session_regenerate_id(true);
     $now = time();
@@ -96,6 +97,7 @@ function auth_complete(array $user): never
         'name' => $fullName !== '' ? $fullName : (string) $user['email'],
         'type' => (string) ($user['tipo'] ?? ''),
         'client_id' => (int) ($user['cliente'] ?? 0),
+        'method' => $method,
         'authenticated_at' => $now,
         'last_activity' => $now,
         'rotated_at' => $now,
@@ -113,7 +115,12 @@ function auth_complete(array $user): never
 
     $returnTo = (string) ($_SESSION['auth_return_to'] ?? '');
     unset($_SESSION['auth_return_to']);
-    redirect(str_starts_with($returnTo, '?') ? $returnTo : './');
+    return str_starts_with($returnTo, '?') ? app_url($returnTo) : app_url('/');
+}
+
+function auth_complete(array $user, string $method = 'password'): never
+{
+    redirect(auth_establish_session($user, $method));
 }
 
 function auth_render_login(string $step = 'password', ?string $error = null, string $email = ''): never
@@ -136,6 +143,7 @@ function handle_authentication(): void
 {
     auth_validate_session();
     $authRoute = (string) ($_GET['auth'] ?? '');
+    $webauthnRoute = (string) ($_GET['webauthn'] ?? '');
 
     if (is_array($_SESSION['auth_user'] ?? null)) {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $authRoute === 'logout') {
@@ -199,7 +207,7 @@ function handle_authentication(): void
         }
 
         $limiter->clear($email, $ip);
-        auth_complete($user);
+        auth_complete($user, 'password');
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $authRoute === '2fa') {
@@ -236,7 +244,14 @@ function handle_authentication(): void
         }
 
         $limiter->clear($email, $ip);
-        auth_complete($user);
+        auth_complete($user, 'totp');
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST'
+        && in_array($webauthnRoute, [
+            'login-options', 'login-verify', 'register-options', 'register-verify', 'rename', 'delete',
+        ], true)) {
+        return;
     }
 
     if ($authRoute === 'login') {
