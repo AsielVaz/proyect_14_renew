@@ -1273,6 +1273,31 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $movementTo,
             $movementDateType
         );
+        $movementPaginationQuery = [
+            'movement' => $movementKey,
+            'client' => $movementClient['id'] ?? null,
+            'q' => $movementSearch ?: null,
+            'doc_filter' => $movementDocumentFilters ?: null,
+            'movement_type' => $movementTypeFilter ?: null,
+            'from' => $movementFrom ?: null,
+            'to' => $movementTo ?: null,
+            'date_type' => $movementKey === 'cartera' ? $movementDateType : null,
+            'per_page' => $movementKey === 'cartera' ? $movementPerPageValue : null,
+        ];
+        $movementPageNumbers = [];
+        if ($movementKey === 'cartera' && $movementPerPageValue !== 'all' && $movementResult) {
+            $currentMovementPage = (int) $movementResult['page'];
+            $lastMovementPage = (int) $movementResult['lastPage'];
+            $firstVisiblePage = max(1, $currentMovementPage - 2);
+            $lastVisiblePage = min($lastMovementPage, $currentMovementPage + 2);
+            if ($currentMovementPage <= 3) {
+                $lastVisiblePage = min($lastMovementPage, 5);
+            }
+            if ($currentMovementPage >= $lastMovementPage - 2) {
+                $firstVisiblePage = max(1, $lastMovementPage - 4);
+            }
+            $movementPageNumbers = range($firstVisiblePage, $lastVisiblePage);
+        }
         $movementClients = in_array($movementAction, ['assign', 'reassign', 'transfer'], true) ? movement_repository()->clients() : [];
         ?>
         <section class="report-intro movement-intro">
@@ -1496,11 +1521,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </div>
             <?php endif; ?>
             <div class="pagination">
-                <span><?= $movementKey === 'cartera' && $movementPerPageValue === 'all' ? number_format(count($movementResult['rows'])) . ' resultados' : 'Página ' . $movementResult['page'] . ($movementResult['hasNext'] ? ' · Hay más resultados' : '') ?></span>
-                <div>
-                    <?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilters ?: null, 'movement_type' => $movementTypeFilter ?: null, 'from' => $movementFrom ?: null, 'to' => $movementTo ?: null, 'date_type' => $movementKey === 'cartera' ? $movementDateType : null, 'per_page' => $movementKey === 'cartera' ? $movementPerPageValue : null, 'page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?>
-                    <?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query(['movement' => $movementKey, 'client' => $movementClient['id'] ?? null, 'q' => $movementSearch, 'doc_filter' => $movementDocumentFilters ?: null, 'movement_type' => $movementTypeFilter ?: null, 'from' => $movementFrom ?: null, 'to' => $movementTo ?: null, 'date_type' => $movementKey === 'cartera' ? $movementDateType : null, 'per_page' => $movementKey === 'cartera' ? $movementPerPageValue : null, 'page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?>
-                </div>
+                <span><?php if ($movementKey === 'cartera' && $movementPerPageValue === 'all'): ?><?= number_format((int) $movementResult['total']) ?> resultados<?php elseif ($movementKey === 'cartera'): ?>Página <?= e($movementResult['page']) ?> de <?= e($movementResult['lastPage']) ?> · <?= number_format((int) $movementResult['total']) ?> resultados<?php else: ?>Página <?= e($movementResult['page']) ?><?= $movementResult['hasNext'] ? ' · Hay más resultados' : '' ?><?php endif; ?></span>
+                <?php if ($movementKey === 'cartera' && $movementPerPageValue !== 'all'): ?>
+                    <nav class="pagination-pages" aria-label="Páginas de movimientos">
+                        <?php if ($movementResult['page'] > 1): ?><a class="button pagination-direction" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['page'] - 1])) ?>" rel="prev">← Anterior</a><?php endif; ?>
+                        <?php if ($movementPageNumbers !== [] && $movementPageNumbers[0] > 1): ?><a class="button pagination-number" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => 1])) ?>" aria-label="Ir a la página 1">1</a><?php if ($movementPageNumbers[0] > 2): ?><span class="pagination-ellipsis" aria-hidden="true">…</span><?php endif; ?><?php endif; ?>
+                        <?php foreach ($movementPageNumbers as $pageNumber): ?><?php if ($pageNumber === (int) $movementResult['page']): ?><span class="button pagination-number is-current" aria-current="page"><?= e($pageNumber) ?></span><?php else: ?><a class="button pagination-number" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $pageNumber])) ?>" aria-label="Ir a la página <?= e($pageNumber) ?>"><?= e($pageNumber) ?></a><?php endif; ?><?php endforeach; ?>
+                        <?php if ($movementPageNumbers !== [] && $movementPageNumbers[count($movementPageNumbers) - 1] < (int) $movementResult['lastPage']): ?><?php if ($movementPageNumbers[count($movementPageNumbers) - 1] < (int) $movementResult['lastPage'] - 1): ?><span class="pagination-ellipsis" aria-hidden="true">…</span><?php endif; ?><a class="button pagination-number" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['lastPage']])) ?>" aria-label="Ir a la página <?= e($movementResult['lastPage']) ?>"><?= e($movementResult['lastPage']) ?></a><?php endif; ?>
+                        <?php if ($movementResult['page'] < $movementResult['lastPage']): ?><a class="button pagination-direction" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['page'] + 1])) ?>" rel="next">Siguiente →</a><?php endif; ?>
+                    </nav>
+                <?php else: ?>
+                    <div><?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div>
+                <?php endif; ?>
             </div>
         </section>
         <?php endif; ?>

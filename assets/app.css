@@ -2109,6 +2109,52 @@ tbody tr:hover {
     gap: 8px;
 }
 
+.pagination-pages {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pagination-number {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 8px;
+    justify-content: center;
+}
+
+.pagination-number.is-current {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: var(--color-surface);
+    cursor: default;
+}
+
+.pagination-ellipsis {
+    display: grid;
+    min-width: 24px;
+    min-height: 40px;
+    place-items: center;
+    color: var(--color-muted);
+}
+
+@media (max-width: 760px) {
+    .pagination {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .pagination-pages {
+        justify-content: flex-start;
+    }
+
+    .pagination-number,
+    .pagination-ellipsis {
+        min-height: 44px;
+    }
+}
+
 /* 7. Formularios y mensajes -------------------------------------------- */
 
 /* Acceso ---------------------------------------------------------------- */

@@ -117,6 +117,23 @@ final class MovementRepository
             $perPage = $perPage > 0 ? $perPage : 25;
         }
         $page = $showAll ? 1 : max(1, $page);
+        $totalExact = false;
+        $total = null;
+        $lastPage = $page;
+        if ($view === 'cartera' && !$showAll) {
+            $countQueryText = 'SELECT COUNT(*) FROM (' . $source . ') movement_count';
+            if ($conditions !== []) {
+                $countQueryText .= ' WHERE ' . implode(' AND ', $conditions);
+            }
+            $countParams = $params;
+            unset($countParams['search_amount_sort']);
+            $countQuery = $this->pdo->prepare($countQueryText);
+            $countQuery->execute($countParams);
+            $total = (int) $countQuery->fetchColumn();
+            $totalExact = true;
+            $lastPage = max(1, (int) ceil($total / $perPage));
+            $page = min($page, $lastPage);
+        }
         $order = $normalizedSearchAmount !== null
             ? "(`monto` = :search_amount_sort) DESC, {$sort}"
             : $sort;
@@ -147,9 +164,17 @@ final class MovementRepository
         if ($view === 'asignados') {
             $rows = $this->attachPortfolioThirteenInvoices($rows);
         }
+        if ($showAll) {
+            $total = count($rows);
+            $totalExact = true;
+            $lastPage = 1;
+        } elseif (!$totalExact) {
+            $total = count($rows);
+            $lastPage = $page + ($hasNext ? 1 : 0);
+        }
         return [
-            'rows' => $rows, 'total' => count($rows), 'page' => $page,
-            'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
+            'rows' => $rows, 'total' => $total, 'page' => $page,
+            'lastPage' => $lastPage, 'hasNext' => $hasNext, 'totalExact' => $totalExact,
         ];
     }
 
