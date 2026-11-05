@@ -13,17 +13,14 @@
     <section class="login-card" aria-labelledby="loginTitle">
         <header class="login-brand">
             <img src="assets/logo-s14.png" alt="Sistema 14">
-            <div><strong>Sistema 14</strong><span>Administración financiera</span></div>
         </header>
 
         <?php if ($step === '2fa'): ?>
-            <p class="eyebrow">Verificación en dos pasos</p>
             <h1 id="loginTitle">Confirma tu identidad</h1>
             <p class="login-copy">Abre tu aplicación de autenticación e ingresa el código vigente.</p>
         <?php else: ?>
-            <p class="eyebrow">Acceso seguro</p>
-            <h1 id="loginTitle">Bienvenido</h1>
-            <p class="login-copy">Ingresa con las mismas credenciales de Sistema 14.</p>
+            <h1 id="loginTitle">Bienvenido de nuevo</h1>
+            <p class="login-copy">Ingresa tus credenciales para continuar.</p>
         <?php endif; ?>
 
         <?php if ($notice !== ''): ?>
@@ -36,9 +33,9 @@
         <?php if ($step === '2fa'): ?>
             <form class="login-form" method="post" action="?auth=2fa" autocomplete="one-time-code">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <label class="field">
+                <label class="field login-field">
                     <span>Código de 6 dígitos</span>
-                    <input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus required>
+                    <span class="login-input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a5 5 0 0 0-5 5v2H5v11h14V10h-2V8a5 5 0 0 0-5-5Zm-3 7V8a3 3 0 0 1 6 0v2"/></svg><input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" autofocus required></span>
                 </label>
                 <button class="button primary" type="submit">Verificar e ingresar</button>
                 <a class="login-back" href="?auth=login">Usar otra cuenta</a>
@@ -46,27 +43,26 @@
         <?php else: ?>
             <form class="login-form" method="post" action="?auth=login" autocomplete="on">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <label class="field">
-                    <span>Correo o usuario de acceso</span>
-                    <input name="email" type="text" inputmode="email" maxlength="254" autocomplete="username" value="<?= e($email) ?>" autofocus required>
+                <label class="field login-field">
+                    <span>Correo electrónico</span>
+                    <span class="login-input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3V6Zm1 1 8 6 8-6"/></svg><input name="email" type="text" inputmode="email" maxlength="254" autocomplete="username" value="<?= e($email) ?>" placeholder="usuario@ejemplo.com" autofocus required></span>
                 </label>
-                <label class="field">
+                <label class="field login-field">
                     <span>Contraseña</span>
-                    <input name="password" type="password" maxlength="4096" autocomplete="current-password" required>
+                    <span class="login-input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-12 0h14v11H5V10Zm7 4v3"/></svg><input name="password" type="password" maxlength="4096" autocomplete="current-password" placeholder="••••••••" required></span>
                 </label>
-                <button class="button primary" type="submit">Ingresar</button>
+                <button class="button primary login-submit" type="submit">Continuar <span aria-hidden="true">→</span></button>
             </form>
             <?php if (webauthn_service()->isEnabled()): ?>
-                <div class="login-divider"><span>o</span></div>
-                <button class="button passkey-login-button" type="button" data-passkey-login data-identity-field="email">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="3"/><path d="M10.5 13 20 3m-3 3 2 2m-5 1 2 2"/></svg>
-                    Iniciar sesión con Passkey
-                </button>
-                <div class="login-message passkey-message" data-passkey-status role="status" aria-live="polite" hidden></div>
+                <div class="login-passkey">
+                    <button class="button passkey-login-button" type="button" data-passkey-login data-identity-field="email">Entrar con mi passkey</button>
+                    <p>Usa una passkey registrada sin escribir tu correo. Tu dispositivo puede pedir huella, rostro o PIN.</p>
+                    <div class="login-message passkey-message" data-passkey-status role="status" aria-live="polite" hidden></div>
+                </div>
             <?php endif; ?>
         <?php endif; ?>
 
-        <footer class="login-security">Sesión protegida · Los datos de acceso no se modifican al ingresar</footer>
+        <footer class="login-security">Copyright © <?= e(date('Y')) ?> Sistema 14. Todos los derechos reservados.</footer>
     </section>
 </main>
 <script src="assets/ui-motion.js"></script>
