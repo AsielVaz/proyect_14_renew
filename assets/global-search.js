@@ -14,6 +14,7 @@
     const groupDefinitions = [
         ['payments', 'Pagos', 'P'],
         ['invoices', 'Facturas', 'F'],
+        ['complements', 'Complementos de pago', 'CP'],
         ['captures', 'Capturas de saldos', 'C'],
     ];
     let previousFocus = null;
@@ -127,7 +128,7 @@
         if (controller) controller.abort();
         controller = new AbortController();
         form.setAttribute('aria-busy', 'true');
-        setStatus('Buscando en pagos, facturas y capturas…');
+        setStatus('Buscando en pagos, facturas, complementos y capturas…');
         try {
             const url = new URL(window.location.href);
             url.search = '';

@@ -24,7 +24,7 @@ if (isset($_GET['global_search']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $query = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 120);
     if (mb_strlen($query) < 2) {
         echo json_encode(['ok' => true, 'query' => $query, 'results' => [
-            'payments' => [], 'invoices' => [], 'captures' => [],
+            'payments' => [], 'invoices' => [], 'complements' => [], 'captures' => [],
         ], 'total' => 0], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         exit;
     }

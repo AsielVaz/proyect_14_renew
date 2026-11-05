@@ -20,12 +20,13 @@ final class GlobalSearchRepository
         $term = mb_substr(trim(preg_replace('/\s+/u', ' ', $term) ?? $term), 0, 120);
         $limit = max(1, min(10, $limit));
         if (mb_strlen($term) < 2) {
-            return ['payments' => [], 'invoices' => [], 'captures' => []];
+            return ['payments' => [], 'invoices' => [], 'complements' => [], 'captures' => []];
         }
 
         return [
             'payments' => $this->payments($term, $operatorId, $limit),
             'invoices' => $this->invoices($term, $operatorId, $limit),
+            'complements' => $this->complements($term, $operatorId, $limit),
             'captures' => $this->captures($term, $operatorId, $limit),
         ];
     }
@@ -162,6 +163,53 @@ final class GlobalSearchRepository
                     'id' => (int) $row['company_id'],
                     'capture_id' => (int) $row['id_captura'],
                 ]),
+            ];
+        }, $query->fetchAll());
+    }
+
+    private function complements(string $term, int $operatorId, int $limit): array
+    {
+        $access = $this->hasRestrictedAccess($operatorId) ? '' : ' AND fc.razon <> ' . self::RESTRICTED_COMPANY;
+        $numeric = self::numericValue($term);
+        if ($numeric !== null && self::isDecimalAmount($term)) {
+            $condition = 'fc.total_factura = :numeric_amount';
+            $params = ['numeric_amount' => $numeric, 'exact' => $term];
+        } elseif ($numeric !== null) {
+            $condition = '(fc.id = :numeric_id OR fc.total_factura = :numeric_amount OR fc.folio = :numeric_folio)';
+            $params = ['numeric_id' => (int) $numeric, 'numeric_amount' => $numeric,
+                'numeric_folio' => $term, 'exact' => $term];
+        } else {
+            $condition = "CONCAT_WS(' ', CAST(fc.id AS CHAR), fc.serie, fc.folio, fc.uuid,
+                CAST(fc.total_factura AS CHAR), c.nombre, e.razon, cc.razon_social, cc.rfc,
+                fc.status, fc.status_error) LIKE :search";
+            $params = ['search' => '%' . $term . '%', 'exact' => $term];
+        }
+
+        $query = $this->pdo->prepare("SELECT fc.id, fc.serie, fc.folio, fc.uuid, fc.total_factura,
+                fc.fecha_pago, fc.fecha_timbrado, fc.status, fc.status_error,
+                c.nombre AS cliente, e.razon AS empresa, cc.razon_social AS receptor, cc.rfc
+            FROM facturas_complementos fc
+            LEFT JOIN clientes c ON c.id = fc.nombre
+            LEFT JOIN empresas e ON e.id = fc.razon
+            LEFT JOIN claves_cortas cc ON cc.id = fc.id_clave_corta
+            WHERE {$condition}{$access}
+            ORDER BY (CAST(fc.id AS CHAR) = :exact) DESC, fc.id DESC LIMIT {$limit}");
+        $query->execute($params);
+
+        return array_map(static function (array $row): array {
+            $folio = trim((string) ($row['serie'] ?? '') . (string) ($row['folio'] ?? ''));
+            $status = trim((string) (($row['uuid'] ?? '') !== ''
+                ? 'Timbrado'
+                : (($row['status'] ?? '') ?: (($row['status_error'] ?? '') ?: 'Pendiente'))));
+            return [
+                'id' => (int) $row['id'],
+                'title' => 'Complemento #' . $row['id'] . ($folio !== '' ? ' · ' . $folio : ''),
+                'description' => self::firstText($row['receptor'], $row['rfc'], $row['uuid']),
+                'meta' => trim((string) ($row['cliente'] ?: 'Sin cliente')) . ' · '
+                    . trim((string) ($row['empresa'] ?: 'Sin empresa')) . ' · ' . $status,
+                'value' => self::money($row['total_factura']),
+                'date' => (string) (($row['fecha_pago'] ?? '') ?: ($row['fecha_timbrado'] ?? '')),
+                'url' => '?complement=detail&id=' . rawurlencode((string) $row['id']),
             ];
         }, $query->fetchAll());
     }

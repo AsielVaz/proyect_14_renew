@@ -3961,6 +3961,11 @@ body.has-invoice-email-modal {
     color: #7441bd;
 }
 
+.global-search-result.is-complements .global-search-result-badge {
+    background: #eaf7ef;
+    color: #137a45;
+}
+
 .global-search-result.is-captures .global-search-result-badge {
     background: #e8f7fa;
     color: #087b91;
