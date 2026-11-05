@@ -23,7 +23,9 @@ final class MovementRepository
         int $perPage = 25,
         ?int $clientId = null,
         array|string $documentFilters = [],
-        string $movementTypeFilter = ''
+        string $movementTypeFilter = '',
+        string $dateFrom = '',
+        string $dateTo = ''
     ): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
@@ -34,15 +36,27 @@ final class MovementRepository
                 ['internal', 'document', 'none']
             )))
             : [];
+        if (in_array('document', $documentFilters, true)
+            && in_array('none', $documentFilters, true)) {
+            $documentFilters = array_values(array_filter(
+                $documentFilters,
+                static fn (string $filter): bool => $filter !== 'none'
+            ));
+        }
         $movementTypeFilter = $view === 'asignados'
             && in_array($movementTypeFilter, ['deposit', 'withdrawal'], true)
                 ? $movementTypeFilter
                 : '';
+        $dateFrom = $view === 'cartera' ? self::dateFilterValue($dateFrom) : '';
+        $dateTo = $view === 'cartera' ? self::dateFilterValue($dateTo) : '';
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
         // Las vistas sin filtro conservan su límite rápido; una búsqueda explícita
         // debe consultar el histórico completo para que un resultado global sea localizable.
         [$source, $sort] = $this->source(
             $view,
-            $filterByClient || $search !== '' || $documentFilters !== [] || $movementTypeFilter !== '',
+            $filterByClient || $search !== '' || $documentFilters !== [] || $movementTypeFilter !== '' || $dateFrom !== '' || $dateTo !== '',
             $documentFilters,
             $movementTypeFilter
         );
@@ -64,6 +78,16 @@ final class MovementRepository
         if ($filterByClient) {
             $conditions[] = 'client_id = :client_id';
             $params['client_id'] = $clientId;
+        }
+        if ($dateFrom !== '') {
+            $conditions[] = 'fecha_asignacion >= :date_from';
+            $params['date_from'] = $dateFrom . ' 00:00:00';
+        }
+        if ($dateTo !== '') {
+            $conditions[] = 'fecha_asignacion < :date_to';
+            $params['date_to'] = (new \DateTimeImmutable($dateTo))
+                ->modify('+1 day')
+                ->format('Y-m-d') . ' 00:00:00';
         }
         if ($search !== '') {
             $searchColumns = implode(', ', array_map([$this, 'identifier'], $searchableColumns));
@@ -1043,5 +1067,14 @@ final class MovementRepository
         }
 
         return is_numeric($normalized) ? (float) $normalized : null;
+    }
+
+    private static function dateFilterValue(string $value): string
+    {
+        $value = trim($value);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        return $date instanceof \DateTimeImmutable && $date->format('Y-m-d') === $value
+            ? $value
+            : '';
     }
 }

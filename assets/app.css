@@ -1071,6 +1071,24 @@ textarea:focus {
     text-transform: uppercase;
 }
 
+.movement-date-filter {
+    display: grid;
+    gap: 4px;
+}
+
+.movement-date-filter > span {
+    color: var(--color-muted);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.movement-date-filter input {
+    width: 155px;
+    min-height: 40px;
+}
+
 .movement-type-filter {
     display: grid;
     gap: 4px;
@@ -4649,6 +4667,15 @@ body.has-invoice-email-modal {
     }
 
     .movement-type-filter select {
+        min-height: 44px;
+    }
+
+    .movement-date-filter,
+    .movement-date-filter input {
+        width: 100%;
+    }
+
+    .movement-date-filter input {
         min-height: 44px;
     }
 

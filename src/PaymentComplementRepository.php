@@ -111,7 +111,7 @@ final class PaymentComplementRepository
             throw new RuntimeException('El movimiento seleccionado no es válido.');
         }
 
-        $query = $this->pdo->prepare("SELECT p.id, p.id_factura, p.id_factura_res,
+        $query = $this->pdo->prepare("SELECT p.id, p.tipo_movimiento, p.id_factura, p.id_factura_res,
                 ABS(p.monto) AS movement_amount,
                 CAST(p.nombre AS UNSIGNED) AS client_id,
                 CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
@@ -134,6 +134,9 @@ final class PaymentComplementRepository
         $payment = $query->fetch();
         if (!$payment) {
             throw new RuntimeException('El movimiento ya no está asignado o no está disponible para complementos.');
+        }
+        if (strcasecmp(trim((string) ($payment['tipo_movimiento'] ?? '')), 'Retiro') === 0) {
+            throw new RuntimeException('Los retiros no se pueden relacionar con complementos de pago.');
         }
         if ((int) ($payment['id_factura'] ?? 0) > 0) {
             throw new RuntimeException('El movimiento ya está relacionado con una factura.');
@@ -315,7 +318,7 @@ final class PaymentComplementRepository
             }
             $paymentMaximum = null;
             if ($paymentId > 0) {
-                $payment = $this->pdo->prepare("SELECT p.id, p.id_factura, p.id_factura_res,
+                $payment = $this->pdo->prepare("SELECT p.id, p.tipo_movimiento, p.id_factura, p.id_factura_res,
                         CAST(p.nombre AS UNSIGNED) AS client_id,
                         CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
                         ABS(p.monto) AS movement_amount
@@ -329,6 +332,9 @@ final class PaymentComplementRepository
                 $paymentRow = $payment->fetch();
                 if (!$paymentRow) {
                     throw new RuntimeException('El movimiento de pago ya no está asignado o no está disponible.');
+                }
+                if (strcasecmp(trim((string) ($paymentRow['tipo_movimiento'] ?? '')), 'Retiro') === 0) {
+                    throw new RuntimeException('Los retiros no se pueden relacionar con complementos de pago.');
                 }
                 if ((int) ($paymentRow['id_factura'] ?? 0) > 0) {
                     throw new RuntimeException('El movimiento ya está relacionado con una factura.');

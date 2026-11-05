@@ -42,6 +42,11 @@ final class InvoiceRepository
             INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta
             LEFT JOIN formas_pago fp ON fp.id = f.forma_pago
             LEFT JOIN metodos_pago mp ON mp.id = f.metodo_pago
+            LEFT JOIN (
+                SELECT id_factura, SUM(monto) AS total_pagado
+                FROM facturar_rel_complementos
+                GROUP BY id_factura
+            ) pagos_factura ON pagos_factura.id_factura = f.id
             LEFT JOIN usuarios u ON u.id = f.usuario_crea ';
         $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
@@ -49,8 +54,7 @@ final class InvoiceRepository
         $query = $this->pdo->prepare('SELECT f.id, f.fecha, f.serie, f.folio, f.total_iva, f.uuid, f.token,
             f.status, f.status_error, f.status_pago, f.id_pago, f.metodo_pago AS method_id,
             f.nombre AS client_id, f.razon AS company_id, f.id_clave_corta AS receiver_id,
-            GREATEST(0, f.total_iva - COALESCE((SELECT SUM(rel.monto)
-                FROM facturar_rel_complementos rel WHERE rel.id_factura = f.id), 0)) AS saldo_pendiente,
+            GREATEST(0, f.total_iva - COALESCE(pagos_factura.total_pagado, 0)) AS saldo_pendiente,
             c.nombre AS cliente, c.correo AS cliente_correo,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
             fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
@@ -69,6 +73,12 @@ final class InvoiceRepository
 
     public function exportRows(string $search, string $dateFrom = '', string $dateTo = ''): array
     {
+        if ($search === '' && $dateFrom === '' && $dateTo === '') {
+            $today = new \DateTimeImmutable('today');
+            $dateFrom = $today->modify('-9 days')->format('Y-m-d');
+            $dateTo = $today->format('Y-m-d');
+        }
+
         return $this->page($search, 1, 10000, $dateFrom, $dateTo)['rows'];
     }
 
@@ -89,7 +99,7 @@ final class InvoiceRepository
         if ($paymentId <= 0) {
             throw new RuntimeException('El movimiento seleccionado no es válido.');
         }
-        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.id_factura, p.id_factura_res,
+        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.tipo_movimiento, p.id_factura, p.id_factura_res,
                 CAST(p.nombre AS UNSIGNED) AS client_id,
                 CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
                 cl.nombre AS cliente, e.razon AS empresa
@@ -105,6 +115,9 @@ final class InvoiceRepository
         $payment = $query->fetch();
         if (!$payment) {
             throw new RuntimeException('El movimiento ya no está asignado o no está disponible para facturación.');
+        }
+        if (strcasecmp(trim((string) ($payment['tipo_movimiento'] ?? '')), 'Retiro') === 0) {
+            throw new RuntimeException('Los retiros no se pueden relacionar con facturas.');
         }
         if ((int) ($payment['id_factura'] ?? 0) > 0) {
             throw new RuntimeException('El movimiento ya está relacionado con una factura.');
@@ -285,11 +298,14 @@ final class InvoiceRepository
                     'description' => $detail['description'], 'tax' => $detail['tax']]);
             }
             if ($paymentId > 0) {
-                $payment = $this->pdo->prepare('SELECT id, id_factura, id_factura_res FROM pagos WHERE id = :id FOR UPDATE');
+                $payment = $this->pdo->prepare('SELECT id, tipo_movimiento, id_factura, id_factura_res FROM pagos WHERE id = :id FOR UPDATE');
                 $payment->execute(['id' => $paymentId]);
                 $row = $payment->fetch();
                 if (!$row) {
                     throw new RuntimeException('El pago asociado no existe.');
+                }
+                if (strcasecmp(trim((string) ($row['tipo_movimiento'] ?? '')), 'Retiro') === 0) {
+                    throw new RuntimeException('Los retiros no se pueden relacionar con facturas.');
                 }
                 if ((int) ($row['id_factura'] ?? 0) > 0) {
                     throw new RuntimeException('El pago seleccionado ya está relacionado con otra factura.');
