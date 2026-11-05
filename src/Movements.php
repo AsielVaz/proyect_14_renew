@@ -19,7 +19,7 @@ final class Movements
                 'label' => 'Movimientos asignados',
                 'description' => 'Movimientos con cartera asignada. Al desasignar se revierten sus comisiones.',
                 'action' => 'unassign',
-                'columns' => self::baseColumns(true),
+                'columns' => self::baseColumns(true, false),
             ],
             'reasignar' => [
                 'label' => 'Reasignación de movimientos',
@@ -117,7 +117,7 @@ final class Movements
         return implode(' ', $unique);
     }
 
-    private static function baseColumns(bool $assigned): array
+    private static function baseColumns(bool $assigned, bool $showCreditable = true): array
     {
         $columns = ['id' => 'ID'];
         if ($assigned) {
@@ -125,9 +125,9 @@ final class Movements
         }
         $columns += [
             'empresa' => ['label' => 'Origen', 'secondary' => ['cuenta' => 'Cuenta', 'banco' => 'Banco']],
-            'monto' => $assigned
+            'monto' => $assigned && $showCreditable
                 ? ['label' => 'Importe', 'format' => 'money', 'secondary' => ['saldo_acreditable' => 'Acreditable'], 'secondaryFormat' => ['saldo_acreditable' => 'money']]
-                : ['label' => 'Monto', 'format' => 'money'],
+                : ['label' => $assigned ? 'Importe' : 'Monto', 'format' => 'money'],
             'tipo_movimiento' => ['label' => 'Movimiento', 'secondary' => ['detalles' => 'Detalle']],
             'fecha_banco' => $assigned
                 ? ['label' => 'Fechas', 'secondary' => ['fecha_asignacion' => 'Asignado']]

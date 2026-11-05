@@ -1432,7 +1432,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </form>
             <?php endif; ?>
             <div class="panel-heading list-tools">
-                <div><p class="eyebrow">Movimientos</p><h2><?= number_format(count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy">Resultados de la página actual</p></div>
+                <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementKey === 'asignados' ? (int) $movementResult['total'] : count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy"><?= $movementKey === 'asignados' ? 'Total de resultados encontrados' : 'Resultados de la página actual' ?></p></div>
                 <form method="get" class="search">
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>

@@ -18,4 +18,14 @@ foreach ($cases as [$values, $expected]) {
     }
 }
 
-echo count($cases) . " comprobaciones de presentación de movimientos superadas.\n";
+$assignedAmount = App\Movements::get('asignados')['columns']['monto'] ?? [];
+if (isset($assignedAmount['secondary']['saldo_acreditable'])) {
+    throw new RuntimeException('Movimientos asignados no debe mostrar el saldo acreditable.');
+}
+
+$reassignmentAmount = App\Movements::get('reasignar')['columns']['monto'] ?? [];
+if (!isset($reassignmentAmount['secondary']['saldo_acreditable'])) {
+    throw new RuntimeException('Reasignación debe conservar el saldo acreditable.');
+}
+
+echo (count($cases) + 2) . " comprobaciones de presentación de movimientos superadas.\n";
