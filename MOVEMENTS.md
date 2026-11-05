@@ -5,7 +5,7 @@ La navegación y columnas de las vistas están en `src/Movements.php`. Las consu
 ## Flujos integrados
 
 - Movimientos sin asignar: consulta, selector de cartera buscable por cualquier fragmento del nombre o ID, previsualización de comisiones y asignación conjunta únicamente de los movimientos seleccionados.
-- Movimientos asignados: consulta y desasignación.
+- Movimientos asignados: consulta, desasignación y asociación manual de documentos existentes.
 - Reasignación: reversión de comisiones anteriores y cálculo completo para la cartera nueva.
 - Ingreso de pagos: consulta general equivalente a la pantalla anterior.
 - Traspasos: creación y eliminación conjunta de la entrada y la salida.
@@ -13,6 +13,17 @@ La navegación y columnas de las vistas están en `src/Movements.php`. Las consu
 - Correos manuales: composición con plantilla por empresa, conceptos calculados, edición HTML, adjuntos PDF y revisión final obligatoria.
 
 Cada operación de escritura valida CSRF y se ejecuta dentro de una transacción de base de datos. El operador se obtiene de la sesión autenticada mediante `current_operator_id()`.
+
+## Asociación manual de documentos
+
+Los depósitos asignados que todavía no tengan `id_factura` ni una referencia entera válida en `id_factura_res` ofrecen la acción **Asignar documento**. La vista busca facturas y complementos que:
+
+- pertenezcan a la misma empresa emisora del movimiento;
+- tengan un total dentro de una tolerancia de ±$10.00 respecto al monto absoluto del pago;
+- no estén cancelados o desactivados;
+- no estén relacionados con otro movimiento.
+
+Al confirmar, el servidor vuelve a bloquear y validar el pago y el documento dentro de una transacción. Para una factura actualiza `pagos.id_factura`; para un complemento actualiza `pagos.id_factura_res`. También conserva la relación inversa en `id_pago`, registra operador y fecha de asociación, y agrega la acción `document_assign` a la auditoría de movimientos.
 
 ## Correos manuales
 

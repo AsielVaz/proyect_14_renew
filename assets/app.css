@@ -2151,6 +2151,76 @@ tbody tr:hover {
     color: var(--color-muted);
 }
 
+.document-assignment-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    padding: 0 24px 20px;
+}
+
+.document-assignment-summary article {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    background: var(--color-surface-subtle);
+}
+
+.document-assignment-summary span {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.document-assignment-summary strong {
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    font-size: 16px;
+}
+
+.document-assignment-detail {
+    margin: 0 24px 22px;
+    padding: 13px 15px;
+    border-left: 3px solid var(--color-primary);
+    border-radius: 0 var(--radius-control) var(--radius-control) 0;
+    background: var(--color-primary-soft);
+    color: var(--color-text-secondary);
+}
+
+.document-candidate-table {
+    min-width: 1080px;
+}
+
+.document-uuid {
+    max-width: 260px;
+    overflow-wrap: anywhere;
+}
+
+.document-difference {
+    font-variant-numeric: tabular-nums;
+    font-weight: 750;
+}
+
+.document-difference.is-exact {
+    color: var(--color-success);
+}
+
+.document-candidate-actions {
+    white-space: nowrap;
+}
+
+.document-candidate-actions form {
+    display: inline-block;
+    margin: 0 0 0 8px;
+    vertical-align: middle;
+}
+
+.document-candidate-actions .button {
+    min-height: 44px;
+}
+
 @media (max-width: 760px) {
     .pagination {
         align-items: stretch;
@@ -2164,6 +2234,23 @@ tbody tr:hover {
     .pagination-number,
     .pagination-ellipsis {
         min-height: 44px;
+    }
+
+    .document-assignment-summary {
+        grid-template-columns: 1fr;
+        padding-right: 18px;
+        padding-left: 18px;
+    }
+
+    .document-assignment-detail {
+        margin-right: 18px;
+        margin-left: 18px;
+    }
+}
+
+@media (min-width: 761px) and (max-width: 1100px) {
+    .document-assignment-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 

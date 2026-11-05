@@ -181,6 +181,201 @@ final class MovementRepository
         ];
     }
 
+    public function documentCandidates(int $paymentId): array
+    {
+        $payment = $this->documentAssignmentPayment($paymentId);
+        $minimum = max(0, round((float) $payment['amount'] - 10, 2));
+        $maximum = round((float) $payment['amount'] + 10, 2);
+
+        $invoiceQuery = $this->pdo->prepare("SELECT f.id, f.fecha, f.fecha_timbrado, f.serie, f.folio,
+                f.uuid, f.total_iva AS amount, f.status, f.status_error,
+                c.nombre AS client, cc.razon_social AS receiver,
+                ABS(f.total_iva - :target) AS difference
+            FROM facturas f
+            LEFT JOIN clientes c ON c.id = f.nombre
+            LEFT JOIN claves_cortas cc ON cc.id = f.id_clave_corta
+            WHERE f.razon = :company
+              AND f.total_iva BETWEEN :minimum AND :maximum
+              AND COALESCE(f.cancelado, 0) = 0
+              AND COALESCE(f.desactivado, 0) = 0
+              AND (f.id_pago IS NULL OR f.id_pago = 0 OR f.id_pago = :payment_owner)
+              AND NOT EXISTS (
+                  SELECT 1 FROM pagos linked
+                  WHERE linked.id <> :payment_link AND linked.id_factura = f.id
+              )
+            ORDER BY difference ASC, COALESCE(f.fecha_timbrado, f.fecha) DESC, f.id DESC");
+        $invoiceQuery->execute([
+            'target' => $payment['amount'], 'company' => $payment['company_id'],
+            'minimum' => $minimum, 'maximum' => $maximum,
+            'payment_owner' => $paymentId, 'payment_link' => $paymentId,
+        ]);
+
+        $complementQuery = $this->pdo->prepare("SELECT fc.id, fc.fecha, DATE(fc.fecha_pago) AS payment_date,
+                fc.serie, fc.folio, fc.uuid, fc.total_factura AS amount,
+                fc.status, fc.status_error, c.nombre AS client,
+                cc.razon_social AS receiver,
+                ABS(fc.total_factura - :target) AS difference
+            FROM facturas_complementos fc
+            LEFT JOIN clientes c ON c.id = fc.nombre
+            LEFT JOIN claves_cortas cc ON cc.id = fc.id_clave_corta
+            WHERE fc.razon = :company
+              AND fc.total_factura BETWEEN :minimum AND :maximum
+              AND UPPER(COALESCE(fc.status, '')) <> 'CANCELADO'
+              AND (fc.id_pago IS NULL OR fc.id_pago = 0 OR fc.id_pago = :payment_owner)
+              AND NOT EXISTS (
+                  SELECT 1 FROM pagos linked
+                  WHERE linked.id <> :payment_link
+                    AND TRIM(COALESCE(linked.id_factura_res, '')) = CAST(fc.id AS CHAR)
+              )
+            ORDER BY difference ASC, COALESCE(DATE(fc.fecha_pago), fc.fecha) DESC, fc.id DESC");
+        $complementQuery->execute([
+            'target' => $payment['amount'], 'company' => $payment['company_id'],
+            'minimum' => $minimum, 'maximum' => $maximum,
+            'payment_owner' => $paymentId, 'payment_link' => $paymentId,
+        ]);
+
+        $invoices = $invoiceQuery->fetchAll();
+        $complements = $complementQuery->fetchAll();
+        foreach ([&$invoices, &$complements] as &$documents) {
+            foreach ($documents as &$document) {
+                $document['id'] = (int) $document['id'];
+                $document['amount'] = round((float) $document['amount'], 2);
+                $document['difference'] = round((float) $document['difference'], 2);
+            }
+            unset($document);
+        }
+        unset($documents);
+
+        return [
+            'payment' => $payment,
+            'minimum' => $minimum,
+            'maximum' => $maximum,
+            'invoices' => $invoices,
+            'complements' => $complements,
+        ];
+    }
+
+    public function assignDocument(int $paymentId, string $documentType, int $documentId, int $operatorId): array
+    {
+        if (!in_array($documentType, ['invoice', 'complement'], true) || $documentId <= 0) {
+            throw new RuntimeException('Selecciona una factura o complemento válido.');
+        }
+
+        return $this->transaction(function () use ($paymentId, $documentType, $documentId, $operatorId): array {
+            $this->assertOperator($operatorId);
+            $payment = $this->documentAssignmentPayment($paymentId, true);
+            $table = $documentType === 'invoice' ? 'facturas' : 'facturas_complementos';
+            $amountColumn = $documentType === 'invoice' ? 'total_iva' : 'total_factura';
+            $cancellationCondition = $documentType === 'invoice'
+                ? 'COALESCE(cancelado, 0) = 0 AND COALESCE(desactivado, 0) = 0'
+                : "UPPER(COALESCE(status, '')) <> 'CANCELADO'";
+            $documentQuery = $this->pdo->prepare("SELECT id, {$amountColumn} AS amount, razon, id_pago
+                FROM {$table}
+                WHERE id = :id AND {$cancellationCondition}
+                FOR UPDATE");
+            $documentQuery->execute(['id' => $documentId]);
+            $document = $documentQuery->fetch();
+            if (!$document) {
+                throw new RuntimeException('El documento seleccionado ya no está disponible.');
+            }
+            if ((int) $document['razon'] !== (int) $payment['company_id']) {
+                throw new RuntimeException('El documento no pertenece a la misma empresa del movimiento.');
+            }
+            $difference = round(abs((float) $document['amount'] - (float) $payment['amount']), 2);
+            if ($difference > 10.00001) {
+                throw new RuntimeException('El monto del documento está fuera de la tolerancia permitida de ±$10.00.');
+            }
+            if ((int) ($document['id_pago'] ?? 0) > 0 && (int) $document['id_pago'] !== $paymentId) {
+                throw new RuntimeException('El documento ya está relacionado con otro movimiento.');
+            }
+
+            if ($documentType === 'invoice') {
+                $used = $this->pdo->prepare('SELECT id FROM pagos WHERE id <> :payment AND id_factura = :document LIMIT 1 FOR UPDATE');
+                $used->execute(['payment' => $paymentId, 'document' => $documentId]);
+            } else {
+                $used = $this->pdo->prepare("SELECT id FROM pagos
+                    WHERE id <> :payment
+                      AND TRIM(COALESCE(id_factura_res, '')) = :document
+                    LIMIT 1 FOR UPDATE");
+                $used->execute(['payment' => $paymentId, 'document' => (string) $documentId]);
+            }
+            if ($used->fetchColumn()) {
+                throw new RuntimeException('El documento ya está asignado a otro movimiento.');
+            }
+
+            if ($documentType === 'invoice') {
+                $update = $this->pdo->prepare('UPDATE pagos
+                    SET id_factura = :document, id_factura_res = NULL,
+                        fecha_asig_factura = NOW(), usuario_asigna_fac = :operator
+                    WHERE id = :payment');
+            } else {
+                $update = $this->pdo->prepare('UPDATE pagos
+                    SET id_factura = NULL, id_factura_res = :document,
+                        fecha_asig_factura = NOW(), usuario_asigna_fac = :operator
+                    WHERE id = :payment');
+            }
+            $update->execute(['document' => $documentId, 'operator' => $operatorId, 'payment' => $paymentId]);
+            $this->pdo->prepare("UPDATE {$table} SET id_pago = :payment WHERE id = :document")
+                ->execute(['payment' => $paymentId, 'document' => $documentId]);
+            $this->audit('document_assign', $operatorId, $paymentId, [
+                'type' => $documentType,
+                'documentId' => $documentId,
+                'paymentAmount' => $payment['amount'],
+                'documentAmount' => round((float) $document['amount'], 2),
+                'difference' => $difference,
+                'companyId' => $payment['company_id'],
+            ]);
+
+            return [
+                'paymentId' => $paymentId,
+                'documentId' => $documentId,
+                'documentType' => $documentType,
+            ];
+        });
+    }
+
+    private function documentAssignmentPayment(int $paymentId, bool $forUpdate = false): array
+    {
+        if ($paymentId <= 0) {
+            throw new RuntimeException('El movimiento seleccionado no es válido.');
+        }
+        $query = $this->pdo->prepare("SELECT p.id, ABS(p.monto) AS amount, p.tipo_movimiento,
+                p.id_factura, p.id_factura_res, p.status,
+                CAST(p.nombre AS UNSIGNED) AS client_id,
+                CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
+                cl.nombre AS client, e.razon AS company,
+                COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_asignacion, p.fecha_captura) AS movement_date,
+                p.detalle, p.descripcion
+            FROM pagos p
+            LEFT JOIN captura ca ON ca.id = p.id_captura
+            LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
+            LEFT JOIN empresas e ON e.id = CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED)
+            WHERE p.id = :id
+              AND p.status = 'asignado'
+              AND p.tipo_movimiento <> 'Abono por comisión'
+              AND p.banco <> 'STP' AND p.banco <> '99'
+            LIMIT 1" . ($forUpdate ? ' FOR UPDATE' : ''));
+        $query->execute(['id' => $paymentId]);
+        $payment = $query->fetch();
+        if (!$payment) {
+            throw new RuntimeException('El movimiento ya no está asignado o no está disponible.');
+        }
+        if (strcasecmp(trim((string) $payment['tipo_movimiento']), 'Retiro') === 0) {
+            throw new RuntimeException('Los retiros no se pueden relacionar con documentos.');
+        }
+        if ((int) ($payment['id_factura'] ?? 0) > 0 || self::positiveIntegerReference($payment['id_factura_res'] ?? null) > 0) {
+            throw new RuntimeException('El movimiento ya tiene una factura o complemento relacionado.');
+        }
+        if ((int) $payment['company_id'] <= 0 || trim((string) ($payment['company'] ?? '')) === '') {
+            throw new RuntimeException('El movimiento no tiene una empresa válida para buscar documentos.');
+        }
+        $payment['id'] = (int) $payment['id'];
+        $payment['amount'] = round((float) $payment['amount'], 2);
+        $payment['client_id'] = (int) $payment['client_id'];
+        $payment['company_id'] = (int) $payment['company_id'];
+        return $payment;
+    }
+
     /**
      * Relaciona los movimientos visibles de la cartera 13 con facturas de esa
      * misma cartera y monto, sin ejecutar una consulta por cada movimiento.
@@ -1108,6 +1303,14 @@ final class MovementRepository
         }
 
         return is_numeric($normalized) ? (float) $normalized : null;
+    }
+
+    private static function positiveIntegerReference(mixed $value): int
+    {
+        $normalized = trim((string) $value);
+        return preg_match('/^[0-9]+$/D', $normalized) === 1 && (int) $normalized > 0
+            ? (int) $normalized
+            : 0;
     }
 
     private static function dateFilterValue(string $value): string

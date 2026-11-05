@@ -449,6 +449,53 @@ try {
             } elseif ($postAction === 'movement_reassign') {
                 $result = movement_repository()->reassign($paymentId, (int) ($_POST['client_id'] ?? 0), $operatorId);
                 flash('success', 'Movimiento reasignado y comisiones recalculadas.');
+            } elseif ($postAction === 'movement_assign_document') {
+                if ($movementKey !== 'asignados') {
+                    throw new RuntimeException('La asociación manual solo está disponible en Movimientos asignados.');
+                }
+                $result = movement_repository()->assignDocument(
+                    $paymentId,
+                    (string) ($_POST['document_type'] ?? ''),
+                    (int) ($_POST['document_id'] ?? 0),
+                    $operatorId
+                );
+                $documentLabel = $result['documentType'] === 'invoice' ? 'Factura' : 'Complemento';
+                flash('success', $documentLabel . ' #' . $result['documentId'] . ' relacionado con el movimiento #' . $paymentId . '.');
+                $returnDocumentFilters = $_POST['return_doc_filter'] ?? [];
+                $returnDocumentFilters = is_array($returnDocumentFilters) ? $returnDocumentFilters : [$returnDocumentFilters];
+                $returnDocumentFilters = array_values(array_unique(array_intersect(
+                    array_map('strval', $returnDocumentFilters),
+                    ['internal', 'document', 'none']
+                )));
+                if (in_array('document', $returnDocumentFilters, true) && in_array('none', $returnDocumentFilters, true)) {
+                    $returnDocumentFilters = array_values(array_filter(
+                        $returnDocumentFilters,
+                        static fn (string $filter): bool => $filter !== 'none'
+                    ));
+                }
+                $returnMovementType = in_array((string) ($_POST['return_movement_type'] ?? ''), ['', 'deposit', 'withdrawal'], true)
+                    ? (string) ($_POST['return_movement_type'] ?? '')
+                    : '';
+                $returnPerPage = in_array((string) ($_POST['return_per_page'] ?? '25'), ['25', '50', '100', 'all'], true)
+                    ? (string) ($_POST['return_per_page'] ?? '25')
+                    : '25';
+                $returnQuery = mb_substr(trim((string) ($_POST['return_q'] ?? '')), 0, 160);
+                if ($returnPerPage === 'all' && $returnQuery === '' && $returnDocumentFilters === [] && $returnMovementType === '') {
+                    $returnPerPage = '25';
+                }
+                $returnParams = [
+                    'movement' => 'asignados',
+                    'client' => max(0, (int) ($_POST['return_client'] ?? 0)) ?: null,
+                    'q' => $returnQuery ?: null,
+                    'doc_filter' => $returnDocumentFilters ?: null,
+                    'movement_type' => $returnMovementType ?: null,
+                    'per_page' => $returnPerPage,
+                    'page' => max(1, (int) ($_POST['return_page'] ?? 1)),
+                ];
+                redirect('?' . http_build_query(array_filter(
+                    $returnParams,
+                    static fn (mixed $value): bool => $value !== null && $value !== ''
+                )));
             } elseif ($postAction === 'transfer_create') {
                 $amount = (float) str_replace([',', '$', ' '], '', (string) ($_POST['amount'] ?? '0'));
                 $result = movement_repository()->createTransfer(
@@ -491,6 +538,16 @@ try {
 }
 
 $flash = take_flash();
+$movementDocumentAssignment = null;
+if ($movementKey === 'asignados' && $action === 'assign-document') {
+    try {
+        $documentPaymentId = filter_var($_GET['payment_id'] ?? null, FILTER_VALIDATE_INT) ?: 0;
+        $movementDocumentAssignment = movement_repository()->documentCandidates($documentPaymentId);
+    } catch (Throwable $exception) {
+        flash('error', $exception->getMessage());
+        redirect('?movement=asignados');
+    }
+}
 $complementPrefill = null;
 $complementPaymentPrefill = null;
 $invoicePaymentPrefill = null;
@@ -1261,8 +1318,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         $movementClientId = filter_input(INPUT_GET, 'client', FILTER_VALIDATE_INT) ?: null;
         $movementClient = $movementClientId ? movement_repository()->client($movementClientId) : null;
         $isTransferForm = $movementAction === 'transfer' && $action === 'form';
+        $isDocumentAssignment = $movementKey === 'asignados'
+            && $action === 'assign-document'
+            && is_array($movementDocumentAssignment);
         $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
-        $movementResult = $isTransferForm ? null : movement_repository()->page(
+        $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,
             $movement,
             $movementSearch,
@@ -1286,6 +1346,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             'date_type' => $movementKey === 'cartera' ? $movementDateType : null,
             'per_page' => $movementSupportsFullPagination ? $movementPerPageValue : null,
         ];
+        $movementReturnUrl = '?' . http_build_query(array_filter(
+            $movementPaginationQuery + ['page' => $movementPage],
+            static fn (mixed $value): bool => $value !== null && $value !== ''
+        ));
         $movementPageNumbers = [];
         if ($movementSupportsFullPagination && $movementPerPageValue !== 'all' && $movementResult) {
             $currentMovementPage = (int) $movementResult['page'];
@@ -1357,6 +1421,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <div class="form-actions transfer-actions"><button class="button primary" type="submit">Confirmar traspaso</button></div>
                 </form>
             </section>
+        <?php elseif ($isDocumentAssignment): ?>
+            <?php require __DIR__ . '/views/movement-document-assignment.php'; ?>
         <?php else: ?>
         <section class="panel movement-panel">
             <?php if ($movementAction === 'assign'): ?>
@@ -1423,7 +1489,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && (int) ($row['company_id'] ?? 0) > 0
                             && !$hasStoredMovementDocument
                             && $matchedMovementInvoiceId <= 0;
-                        $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice;
+                        $canAssignMovementDocument = $movementKey === 'asignados'
+                            && !$isWithdrawalMovement
+                            && (string) ($row['status'] ?? '') === 'asignado'
+                            && (int) ($row['company_id'] ?? 0) > 0
+                            && !$hasStoredMovementDocument
+                            && $matchedMovementInvoiceId <= 0;
+                        $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice || $canAssignMovementDocument;
                         $hasMovementContextMenu = !$isWithdrawalMovement
                             && ($displayMovementInvoiceId > 0
                                 || $movementComplementId > 0
@@ -1495,7 +1567,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             </form>
                                             <?php if ($hasMovementContextMenu): ?>
                                                 <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
-                                                <div class="record-action-source" hidden><?php if ($displayMovementInvoiceId > 0 || $movementComplementId > 0): ?><?php if ($displayMovementInvoiceId > 0): ?><a data-record-action data-action-label="Mostrar factura" data-action-icon="document" href="?document=invoice_pdf&amp;id=<?= e($displayMovementInvoiceId) ?>" target="_blank" rel="noopener">Mostrar factura</a><?php endif; ?><?php if ($movementComplementId > 0): ?><a data-record-action data-action-label="Mostrar complemento" data-action-icon="receipt" href="?complement=detail&amp;id=<?= e($movementComplementId) ?>">Mostrar complemento</a><?php endif; ?><?php else: ?><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?><?php endif; ?></div>
+                                                <div class="record-action-source" hidden><?php if ($displayMovementInvoiceId > 0 || $movementComplementId > 0): ?><?php if ($displayMovementInvoiceId > 0): ?><a data-record-action data-action-label="Mostrar factura" data-action-icon="document" href="?document=invoice_pdf&amp;id=<?= e($displayMovementInvoiceId) ?>" target="_blank" rel="noopener">Mostrar factura</a><?php endif; ?><?php if ($movementComplementId > 0): ?><a data-record-action data-action-label="Mostrar complemento" data-action-icon="receipt" href="?complement=detail&amp;id=<?= e($movementComplementId) ?>">Mostrar complemento</a><?php endif; ?><?php else: ?><?php if ($canAssignMovementDocument): ?><a data-record-action data-action-label="Asignar documento" data-action-icon="receipt" href="?<?= e(http_build_query($movementPaginationQuery + ['action'=>'assign-document','payment_id'=>$row['id'],'page'=>$movementResult['page']])) ?>">Asignar documento</a><?php endif; ?><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?><?php endif; ?></div>
                                             <?php endif; ?>
                                         </div>
                                     <?php elseif ($movementAction === 'transfer'): ?>
@@ -1505,7 +1577,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                         </form>
                                     <?php elseif ($hasMovementContextMenu): ?>
                                         <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
-                                        <div class="record-action-source" hidden><?php if ($displayMovementInvoiceId > 0 || $movementComplementId > 0): ?><?php if ($displayMovementInvoiceId > 0): ?><a data-record-action data-action-label="Mostrar factura" data-action-icon="document" href="?document=invoice_pdf&amp;id=<?= e($displayMovementInvoiceId) ?>" target="_blank" rel="noopener">Mostrar factura</a><?php endif; ?><?php if ($movementComplementId > 0): ?><a data-record-action data-action-label="Mostrar complemento" data-action-icon="receipt" href="?complement=detail&amp;id=<?= e($movementComplementId) ?>">Mostrar complemento</a><?php endif; ?><?php else: ?><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?><?php endif; ?></div>
+                                        <div class="record-action-source" hidden><?php if ($displayMovementInvoiceId > 0 || $movementComplementId > 0): ?><?php if ($displayMovementInvoiceId > 0): ?><a data-record-action data-action-label="Mostrar factura" data-action-icon="document" href="?document=invoice_pdf&amp;id=<?= e($displayMovementInvoiceId) ?>" target="_blank" rel="noopener">Mostrar factura</a><?php endif; ?><?php if ($movementComplementId > 0): ?><a data-record-action data-action-label="Mostrar complemento" data-action-icon="receipt" href="?complement=detail&amp;id=<?= e($movementComplementId) ?>">Mostrar complemento</a><?php endif; ?><?php else: ?><?php if ($canAssignMovementDocument): ?><a data-record-action data-action-label="Asignar documento" data-action-icon="receipt" href="?<?= e(http_build_query($movementPaginationQuery + ['action'=>'assign-document','payment_id'=>$row['id'],'page'=>$movementResult['page']])) ?>">Asignar documento</a><?php endif; ?><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?><?php endif; ?></div>
                                     <?php else: ?>
                                         <span aria-hidden="true">—</span>
                                     <?php endif; ?>
