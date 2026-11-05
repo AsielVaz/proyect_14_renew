@@ -546,19 +546,21 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </summary>
             <div class="catalog-links">
                 <?php foreach ($catalogs as $navKey => $item): ?>
+                    <?php if (in_array($navKey, ['cuentas-especiales', 'fondeadoras', 'contactos'], true)) continue; ?>
                     <a class="<?= $key === $navKey ? 'active' : '' ?>" href="?catalog=<?= e($navKey) ?>">
                         <span></span><?= e($item['label']) ?>
                     </a>
                 <?php endforeach; ?>
             </div>
         </details>
-        <details class="catalog-menu movement-menu" <?= $movement ? 'open' : '' ?>>
+        <details class="catalog-menu movement-menu" <?= $movement && !in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span> Movimientos</span>
                 <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
             </summary>
             <div class="catalog-links">
                 <?php foreach ($movements as $navKey => $item): ?>
+                    <?php if (in_array($navKey, ['totales', 'cartera', 'stp'], true)) continue; ?>
                     <a class="<?= $movementKey === $navKey ? 'active' : '' ?>" href="?movement=<?= e($navKey) ?>">
                         <span></span><?= e($item['label']) ?>
                     </a>
@@ -573,12 +575,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <a class="<?= $complementModule ? 'active' : '' ?>" href="?complement=list"><span></span>Complementos de pago</a>
             </div>
         </details>
-        <details class="catalog-menu report-menu" <?= $report ? 'open' : '' ?>>
+        <details class="catalog-menu report-menu" <?= $report || in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm3 5h6m-6 4h6m-6 4h4"/></svg></span> Reportes</span>
                 <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
             </summary>
             <div class="catalog-links">
+                <a class="<?= $movementKey === 'totales' ? 'active' : '' ?>" href="?movement=totales"><span></span>Log de movimientos</a>
+                <a class="<?= $movementKey === 'stp' ? 'active' : '' ?>" href="?movement=stp"><span></span>Movimientos STP</a>
                 <?php foreach ($reports as $navKey => $item): ?>
                     <a class="<?= $reportKey === $navKey ? 'active' : '' ?>" href="?report=<?= e($navKey) ?>">
                         <span></span><?= e($item['label']) ?>
@@ -619,7 +623,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <main id="main-content">
     <header class="topbar">
         <div class="topbar-copy">
-            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))))) ?></p>
+            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))))) ?></p>
             <h1><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))))) ?></h1>
             <?php if ($dashboardModule): ?><p class="topbar-description">Visión general de saldos, movimientos y carteras de clientes del sistema.</p><?php endif; ?>
             <?php if ($securityModule): ?><p class="topbar-description">Administra los dispositivos que pueden autenticar tu cuenta sin contraseña.</p><?php endif; ?>

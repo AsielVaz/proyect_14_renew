@@ -5,8 +5,8 @@ declare(strict_types=1);
 ?>
 <section class="report-intro movement-intro manual-email-intro">
     <div>
-        <p class="eyebrow">Movimientos · comunicación</p>
-        <h2>Correos manuales</h2>
+        <p class="eyebrow">Movimientos · cotizaciones</p>
+        <h2>Cotizador por correo</h2>
         <p>Prepara cotizaciones y mensajes con la identidad de cada empresa. El envío sólo se habilita después de revisar la versión final.</p>
     </div>
     <span class="operation-badge">Revisión obligatoria antes de enviar</span>

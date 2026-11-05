@@ -28,7 +28,7 @@ final class Movements
                 'columns' => self::baseColumns(true),
             ],
             'totales' => [
-                'label' => 'Ingreso de pagos',
+                'label' => 'Log de movimientos',
                 'description' => 'Consulta general de movimientos capturados.',
                 'columns' => [
                     'id' => 'ID',
@@ -76,7 +76,7 @@ final class Movements
                 ],
             ],
             'correos-manuales' => [
-                'label' => 'Correos manuales',
+                'label' => 'Cotizador por correo',
                 'description' => 'Prepara cotizaciones con plantilla, revisa el HTML final y envía por correo.',
                 'action' => 'manual_email',
                 'restrictedTo' => [1, 32, 82],
