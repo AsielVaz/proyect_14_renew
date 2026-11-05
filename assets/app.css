@@ -394,7 +394,7 @@ textarea:focus {
     margin-bottom: 20px;
 }
 
-.dashboard-summary article {
+.dashboard-summary .summary-card {
     display: grid;
     gap: 7px;
     min-width: 0;
@@ -406,7 +406,7 @@ textarea:focus {
     box-shadow: var(--shadow-card);
 }
 
-.dashboard-summary article.is-warning {
+.dashboard-summary .summary-card.is-warning {
     border-top-color: var(--color-danger);
 }
 
@@ -1065,6 +1065,19 @@ tbody tr:hover {
     text-overflow: ellipsis;
 }
 
+.movement-table tr[data-assignment-row] > td {
+    transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.movement-table tr.is-assignment-selected > td,
+.movement-table tr.is-assignment-selected:hover > td {
+    background: var(--color-primary-soft);
+}
+
+.movement-table tr.is-assignment-selected > td:first-child {
+    box-shadow: inset 4px 0 0 var(--color-primary);
+}
+
 .movement-cell-main,
 .movement-cell-secondary {
     display: block;
@@ -1375,6 +1388,16 @@ tbody tr:hover {
 .pending-invoices-table td strong,
 .pending-invoices-table td small {
     display: block;
+}
+
+.pending-invoices-table td small.pending-invoice-amount-match {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+    font-weight: 750;
 }
 
 .pending-invoices-table td small {
@@ -6723,7 +6746,7 @@ main::before {
     margin-bottom: 24px;
 }
 
-.dashboard-summary article {
+.dashboard-summary .summary-card {
     position: relative;
     display: flex;
     align-items: flex-start;
@@ -6738,17 +6761,17 @@ main::before {
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
-.dashboard-summary article:hover {
+.dashboard-summary .summary-card:hover {
     border-color: rgba(245, 102, 0, 0.36);
     box-shadow: 0 16px 35px rgba(58, 37, 24, 0.1);
     transform: translateY(-2px);
 }
 
-.dashboard-summary article.is-warning {
+.dashboard-summary .summary-card.is-warning {
     border-color: rgba(216, 58, 67, 0.38);
 }
 
-.dashboard-summary article.summary-card-primary {
+.dashboard-summary .summary-card.summary-card-primary {
     border-color: rgba(245, 102, 0, 0.75);
 }
 
@@ -6756,6 +6779,18 @@ main::before {
     display: grid;
     min-width: 0;
     gap: 1px;
+}
+
+.summary-card-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.summary-card-link:focus-visible {
+    border-color: var(--color-primary);
+    outline: 3px solid var(--color-primary-focus);
+    outline-offset: 2px;
 }
 
 .summary-icon {
@@ -7216,7 +7251,7 @@ main::before {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .dashboard-summary article:last-child {
+    .dashboard-summary .summary-card:last-child {
         grid-column: 1 / -1;
     }
 
@@ -7301,7 +7336,7 @@ main::before {
         grid-template-columns: 1fr;
     }
 
-    .dashboard-summary article:last-child {
+    .dashboard-summary .summary-card:last-child {
         grid-column: auto;
     }
 
@@ -7353,7 +7388,7 @@ main::before {
         align-self: flex-end;
     }
 
-    .dashboard-summary article {
+    .dashboard-summary .summary-card {
         min-height: 116px;
         padding: 18px;
     }

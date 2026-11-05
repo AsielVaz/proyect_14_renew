@@ -84,6 +84,47 @@ final class InvoiceRepository
         ];
     }
 
+    public function paymentPrefill(int $paymentId): array
+    {
+        if ($paymentId <= 0) {
+            throw new RuntimeException('El movimiento seleccionado no es válido.');
+        }
+        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.id_factura,
+                CAST(p.nombre AS UNSIGNED) AS client_id,
+                CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
+                cl.nombre AS cliente, e.razon AS empresa
+            FROM pagos p
+            LEFT JOIN captura ca ON ca.id = p.id_captura
+            LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
+            LEFT JOIN empresas e ON e.id = CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED)
+            WHERE p.id = :id AND p.status = 'asignado'
+              AND p.tipo_movimiento <> 'Abono por comisión'
+              AND p.banco <> 'STP' AND p.banco <> '99'
+            LIMIT 1");
+        $query->execute(['id' => $paymentId]);
+        $payment = $query->fetch();
+        if (!$payment) {
+            throw new RuntimeException('El movimiento ya no está asignado o no está disponible para facturación.');
+        }
+        if ((int) ($payment['id_factura'] ?? 0) > 0) {
+            throw new RuntimeException('El movimiento ya está relacionado con una factura.');
+        }
+        if ((int) $payment['client_id'] <= 0 || (int) $payment['company_id'] <= 0) {
+            throw new RuntimeException('El movimiento no tiene empresa y cliente válidos para crear la factura.');
+        }
+
+        $receivers = $this->receivers((int) $payment['client_id']);
+        return [
+            'id' => (int) $payment['id'],
+            'amount' => round(abs((float) $payment['monto']), 2),
+            'client_id' => (int) $payment['client_id'],
+            'company_id' => (int) $payment['company_id'],
+            'receiver_id' => count($receivers) === 1 ? (int) $receivers[0]['id'] : 0,
+            'cliente' => (string) ($payment['cliente'] ?? ''),
+            'empresa' => (string) ($payment['empresa'] ?? ''),
+        ];
+    }
+
     public function receivers(int $clientId): array
     {
         $query = $this->pdo->prepare('SELECT id, clave_corta, razon_social, rfc, cp, regimen_fiscal FROM claves_cortas WHERE id_cliente = :client ORDER BY razon_social');

@@ -111,11 +111,10 @@ final class PaymentComplementRepository
             throw new RuntimeException('El movimiento seleccionado no es válido.');
         }
 
-        $query = $this->pdo->prepare("SELECT p.id,
+        $query = $this->pdo->prepare("SELECT p.id, ABS(p.monto) AS movement_amount,
                 CAST(p.nombre AS UNSIGNED) AS client_id,
                 CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
                 cl.nombre AS cliente, e.razon AS empresa,
-                COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable,
                 COALESCE((SELECT SUM(fc.total_factura)
                     FROM facturas_complementos fc
                     WHERE fc.id_pago = p.id AND COALESCE(fc.status, '') <> 'Cancelado'), 0) AS utilizado,
@@ -138,12 +137,12 @@ final class PaymentComplementRepository
 
         $clientId = (int) $payment['client_id'];
         $companyId = (int) $payment['company_id'];
-        $maximum = round((float) $payment['saldo_acreditable'] - (float) $payment['utilizado'], 2);
+        $maximum = round((float) $payment['movement_amount'] - (float) $payment['utilizado'], 2);
         if ($clientId <= 0 || $companyId <= 0 || trim((string) $payment['cliente']) === '' || trim((string) $payment['empresa']) === '') {
             throw new RuntimeException('El movimiento no tiene empresa y cliente válidos para crear el complemento.');
         }
         if ($maximum <= 0) {
-            throw new RuntimeException('El movimiento no tiene saldo acreditable disponible para otro complemento.');
+            throw new RuntimeException('El monto del movimiento ya fue aplicado por completo en otros complementos.');
         }
 
         return [
@@ -153,47 +152,46 @@ final class PaymentComplementRepository
             'cliente' => (string) $payment['cliente'],
             'empresa' => (string) $payment['empresa'],
             'maximum' => $maximum,
+            'movement_amount' => round((float) $payment['movement_amount'], 2),
             'payment_date' => (string) ($payment['payment_date'] ?: date('Y-m-d')),
         ];
     }
 
-    public function pendingInvoicesForPayment(int $paymentId, int $receiverId): array
+    public function pendingInvoicesForPayment(int $paymentId, int $companyId): array
     {
-        if ($receiverId <= 0) {
-            throw new RuntimeException('Selecciona una razón social para consultar sus facturas pendientes.');
+        if ($companyId <= 0) {
+            throw new RuntimeException('Selecciona una empresa emisora para consultar sus facturas pendientes.');
         }
 
         $payment = $this->paymentPrefill($paymentId);
-        $receiver = $this->pdo->prepare('SELECT id FROM claves_cortas WHERE id = :id AND id_cliente = :client');
-        $receiver->execute(['id' => $receiverId, 'client' => $payment['client_id']]);
-        if (!$receiver->fetchColumn()) {
-            throw new RuntimeException('La razón social seleccionada no pertenece al cliente del movimiento.');
-        }
+        $this->assertReference('empresas', $companyId, 'empresa emisora');
+        $movementAmount = (float) $payment['movement_amount'];
 
         $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
+                f.nombre AS client_id, f.id_clave_corta AS receiver_id,
+                c.nombre AS cliente, cc.razon_social AS receptor, cc.rfc,
                 DATE(f.fecha_timbrado) AS fecha_timbrado,
                 COALESCE(rel.pagado, 0) AS pagado,
                 GREATEST(ROUND(f.total_iva - COALESCE(rel.pagado, 0), 2), 0) AS saldo,
                 COALESCE(rel.ultima_parcialidad, 0) + 1 AS siguiente_parcialidad
             FROM facturas f
+            INNER JOIN clientes c ON c.id = f.nombre
+            INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta
             LEFT JOIN (
                 SELECT id_factura, SUM(monto) AS pagado, MAX(num_pago) AS ultima_parcialidad
                 FROM facturar_rel_complementos
                 GROUP BY id_factura
             ) rel ON rel.id_factura = f.id
-            WHERE f.nombre = :client
-              AND f.razon = :company
-              AND f.id_clave_corta = :receiver
+            WHERE f.razon = :company
               AND f.metodo_pago = 2
               AND COALESCE(f.uuid, '') <> ''
               AND COALESCE(f.status, '') <> 'Cancelado'
-              AND f.total_iva - COALESCE(rel.pagado, 0) > 0.005
-            ORDER BY f.fecha_timbrado ASC, f.id ASC
-            LIMIT 100");
+              AND (f.total_iva - COALESCE(rel.pagado, 0) > 0.005
+                   OR ABS(f.total_iva - :movement_amount) < 0.005)
+            ORDER BY f.fecha_timbrado ASC, f.id ASC");
         $query->execute([
-            'client' => $payment['client_id'],
-            'company' => $payment['company_id'],
-            'receiver' => $receiverId,
+            'company' => $companyId,
+            'movement_amount' => $movementAmount,
         ]);
         $invoices = $query->fetchAll();
         foreach ($invoices as &$invoice) {
@@ -202,6 +200,9 @@ final class PaymentComplementRepository
             $invoice['pagado'] = round((float) $invoice['pagado'], 2);
             $invoice['saldo'] = round((float) $invoice['saldo'], 2);
             $invoice['siguiente_parcialidad'] = (int) $invoice['siguiente_parcialidad'];
+            $invoice['client_id'] = (int) $invoice['client_id'];
+            $invoice['receiver_id'] = (int) $invoice['receiver_id'];
+            $invoice['matches_movement_amount'] = abs((float) $invoice['total_iva'] - $movementAmount) < 0.005;
         }
         unset($invoice);
 
@@ -304,7 +305,7 @@ final class PaymentComplementRepository
             if ($paymentId > 0) {
                 $payment = $this->pdo->prepare("SELECT p.id, CAST(p.nombre AS UNSIGNED) AS client_id,
                         CAST(COALESCE(ca.razon, p.empresa) AS UNSIGNED) AS company_id,
-                        COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable
+                        ABS(p.monto) AS movement_amount
                     FROM pagos p
                     LEFT JOIN captura ca ON ca.id = p.id_captura
                     WHERE p.id = :id AND p.status = 'asignado'
@@ -316,16 +317,13 @@ final class PaymentComplementRepository
                 if (!$paymentRow) {
                     throw new RuntimeException('El movimiento de pago ya no está asignado o no está disponible.');
                 }
-                if ((int) $paymentRow['client_id'] !== $clientId || (int) $paymentRow['company_id'] !== $companyId) {
-                    throw new RuntimeException('El movimiento de pago no corresponde al cliente y empresa seleccionados.');
-                }
                 $used = $this->pdo->prepare("SELECT COALESCE(SUM(total_factura), 0)
                     FROM facturas_complementos
                     WHERE id_pago = :payment AND COALESCE(status, '') <> 'Cancelado'");
                 $used->execute(['payment' => $paymentId]);
-                $paymentMaximum = round((float) $paymentRow['saldo_acreditable'] - (float) $used->fetchColumn(), 2);
+                $paymentMaximum = round((float) $paymentRow['movement_amount'] - (float) $used->fetchColumn(), 2);
                 if ($paymentMaximum <= 0) {
-                    throw new RuntimeException('El movimiento no tiene saldo acreditable disponible para otro complemento.');
+                    throw new RuntimeException('El monto del movimiento ya fue aplicado por completo en otros complementos.');
                 }
             }
 

@@ -330,7 +330,7 @@ if ($complementModule && isset($_GET['data'])) {
             'invoice' => payment_complement_repository()->invoiceByUuid((string) ($_GET['uuid'] ?? '')),
             'pending_invoices' => payment_complement_repository()->pendingInvoicesForPayment(
                 (int) ($_GET['payment_id'] ?? 0),
-                (int) ($_GET['receiver_id'] ?? 0)
+                (int) ($_GET['company_id'] ?? 0)
             ),
             default => throw new RuntimeException('Consulta de complementos desconocida.'),
         };
@@ -492,6 +492,7 @@ try {
 $flash = take_flash();
 $complementPrefill = null;
 $complementPaymentPrefill = null;
+$invoicePaymentPrefill = null;
 if ($complementView === 'create' && isset($_GET['invoice_id'])) {
     try {
         $sourceInvoiceId = filter_var($_GET['invoice_id'], FILTER_VALIDATE_INT) ?: 0;
@@ -513,6 +514,15 @@ if ($complementView === 'create' && isset($_GET['invoice_id'])) {
     try {
         $sourcePaymentId = filter_var($_GET['payment_id'], FILTER_VALIDATE_INT) ?: 0;
         $complementPaymentPrefill = payment_complement_repository()->paymentPrefill($sourcePaymentId);
+    } catch (Throwable $exception) {
+        flash('error', $exception->getMessage());
+        redirect('?movement=asignados');
+    }
+}
+if ($invoiceView === 'create' && isset($_GET['payment_id'])) {
+    try {
+        $sourcePaymentId = filter_var($_GET['payment_id'], FILTER_VALIDATE_INT) ?: 0;
+        $invoicePaymentPrefill = invoice_repository()->paymentPrefill($sourcePaymentId);
     } catch (Throwable $exception) {
         flash('error', $exception->getMessage());
         redirect('?movement=asignados');
@@ -977,27 +987,27 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $complementData = payment_complement_repository()->formData();
             $invoiceComplementContext = $complementPrefill !== null;
             $paymentComplementContext = $complementPaymentPrefill !== null;
-            $lockedCompanyClient = $invoiceComplementContext || $paymentComplementContext;
             $complementHeaderPrefill = $complementPrefill ?? $complementPaymentPrefill;
-            $paymentPrefillReceivers = $paymentComplementContext
-                ? payment_complement_repository()->receivers((int) $complementPaymentPrefill['client_id'])
+            $complementInitialClientId = (int) ($complementHeaderPrefill['client_id'] ?? 0);
+            $complementInitialCompanyId = (int) ($complementHeaderPrefill['company_id'] ?? 0);
+            $paymentPrefillReceivers = $complementInitialClientId > 0
+                ? payment_complement_repository()->receivers($complementInitialClientId)
                 : [];
-            $paymentAutoReceiverId = count($paymentPrefillReceivers) === 1
-                ? (int) $paymentPrefillReceivers[0]['id']
-                : 0;
+            $paymentAutoReceiverId = $invoiceComplementContext
+                ? (int) $complementPrefill['receiver_id']
+                : (count($paymentPrefillReceivers) === 1 ? (int) $paymentPrefillReceivers[0]['id'] : 0);
             ?>
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $invoiceComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?><?= $paymentComplementContext ? ' data-prefill-payment-maximum="' . e($complementPaymentPrefill['maximum']) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_create">
-                <?php if ($lockedCompanyClient): ?><input type="hidden" name="company_id" value="<?= e($complementHeaderPrefill['company_id']) ?>"><input type="hidden" name="client_id" value="<?= e($complementHeaderPrefill['client_id']) ?>"><?php endif; ?>
-                <?php if ($invoiceComplementContext): ?><input type="hidden" name="receiver_id" value="<?= e($complementPrefill['receiver_id']) ?>"><input type="hidden" name="source_invoice_id" value="<?= e($complementPrefill['id']) ?>"><?php endif; ?>
+                <?php if ($invoiceComplementContext): ?><input type="hidden" name="source_invoice_id" value="<?= e($complementPrefill['id']) ?>"><?php endif; ?>
                 <?php if ($paymentComplementContext): ?><input type="hidden" name="payment_id" value="<?= e($complementPaymentPrefill['id']) ?>"><?php endif; ?>
                 <section class="panel invoice-form-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Datos del pago</p><h2>Emisor y receptor</h2></div><a class="button" href="?complement=list">Volver</a></div>
                     <div class="form-grid invoice-header-grid">
-                        <label class="field"><span>Empresa emisora *</span><select <?= $lockedCompanyClient ? '' : 'name="company_id" ' ?>id="complementCompany" required<?= $lockedCompanyClient ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedCompanyClient): ?><option value="<?= e($complementHeaderPrefill['company_id']) ?>" selected><?= e($complementHeaderPrefill['empresa']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
-                        <label class="field"><span>Cliente *</span><select <?= $lockedCompanyClient ? '' : 'name="client_id" ' ?>id="complementClient" required<?= $lockedCompanyClient ? ' disabled aria-disabled="true"' : '' ?>><?php if ($lockedCompanyClient): ?><option value="<?= e($complementHeaderPrefill['client_id']) ?>" selected><?= e($complementHeaderPrefill['cliente']) ?></option><?php else: ?><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?><?php endif; ?></select></label>
-                        <label class="field"><span>Razón social / clave corta *</span><select <?= $invoiceComplementContext ? '' : 'name="receiver_id" ' ?>id="complementReceiver" required<?= $invoiceComplementContext ? ' disabled aria-disabled="true"' : (!$paymentComplementContext ? ' disabled' : '') ?>><?php if ($invoiceComplementContext): ?><option value="<?= e($complementPrefill['receiver_id']) ?>" selected><?= e($complementPrefill['clave_corta'] . ' · ' . $complementPrefill['receptor']) ?></option><?php elseif ($paymentComplementContext): ?><option value="">Seleccionar…</option><?php foreach ($paymentPrefillReceivers as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social']) ?></option><?php endforeach; ?><?php else: ?><option value="">Selecciona primero un cliente…</option><?php endif; ?></select></label>
+                        <label class="field"><span>Empresa emisora *</span><select name="company_id" id="complementCompany" required><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialCompanyId ? 'selected' : '' ?>><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Cliente *</span><select name="client_id" id="complementClient" required><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Razón social / clave corta *</span><select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>><option value=""><?= $complementInitialClientId > 0 ? 'Seleccionar…' : 'Selecciona primero un cliente…' ?></option><?php foreach ($paymentPrefillReceivers as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e($paymentComplementContext ? $complementPaymentPrefill['payment_date'] : date('Y-m-d')) ?>" required></label>
                         <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
@@ -1008,13 +1018,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <label class="field"><span>Movimiento de pago</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label>
                         <?php endif; ?>
                     </div>
-                    <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente bloqueados para conservar la relación. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
+                    <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren desde el movimiento, pero puedes cambiarlos. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas con saldo pendiente para este pago.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta todas las facturas con saldo pendiente de la empresa emisora.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $complementInitialCompanyId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
                     <?php if ($paymentComplementContext): ?>
                         <section class="pending-invoices-panel" id="pendingInvoicesPanel" aria-labelledby="pendingInvoicesTitle" tabindex="-1" hidden>
-                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes</h3><span id="pendingInvoicesSummary">Selecciona una razón social y consulta sus facturas.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes de la empresa</h3><span id="pendingInvoicesSummary">Consulta todas las facturas PPD con saldo pendiente.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
                             <div class="pending-invoices-status" id="pendingInvoicesStatus" role="status" aria-live="polite">Preparado para consultar.</div>
                             <div class="table-wrap"><table class="pending-invoices-table"><thead><tr><th>Factura</th><th>Fecha</th><th>Total</th><th>Pagado</th><th>Saldo pendiente</th><th><span class="sr-only">Acción</span></th></tr></thead><tbody id="pendingInvoicesBody"></tbody></table></div>
                         </section>
@@ -1081,15 +1091,15 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php endif; ?>
     <?php elseif ($invoiceModule): ?>
         <?php if ($invoiceView === 'create'): ?>
-            <?php $invoiceData = invoice_repository()->formData(); ?>
+            <?php $invoiceData = invoice_repository()->formData(); $invoiceInitialCompanyId = (int) ($invoicePaymentPrefill['company_id'] ?? 0); $invoiceInitialClientId = (int) ($invoicePaymentPrefill['client_id'] ?? 0); $invoiceInitialReceiverId = (int) ($invoicePaymentPrefill['receiver_id'] ?? 0); ?>
             <section class="report-intro"><p>Genera la factura usando los mismos catálogos de empresas, clientes, razones sociales, conceptos y claves fiscales del sistema anterior.</p><span class="operation-badge">Guardado transaccional</span></section>
-            <form method="post" id="invoiceForm" data-confirm="¿Guardar esta factura y todos sus conceptos?" data-confirm-title="Confirmar factura">
+            <form method="post" id="invoiceForm" data-confirm="¿Guardar esta factura y todos sus conceptos?" data-confirm-title="Confirmar factura"<?= $invoicePaymentPrefill ? ' data-prefill-receiver="' . e($invoiceInitialReceiverId) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_create">
                 <section class="panel invoice-form-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Datos fiscales</p><h2>Emisor y receptor</h2></div><a class="button" href="?invoice=list">Volver</a></div>
                     <div class="form-grid invoice-header-grid">
-                        <label class="field"><span>Empresa emisora *</span><select name="company_id" id="invoiceCompany" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['companies'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Cliente *</span><select name="client_id" id="invoiceClient" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['clients'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Empresa emisora *</span><select name="company_id" id="invoiceCompany" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['companies'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $invoiceInitialCompanyId ? 'selected' : '' ?>><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Cliente *</span><select name="client_id" id="invoiceClient" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $invoiceInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Razón social *</span><select name="receiver_id" id="invoiceReceiver" required disabled><option value="">Selecciona primero un cliente…</option></select></label>
                         <label class="field"><span>Método de pago *</span><select name="method_id" required><?php foreach ($invoiceData['methods'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['clave']) ?> · <?= e($item['metodo_pago']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Forma de pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['forms'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e($item['forma_pago']) ?></option><?php endforeach; ?></select></label>
@@ -1098,8 +1108,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <label class="field"><span>Tipo de comprobante *</span><select name="voucher_type" required><option value="I">Ingreso</option><option value="E">Egreso</option><option value="T">Traslado</option><option value="N">Nómina</option><option value="P">Pago</option></select></label>
                         <label class="field"><span>Estatus de pago *</span><select name="status_payment"><option value="Pagado">Pagado</option><option value="No Pagado">No pagado</option></select></label>
                         <label class="field"><span>Retención 4%</span><select name="retention"><option value="No">No</option><option value="Si">Sí</option></select></label>
-                        <label class="field"><span>Pago asociado</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label>
+                        <?php if ($invoicePaymentPrefill): ?><input type="hidden" name="payment_id" value="<?= e($invoicePaymentPrefill['id']) ?>"><label class="field"><span>Pago asociado</span><input type="text" value="#<?= e($invoicePaymentPrefill['id']) ?> · <?= e(report_value($invoicePaymentPrefill['amount'], 'money')) ?>" readonly aria-readonly="true"></label><?php else: ?><label class="field"><span>Pago asociado</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label><?php endif; ?>
                     </div>
+                    <?php if ($invoicePaymentPrefill): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($invoicePaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren automáticamente, pero ambos permanecen editables.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Partidas</p><h2>Conceptos de factura</h2></div><div class="invoice-add-concept"><select id="invoiceConcept" disabled><option value="">Selecciona primero una empresa…</option></select><button type="button" class="button" id="addInvoiceConcept">+ Agregar</button></div></div>
@@ -1263,10 +1274,16 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php foreach ($movementResult['rows'] as $row): ?>
                         <?php $canCreateMovementComplement = $hasMovementContextActions
                             && (string) ($row['status'] ?? '') === 'asignado'
-                            && (float) ($row['saldo_acreditable'] ?? 0) > 0.005
+                            && abs((float) ($row['monto'] ?? 0)) > 0.005
                             && (int) ($row['client_id'] ?? 0) > 0
                             && (int) ($row['company_id'] ?? 0) > 0; ?>
-                        <tr<?= $canCreateMovementComplement ? ' data-record-row' : '' ?>>
+                        <?php $canCreateMovementInvoice = $hasMovementContextActions
+                            && (string) ($row['status'] ?? '') === 'asignado'
+                            && (int) ($row['client_id'] ?? 0) > 0
+                            && (int) ($row['company_id'] ?? 0) > 0
+                            && (int) ($row['id_factura'] ?? 0) <= 0;
+                        $hasMovementDocumentActions = $canCreateMovementComplement || $canCreateMovementInvoice; ?>
+                        <tr<?= $hasMovementDocumentActions ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?>>
                             <?php foreach ($movement['columns'] as $columnKey => $column): ?>
                                 <?php
                                 $columnConfig = is_array($column) ? $column : [];
@@ -1331,9 +1348,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="movement_unassign"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
                                                 <button class="button danger" type="submit">Desasignar</button>
                                             </form>
-                                            <?php if ($canCreateMovementComplement): ?>
+                                            <?php if ($hasMovementDocumentActions): ?>
                                                 <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
-                                                <div class="record-action-source" hidden><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a></div>
+                                                <div class="record-action-source" hidden><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?></div>
                                             <?php endif; ?>
                                         </div>
                                     <?php elseif ($movementAction === 'transfer'): ?>
@@ -1341,9 +1358,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="transfer_delete"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
                                             <button class="button danger" type="submit">Eliminar par</button>
                                         </form>
-                                    <?php elseif ($canCreateMovementComplement): ?>
+                                    <?php elseif ($hasMovementDocumentActions): ?>
                                         <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
-                                        <div class="record-action-source" hidden><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a></div>
+                                        <div class="record-action-source" hidden><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?></div>
                                     <?php else: ?>
                                         <span aria-hidden="true">—</span>
                                     <?php endif; ?>
@@ -1538,10 +1555,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 11v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg></span>
                 <div><span>Saldos internos</span><strong><?= e(report_value($dashboardOverview['internalBalance'], 'money')) ?></strong><small>Cartera interna #13</small></div>
             </article>
-            <article class="summary-card">
+            <a class="summary-card summary-card-link" href="?movement=sin-asignar" aria-label="Ver movimientos sin asignar">
                 <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span>
                 <div><span>Movimientos pendientes</span><strong><?= e(report_value($dashboardOverview['pendingBalance'], 'money')) ?></strong><small><?= number_format($dashboardOverview['pendingCount']) ?> movimientos</small></div>
-            </article>
+            </a>
             <article class="summary-card <?= abs($dashboardOverview['balanceDifference']) > 0.01 ? 'is-warning' : '' ?>">
                 <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M6 6h12M8 6 4 14h8L8 6Zm8 0-4 8h8l-4-8ZM4 14c.7 2 2 3 4 3s3.3-1 4-3m0 0c.7 2 2 3 4 3s3.3-1 4-3"/></svg></span>
                 <div><span>Diferencia de saldos</span><strong><?= e(report_value($dashboardOverview['balanceDifference'], 'money')) ?></strong><small>Estados de cuenta contra pagos</small></div>
@@ -1886,6 +1903,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             const icon = document.createElement('span');
             if (original.dataset.actionIcon === 'receipt') {
                 icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg>';
+            } else if (original.dataset.actionIcon === 'document') {
+                icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6m-6 4h4"/></svg>';
             } else if (original.dataset.actionIcon === 'mail') {
                 icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3V6Zm1 1 8 6 8-6"/></svg>';
             } else {
@@ -2091,6 +2110,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const invoiceReceiver = document.getElementById('invoiceReceiver');
     const invoiceConcept = document.getElementById('invoiceConcept');
     const invoiceLines = document.getElementById('invoiceLines');
+    const invoiceForm = document.getElementById('invoiceForm');
     const addInvoiceConcept = document.getElementById('addInvoiceConcept');
     const invoiceMoney = new Intl.NumberFormat('es-MX', {style: 'currency', currency: 'MXN'});
 
@@ -2098,6 +2118,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     if (movementClientOptions) {
         document.querySelectorAll('select[data-client-picker]').forEach((select) => {
             select.appendChild(movementClientOptions.content.cloneNode(true));
+            const assignmentRow = select.closest('[data-assignment-row]');
+            if (assignmentRow) {
+                const syncAssignmentRow = () => {
+                    assignmentRow.classList.toggle('is-assignment-selected', select.value !== '');
+                };
+                select.addEventListener('change', syncAssignmentRow);
+                syncAssignmentRow();
+            }
         });
     }
 
@@ -2172,6 +2200,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         recalculateInvoice();
     });
 
+    if (invoiceForm && invoiceClient?.value && invoiceCompany?.value) {
+        Promise.all([
+            loadInvoiceCatalog('receivers', invoiceClient.value, invoiceReceiver),
+            loadInvoiceCatalog('concepts', invoiceCompany.value, invoiceConcept),
+        ]).then(() => {
+            const receiverId = invoiceForm.dataset.prefillReceiver || '';
+            const receiverExists = Array.from(invoiceReceiver?.options || []).some((option) => option.value === receiverId);
+            if (receiverId && receiverExists) {
+                invoiceReceiver.value = receiverId;
+                invoiceReceiver.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+        });
+    }
+
     addInvoiceConcept?.addEventListener('click', () => {
         const option = invoiceConcept.options[invoiceConcept.selectedIndex];
         if (!option || !option.value) {
@@ -2237,6 +2279,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const pendingInvoicesSummary = document.getElementById('pendingInvoicesSummary');
     const closePendingInvoices = document.getElementById('closePendingInvoices');
     let complementPaymentMaximum = Number(complementForm?.dataset.prefillPaymentMaximum || 0);
+    let selectingPendingInvoiceHeader = false;
     const complementPaymentRemaining = document.querySelector('[data-complement-payment-remaining]');
     const complementPaymentMaximumValue = document.querySelector('[data-complement-payment-maximum-value]');
 
@@ -2257,9 +2300,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         pendingInvoicesBody.querySelectorAll('[data-pending-invoice-add]').forEach((button) => {
             const added = selected.has((button.dataset.pendingInvoiceUuid || '').toUpperCase());
             const applying = button.dataset.applying === 'true';
-            button.disabled = added || applying || noCapacity;
-            button.textContent = added ? 'Agregada' : (applying ? 'Agregando…' : 'Aplicar');
-            button.title = noCapacity && !added ? 'El saldo del movimiento ya fue aplicado' : '';
+            const complete = button.dataset.pendingInvoiceComplete === 'true';
+            button.disabled = complete || added || applying || noCapacity;
+            button.textContent = complete ? 'Completa' : (added ? 'Agregada' : (applying ? 'Agregando…' : 'Aplicar'));
+            button.title = complete
+                ? 'La factura ya no tiene saldo pendiente; se muestra porque coincide con el total del movimiento.'
+                : (noCapacity && !added ? 'El saldo del movimiento ya fue aplicado' : '');
         });
     };
 
@@ -2367,15 +2413,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const renderPendingInvoices = (invoices) => {
         if (!pendingInvoicesBody || !pendingInvoicesSummary) return;
         pendingInvoicesBody.replaceChildren();
-        pendingInvoicesSummary.textContent = invoices.length === 1
-            ? '1 factura con saldo pendiente.'
-            : `${invoices.length} facturas con saldo pendiente.`;
+        const amountMatches = invoices.filter((invoice) => invoice.matches_movement_amount).length;
+        pendingInvoicesSummary.textContent = `${invoices.length} factura${invoices.length === 1 ? '' : 's'} encontrada${invoices.length === 1 ? '' : 's'} en la empresa${amountMatches > 0 ? ` · ${amountMatches} coincide${amountMatches === 1 ? '' : 'n'} con el total del movimiento` : ''}.`;
         if (invoices.length === 0) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
             cell.colSpan = 6;
             cell.className = 'pending-invoices-empty';
-            cell.textContent = 'No hay facturas PPD timbradas con saldo pendiente para esta razón social.';
+            cell.textContent = 'No hay facturas PPD pendientes ni coincidencias por total para esta empresa.';
             row.appendChild(cell);
             pendingInvoicesBody.appendChild(row);
             return;
@@ -2388,7 +2433,15 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             title.textContent = `#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''}`;
             const uuid = document.createElement('small');
             uuid.textContent = invoice.uuid;
-            invoiceCell.append(title, uuid);
+            const party = document.createElement('small');
+            party.textContent = `${invoice.cliente || 'Sin cliente'} · ${invoice.rfc || ''} · ${invoice.receptor || ''}`;
+            invoiceCell.append(title, uuid, party);
+            if (invoice.matches_movement_amount) {
+                const match = document.createElement('small');
+                match.className = 'pending-invoice-amount-match';
+                match.textContent = 'Coincide con el total del movimiento';
+                invoiceCell.appendChild(match);
+            }
             row.appendChild(invoiceCell);
             [
                 [invoice.fecha_timbrado || 'Sin fecha', ''],
@@ -2408,8 +2461,34 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             apply.className = 'button compact';
             apply.dataset.pendingInvoiceAdd = 'true';
             apply.dataset.pendingInvoiceUuid = invoice.uuid;
+            apply.dataset.pendingInvoiceComplete = String(Number(invoice.saldo) <= 0.005);
             apply.textContent = 'Aplicar';
             apply.addEventListener('click', async () => {
+                const targetClientId = String(invoice.client_id || '');
+                const targetReceiverId = String(invoice.receiver_id || '');
+                if (!targetClientId || !targetReceiverId) {
+                    showToast('La factura no tiene cliente o razón social válidos.');
+                    return;
+                }
+                if (!Array.from(complementClient.options).some((option) => option.value === targetClientId)) {
+                    const option = document.createElement('option');
+                    option.value = targetClientId;
+                    option.textContent = invoice.cliente || `Cliente #${targetClientId}`;
+                    complementClient.appendChild(option);
+                }
+                selectingPendingInvoiceHeader = true;
+                complementClient.value = targetClientId;
+                complementClient.dispatchEvent(new Event('change', {bubbles: true}));
+                await loadInvoiceCatalog('receivers', targetClientId, complementReceiver);
+                selectingPendingInvoiceHeader = false;
+                const receiverExists = Array.from(complementReceiver.options).some((option) => option.value === targetReceiverId);
+                if (!receiverExists) {
+                    showToast('No fue posible seleccionar la razón social de la factura.');
+                    return;
+                }
+                complementReceiver.value = targetReceiverId;
+                complementReceiver.dispatchEvent(new Event('change', {bubbles: true}));
+
                 const normalizedUuid = String(invoice.uuid).trim().toUpperCase();
                 const existing = Array.from(complementLines.querySelectorAll('[name="invoice_uuid[]"]'))
                     .find((input) => input.value.trim().toUpperCase() === normalizedUuid);
@@ -2454,9 +2533,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     const loadPendingInvoices = async () => {
         const paymentId = complementForm?.querySelector('[name="payment_id"]')?.value || '';
-        const receiverId = complementReceiver?.value || '';
-        if (!paymentId || !receiverId || !pendingInvoicesPanel || !pendingInvoicesBody) {
-            showToast('Selecciona una razón social para consultar sus facturas pendientes.');
+        const companyId = complementCompany?.value || '';
+        if (!paymentId || !companyId || !pendingInvoicesPanel || !pendingInvoicesBody) {
+            showToast('Selecciona una empresa emisora para consultar sus facturas pendientes.');
             return;
         }
 
@@ -2473,7 +2552,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             url.searchParams.set('complement', 'create');
             url.searchParams.set('data', 'pending_invoices');
             url.searchParams.set('payment_id', paymentId);
-            url.searchParams.set('receiver_id', receiverId);
+            url.searchParams.set('company_id', companyId);
             const response = await fetch(url, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
             const result = await response.json().catch(() => null);
             if (!response.ok || !result?.ok) throw new Error(result?.message || 'No fue posible consultar las facturas pendientes.');
@@ -2487,7 +2566,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             pendingInvoicesStatus.textContent = error instanceof Error ? error.message : 'No fue posible consultar las facturas pendientes.';
             renderPendingInvoices([]);
         } finally {
-            viewPendingInvoices.disabled = !complementReceiver.value;
+            viewPendingInvoices.disabled = !complementCompany.value;
             viewPendingInvoices.removeAttribute('aria-busy');
             viewPendingInvoices.querySelector('span').textContent = 'Ver facturas pendientes';
         }
@@ -2499,15 +2578,33 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (event.key === 'Escape') hidePendingInvoices(true);
     });
 
+    const releaseComplementSourceInvoice = () => {
+        const sourceInvoice = complementForm?.querySelector('[name="source_invoice_id"]');
+        if (!sourceInvoice || sourceInvoice.value === '0') return;
+        sourceInvoice.value = '0';
+        const sourceRow = complementLines?.querySelector('tr[data-complement-line]');
+        if (!sourceRow) return;
+        sourceRow.querySelector('[name="invoice_uuid[]"]')?.removeAttribute('readonly');
+        const remove = sourceRow.querySelector('[data-complement-remove]');
+        const lookup = sourceRow.querySelector('[data-complement-lookup]');
+        if (remove) remove.disabled = false;
+        if (lookup) lookup.hidden = false;
+    };
+
     complementClient?.addEventListener('change', async () => {
+        if (selectingPendingInvoiceHeader) return;
         if (!complementReceiver) return;
+        releaseComplementSourceInvoice();
         await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
     });
     [complementCompany, complementReceiver].forEach((control) => control?.addEventListener('change', () => {
+        releaseComplementSourceInvoice();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
-        if (control === complementReceiver && viewPendingInvoices) {
-            viewPendingInvoices.disabled = !complementReceiver.value;
+        if (viewPendingInvoices) {
+            viewPendingInvoices.disabled = !complementCompany.value;
+        }
+        if (control === complementCompany && viewPendingInvoices) {
             hidePendingInvoices();
             pendingInvoicesBody?.replaceChildren();
         }

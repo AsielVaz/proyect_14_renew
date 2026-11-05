@@ -35,13 +35,23 @@ final class MovementRepository
         $queryText = 'SELECT * FROM (' . $source . ') movement_data';
         $params = [];
         $conditions = [];
+        $normalizedSearchAmount = null;
         if ($filterByClient) {
             $conditions[] = 'client_id = :client_id';
             $params['client_id'] = $clientId;
         }
         if ($search !== '') {
             $searchColumns = implode(', ', array_map([$this, 'identifier'], $searchableColumns));
-            $conditions[] = "CONCAT_WS(' ', {$searchColumns}) LIKE :search";
+            $textSearch = "CONCAT_WS(' ', {$searchColumns}) LIKE :search";
+            $amount = self::moneySearchValue($search);
+            if ($amount !== null && in_array('monto', $searchableColumns, true)) {
+                $conditions[] = "(`monto` = :search_amount OR {$textSearch})";
+                $params['search_amount'] = $amount;
+                $params['search_amount_sort'] = $amount;
+                $normalizedSearchAmount = $amount;
+            } else {
+                $conditions[] = $textSearch;
+            }
             $params['search'] = '%' . $search . '%';
         }
         if ($conditions !== []) {
@@ -51,7 +61,10 @@ final class MovementRepository
         $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
         $fetchLimit = $perPage + 1;
-        $query = $this->pdo->prepare($queryText . " ORDER BY {$sort} LIMIT {$fetchLimit} OFFSET {$offset}");
+        $order = $normalizedSearchAmount !== null
+            ? "(`monto` = :search_amount_sort) DESC, {$sort}"
+            : $sort;
+        $query = $this->pdo->prepare($queryText . " ORDER BY {$order} LIMIT {$fetchLimit} OFFSET {$offset}");
         $query->execute($params);
         $rows = $query->fetchAll();
         $hasNext = count($rows) > $perPage;
@@ -669,7 +682,7 @@ final class MovementRepository
 
     private function source(string $view, bool $filterByClient = false): array
     {
-        $base = "SELECT p.id, p.nombre AS client_id, p.status,
+        $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.banco, p.monto,
@@ -711,7 +724,7 @@ final class MovementRepository
                 '`id` DESC',
             ],
             'cartera' => [
-                "SELECT p.id, p.nombre AS client_id, p.status,
+                "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.monto,
@@ -858,5 +871,23 @@ final class MovementRepository
             throw new RuntimeException('Columna de movimiento no permitida.');
         }
         return '`' . $name . '`';
+    }
+
+    private static function moneySearchValue(string $value): ?float
+    {
+        $normalized = preg_replace('/[\s$]/u', '', trim($value)) ?? '';
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (preg_match('/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/', $normalized) === 1) {
+            $normalized = str_replace(',', '', $normalized);
+        } elseif (preg_match('/^[+-]?\d{1,3}(?:\.\d{3})+,\d+$/', $normalized) === 1) {
+            $normalized = str_replace(['.', ','], ['', '.'], $normalized);
+        } elseif (preg_match('/^[+-]?\d+,\d{1,2}$/', $normalized) === 1) {
+            $normalized = str_replace(',', '.', $normalized);
+        }
+
+        return is_numeric($normalized) ? (float) $normalized : null;
     }
 }
