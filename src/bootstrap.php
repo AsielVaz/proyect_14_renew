@@ -10,6 +10,7 @@ use App\DashboardRepository;
 use App\PaymentComplementRepository;
 use App\CompanyPanelRepository;
 use App\CaptureAnalysisService;
+use App\AutomaticInvoiceService;
 use App\FiscalDocumentService;
 use App\StatisticsRepository;
 use App\GlobalSearchRepository;
@@ -239,7 +240,15 @@ function company_panel_repository(): CompanyPanelRepository
 function capture_analysis_service(): CaptureAnalysisService
 {
     static $service;
-    return $service ??= new CaptureAnalysisService(db(), company_panel_repository(), movement_repository());
+    return $service ??= new CaptureAnalysisService(
+        db(), company_panel_repository(), movement_repository(), automatic_invoice_service()
+    );
+}
+
+function automatic_invoice_service(): AutomaticInvoiceService
+{
+    static $service;
+    return $service ??= new AutomaticInvoiceService(db());
 }
 
 function fiscal_document_service(): FiscalDocumentService

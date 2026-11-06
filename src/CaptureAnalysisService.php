@@ -17,6 +17,7 @@ final class CaptureAnalysisService
         private readonly PDO $pdo,
         private readonly CompanyPanelRepository $companies,
         private readonly MovementRepository $movements,
+        private readonly AutomaticInvoiceService $automaticInvoices,
     ) {
     }
 
@@ -208,6 +209,7 @@ final class CaptureAnalysisService
             $commissions = 0;
             $commissionTotal = 0.0;
             $paymentIds = [];
+            $automaticInvoiceIds = [];
             foreach ($newMovements as $movement) {
                 $match = (array) ($movement['short_key'] ?? []);
                 $clientId = !empty($match['associated']) ? (int) ($match['client_id'] ?? 0) : 0;
@@ -262,6 +264,19 @@ final class CaptureAnalysisService
                     $assigned++;
                     $commissions += (int) $assignment['commissions'];
                     $commissionTotal += (float) $assignment['commissionTotal'];
+
+                    $automaticInvoiceId = $this->automaticInvoices->createForCapturedMovement(
+                        $paymentId,
+                        $captureId,
+                        $companyId,
+                        (int) ($match['key_id'] ?? 0),
+                        (float) $movement['amount'],
+                        (string) $movement['type'],
+                        $operatorId,
+                    );
+                    if ($automaticInvoiceId !== null) {
+                        $automaticInvoiceIds[] = $automaticInvoiceId;
+                    }
                 } else {
                     $unassigned++;
                 }
@@ -286,6 +301,8 @@ final class CaptureAnalysisService
                 'commissions' => $commissions,
                 'commissionTotal' => round($commissionTotal, 6),
                 'paymentIds' => $paymentIds,
+                'automaticInvoices' => count($automaticInvoiceIds),
+                'automaticInvoiceIds' => $automaticInvoiceIds,
             ];
         } catch (Throwable $exception) {
             if ($this->pdo->inTransaction()) {

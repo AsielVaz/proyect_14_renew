@@ -3736,7 +3736,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             if (!response.ok || !data.ok) throw new Error(data.message || 'No fue posible cargar los movimientos.');
             const result = data.result;
             captureLoadTitle.textContent = 'Carga completada';
-            captureLoadStatus.textContent = `${result.loaded} movimientos cargados: ${result.assigned} asignados y ${result.unassigned} sin asignar. ${result.commissions} comisiones por ${invoiceMoney.format(Number(result.commissionTotal) || 0)}.`;
+            const automaticInvoices = Number(result.automaticInvoices) || 0;
+            captureLoadStatus.textContent = `${result.loaded} movimientos cargados: ${result.assigned} asignados y ${result.unassigned} sin asignar. ${result.commissions} comisiones por ${invoiceMoney.format(Number(result.commissionTotal) || 0)}. ${automaticInvoices} factura${automaticInvoices === 1 ? '' : 's'} automática${automaticInvoices === 1 ? '' : 's'} generada${automaticInvoices === 1 ? '' : 's'}.`;
             label.textContent = 'Carga completada';
             showToast('Los movimientos se cargaron correctamente.');
             window.setTimeout(() => {
