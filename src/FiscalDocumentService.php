@@ -99,6 +99,7 @@ final class FiscalDocumentService
             CURLOPT_USERAGENT => 'Sistema14-Renovado/1.0',
         ]);
         $body = curl_exec($handle);
+        $this->refreshSessionActivity();
         if ($body === false) {
             $message = curl_error($handle);
             curl_close($handle);
@@ -121,6 +122,14 @@ final class FiscalDocumentService
     {
         ignore_user_abort(true);
         @set_time_limit(0);
+        $this->refreshSessionActivity();
+    }
+
+    private function refreshSessionActivity(): void
+    {
+        if (is_array($_SESSION['auth_user'] ?? null)) {
+            $_SESSION['auth_user']['last_activity'] = time();
+        }
     }
 
     private function extractRemoteResult(string $body): ?array

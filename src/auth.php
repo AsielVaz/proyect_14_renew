@@ -76,9 +76,11 @@ function auth_validate_session(): void
 
     $_SESSION['auth_user']['last_activity'] = $now;
     if ($now - (int) ($user['rotated_at'] ?? 0) > 900) {
+        // Renovar el identificador protege la sesión sin invalidar formularios
+        // que el usuario ya tiene abiertos. El token CSRF sólo cambia al
+        // autenticar, cerrar o invalidar completamente la sesión.
         session_regenerate_id(true);
         $_SESSION['auth_user']['rotated_at'] = $now;
-        unset($_SESSION['csrf_token']);
     }
 }
 
