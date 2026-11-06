@@ -17,6 +17,7 @@ final class FiscalDocumentService
 
     public function stampInvoice(int $id, int $operatorId): string
     {
+        $this->prepareLongRunningStamp();
         $this->assertInvoice($id, false);
         $response = $this->post('/apiFactura.php', [
             'accion' => 'facturar', 'id' => $id, 'usuario' => $operatorId,
@@ -36,6 +37,7 @@ final class FiscalDocumentService
 
     public function stampComplement(int $id, string $treatment): string
     {
+        $this->prepareLongRunningStamp();
         $this->assertComplement($id, false);
         $action = match ($treatment) {
             'T' => 'timbrar',
@@ -88,8 +90,10 @@ final class FiscalDocumentService
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => http_build_query($fields),
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_TIMEOUT => 180,
+            // El PAC puede tardar mientras procesa y firma el CFDI. Cero indica
+            // que cURL no debe cancelar la conexión por límite de tiempo.
+            CURLOPT_CONNECTTIMEOUT => 0,
+            CURLOPT_TIMEOUT => 0,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTPHEADER => ['Accept: application/json'],
             CURLOPT_USERAGENT => 'Sistema14-Renovado/1.0',
@@ -111,6 +115,12 @@ final class FiscalDocumentService
             throw new RuntimeException('El servicio fiscal devolvió una respuesta no válida.');
         }
         return $data;
+    }
+
+    private function prepareLongRunningStamp(): void
+    {
+        ignore_user_abort(true);
+        @set_time_limit(0);
     }
 
     private function extractRemoteResult(string $body): ?array

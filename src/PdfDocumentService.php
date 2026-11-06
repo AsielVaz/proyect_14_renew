@@ -266,8 +266,19 @@ final class PdfDocumentService
         if ($subtotal <= 0) {
             $subtotal = array_sum(array_map(static fn (array $item): float => (float) ($item['precio_neto'] ?? 0), $details));
         }
-        $total = (float) ($invoice['xml_total'] ?? $invoice['total_iva'] ?? 0);
-        $tax = max(0, $total - $subtotal);
+        $hasRetention = strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? 'No')), 'Si') === 0;
+        $transferredTax = array_sum(array_map(static fn (array $item): float => max(
+            0,
+            (float) ($item['precio_neto_iva'] ?? 0) - (float) ($item['precio_neto'] ?? 0)
+        ), $details));
+        $retainedTax = $hasRetention ? array_sum(array_map(static fn (array $item): float =>
+            (int) ($item['iva'] ?? 0) > 0 ? round((float) ($item['precio_neto'] ?? 0) * 0.04, 6) : 0.0,
+            $details
+        )) : 0.0;
+        $retainedTax = round($retainedTax, 2);
+        $total = $hasRetention && (float) ($invoice['total_iva'] ?? 0) > 0
+            ? (float) $invoice['total_iva']
+            : (float) ($invoice['xml_total'] ?? $invoice['total_iva'] ?? 0);
         if ($pdf->GetY() > 205) {
             $pdf->AddPage();
             $this->continuationHeader($pdf, 'FACTURA', 'Resumen del comprobante');
@@ -285,7 +296,8 @@ final class PdfDocumentService
         $pdf->MultiCell(92, 4, $pdf->encode($this->amountWords($total, (string) ($invoice['moneda_clave'] ?? 'MXN'))), 0, 'L');
         $this->totalsCard($pdf, 126, $y + 4, 76, [
             ['Subtotal', $subtotal],
-            ['Impuestos', $tax],
+            ['IVA trasladado', $transferredTax],
+            ...($hasRetention ? [['Retención 4%', -$retainedTax]] : []),
             ['TOTAL', $total],
         ]);
         $pdf->SetY($y + 43);
@@ -451,7 +463,10 @@ final class PdfDocumentService
     private function satVerificationUrl(array $row): string
     {
         $seal = trim((string) ($row['sello_cfd'] ?? ''));
-        $total = (float) ($row['xml_total'] ?? $row['total_iva'] ?? $row['total_factura'] ?? 0);
+        $hasRetention = strcasecmp(trim((string) ($row['retencion_transporte'] ?? 'No')), 'Si') === 0;
+        $total = $hasRetention && (float) ($row['total_iva'] ?? 0) > 0
+            ? (float) $row['total_iva']
+            : (float) ($row['xml_total'] ?? $row['total_iva'] ?? $row['total_factura'] ?? 0);
         return 'https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?' . http_build_query([
             'id' => strtoupper(trim((string) ($row['uuid'] ?? ''))),
             're' => trim((string) ($row['empresa_rfc'] ?? '')),

@@ -865,7 +865,8 @@ textarea:focus {
     min-width: auto;
 }
 
-.invoice-concept-modal {
+.invoice-concept-modal,
+.invoice-import-modal {
     z-index: 1380;
 }
 
@@ -929,6 +930,7 @@ textarea:focus {
 }
 
 #addInvoiceConcept svg,
+#importInvoiceCapture svg,
 .invoice-concept-close svg {
     width: 18px;
     height: 18px;
@@ -937,6 +939,49 @@ textarea:focus {
     stroke-linecap: round;
     stroke-linejoin: round;
     stroke-width: 2;
+}
+
+.glass-modal.invoice-import-dialog {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    width: min(760px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.invoice-import-source textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 260px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    tab-size: 2;
+}
+
+.invoice-import-source small {
+    color: var(--color-muted);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.invoice-import-status {
+    padding: 12px 14px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 12px;
+    background: var(--color-surface-subtle);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.invoice-import-status[data-type="error"] {
+    border-color: #e6aaa6;
+    background: #fff1f0;
+    color: #982b24;
 }
 
 .invoice-concept-form-grid {
@@ -1012,7 +1057,7 @@ textarea:focus {
     font-size: 17px;
 }
 
-.invoice-summary > div:nth-child(3) strong {
+.invoice-summary > div:nth-child(4) strong {
     color: var(--color-primary-dark);
     font-size: 21px;
 }
@@ -1819,7 +1864,8 @@ tbody tr:hover {
         width: 100%;
     }
 
-    .glass-modal.invoice-concept-dialog {
+    .glass-modal.invoice-concept-dialog,
+    .glass-modal.invoice-import-dialog {
         width: min(760px, 100%);
         max-height: calc(100vh - 24px);
         padding: 18px;
@@ -1839,12 +1885,14 @@ tbody tr:hover {
         gap: 12px;
     }
 
-    .invoice-concept-dialog .glass-modal-actions {
+    .invoice-concept-dialog .glass-modal-actions,
+    .invoice-import-dialog .glass-modal-actions {
         align-items: stretch;
         flex-direction: column-reverse;
     }
 
-    .invoice-concept-dialog .glass-modal-actions .button {
+    .invoice-concept-dialog .glass-modal-actions .button,
+    .invoice-import-dialog .glass-modal-actions .button {
         justify-content: center;
         min-height: 44px;
         width: 100%;

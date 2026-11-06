@@ -233,6 +233,7 @@ final class InvoiceRepository
         $details = [];
         $total = 0.0;
         $subtotal = 0.0;
+        $retainedTax = 0.0;
         foreach ($conceptIds as $index => $rawId) {
             $conceptQuery->execute(['id' => (int) $rawId, 'company' => $companyId]);
             $concept = $conceptQuery->fetch();
@@ -255,8 +256,13 @@ final class InvoiceRepository
             $gross = round($grossUnit * $quantity, 2);
             $subtotal += $net;
             $total += $gross;
+            if ($retention === 'Si' && $appliesTax) {
+                $retainedTax += round($net * 0.04, 6);
+            }
             $details[] = compact('concept', 'quantity', 'grossUnit', 'tax', 'netUnit', 'net', 'gross', 'description');
         }
+        $retainedTax = round($retainedTax, 2);
+        $payableTotal = round($total - $retainedTax, 2);
 
         $this->pdo->beginTransaction();
         try {
@@ -272,10 +278,10 @@ final class InvoiceRepository
                  :xml_total, :xml_subtotal, 1, "Pendiente")');
             $insert->execute(['client' => $clientId, 'method' => $methodId, 'currency' => $currencyId,
                 'form' => $formId, 'payment_status' => $statusPayment, 'company' => $companyId,
-                'total' => round($total, 2), 'token' => $token, 'voucher' => $voucherType,
+                'total' => $payableTotal, 'token' => $token, 'voucher' => $voucherType,
                 'use_cfdi' => $useId, 'receiver' => $receiverId, 'folio' => $folio,
                 'operator' => $operatorId, 'series' => $series, 'retention' => $retention,
-                'xml_total' => round($total, 2), 'xml_subtotal' => round($subtotal, 2)]);
+                'xml_total' => $payableTotal, 'xml_subtotal' => round($subtotal, 2)]);
             $invoiceId = (int) $this->pdo->lastInsertId();
             $detailInsert = $this->pdo->prepare('INSERT INTO detalle_factura
                 (id_factura, id_producto, cantidad, precio_unitario, precio_con_iva, precio_neto, precio_neto_iva, concepto, iva)
