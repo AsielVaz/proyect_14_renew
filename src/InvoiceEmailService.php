@@ -34,11 +34,11 @@ final class InvoiceEmailService
         if ($recipient === '') {
             return [
                 'status' => 'skipped',
-                'message' => 'El cliente no tiene un correo principal capturado; no se realizó el envío.',
+                'message' => 'El cliente no tiene un correo de facturación capturado en correo2; no se realizó el envío.',
                 'invoiceId' => $invoiceId,
             ];
         }
-        return $this->send($invoiceId, $recipient, $operatorId, $allowRapidDuplicate, $requireStampedDocument);
+        return $this->send($invoiceId, $recipient, $operatorId, $allowRapidDuplicate, $requireStampedDocument, true);
     }
 
     public function send(
@@ -47,6 +47,7 @@ final class InvoiceEmailService
         int $operatorId,
         bool $allowRapidDuplicate = false,
         bool $requireStampedDocument = false,
+        bool $includeInvoiceCopies = false,
     ): array
     {
         if ($invoiceId <= 0 || $operatorId <= 0) {
@@ -65,13 +66,17 @@ final class InvoiceEmailService
         }
         if (!$allowRapidDuplicate) $this->preventRapidDuplicate($invoiceId, $recipient);
         $pdf = $this->documents->invoice($invoiceId);
+        $pdfBytes = (string) ($pdf['bytes'] ?? '');
+        if (strlen($pdfBytes) < 5 || !str_starts_with($pdfBytes, '%PDF-')) {
+            throw new RuntimeException('No fue posible generar un PDF válido; el correo no se envió para evitar adjuntos incompletos.');
+        }
         $folio = trim((string) ($invoice['serie'] ?? '') . (string) ($invoice['folio'] ?? ''));
         if ($folio === '') $folio = '#' . $invoiceId;
         $subject = 'Factura ' . $folio . ' - ' . (string) ($invoice['empresa'] ?? 'Sistema 14');
         $attachments = [[
             'type' => 'application/pdf',
             'name' => (string) $pdf['filename'],
-            'content' => base64_encode((string) $pdf['bytes']),
+            'content' => base64_encode($pdfBytes),
         ]];
         $xml = $stamped ? $this->system14Xml($invoice) : null;
         if ($xml !== null) {
@@ -87,7 +92,7 @@ final class InvoiceEmailService
         $message = [
             'from_email' => self::FROM_EMAIL,
             'from_name' => self::FROM_NAME,
-            'to' => [['email' => $recipient, 'type' => 'to']],
+            'to' => $this->recipients($recipient, $invoice, $includeInvoiceCopies),
             'subject' => $subject,
             'html' => $this->html($invoice, $folio),
             'text' => $this->text($invoice, $folio),
@@ -102,7 +107,16 @@ final class InvoiceEmailService
         try {
             $response = $this->sendMandrill($message);
             $accepted = in_array($response['status'], ['sent', 'queued', 'scheduled'], true);
-            $this->finishAudit($auditId, $accepted ? ($response['status'] === 'sent' ? 1 : 2) : -1, $response);
+            $attachmentAudit = array_map(static fn (array $attachment): array => [
+                'name' => (string) ($attachment['name'] ?? ''),
+                'type' => (string) ($attachment['type'] ?? ''),
+                'bytes' => (int) floor(strlen((string) ($attachment['content'] ?? '')) * 3 / 4),
+            ], $attachments);
+            $this->finishAudit(
+                $auditId,
+                $accepted ? ($response['status'] === 'sent' ? 1 : 2) : -1,
+                $response + ['attachments' => $attachmentAudit]
+            );
             if ($accepted) {
                 $this->pdo->prepare("UPDATE facturas SET enviado = 'si' WHERE id = :id")->execute(['id' => $invoiceId]);
             }
@@ -121,19 +135,40 @@ final class InvoiceEmailService
     private function invoice(int $id): array
     {
         $query = $this->pdo->prepare('SELECT f.id, f.serie, f.folio, f.uuid, f.total_iva,
-            f.xml_firmado, f.razon AS company_id, f.nombre AS client_id,
+            f.xml_firmado, f.razon AS company_id,
+            COALESCE(cc.id_cliente, CAST(f.nombre AS UNSIGNED)) AS client_id,
             e.razon AS empresa, e.rfc AS empresa_rfc,
-            c.nombre AS cliente, c.correo AS client_email,
+            c.nombre AS cliente,
+            NULLIF(TRIM(c.correo2), "") AS client_email,
+            c.correo2_2_f AS client_email_copy_1, c.correo2_3_f AS client_email_copy_2,
             cc.razon_social AS receptor, cc.rfc AS receptor_rfc
             FROM facturas f
             LEFT JOIN empresas e ON e.id = f.razon
-            LEFT JOIN clientes c ON c.id = f.nombre
             LEFT JOIN claves_cortas cc ON cc.id = CAST(f.id_clave_corta AS UNSIGNED)
+            LEFT JOIN clientes c ON c.id = COALESCE(cc.id_cliente, CAST(f.nombre AS UNSIGNED))
             WHERE f.id = :id LIMIT 1');
         $query->execute(['id' => $id]);
         $invoice = $query->fetch();
         if (!$invoice) throw new RuntimeException('La factura solicitada no existe.');
         return $invoice;
+    }
+
+    private function recipients(string $primary, array $invoice, bool $includeCopies): array
+    {
+        $recipients = [['email' => $primary, 'type' => 'to']];
+        if (!$includeCopies) {
+            return $recipients;
+        }
+        $used = [mb_strtolower($primary) => true];
+        foreach (['client_email_copy_1', 'client_email_copy_2'] as $column) {
+            $email = mb_strtolower(trim((string) ($invoice[$column] ?? '')));
+            if ($email === '' || isset($used[$email]) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+            $recipients[] = ['email' => $email, 'type' => 'bcc'];
+            $used[$email] = true;
+        }
+        return $recipients;
     }
 
     private function waitForStampedInvoice(int $id): array

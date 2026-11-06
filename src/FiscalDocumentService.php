@@ -22,6 +22,7 @@ final class FiscalDocumentService
         $response = $this->post('/apiFactura.php', [
             'accion' => 'facturar', 'id' => $id, 'usuario' => $operatorId,
             'nota' => 'Timbrado desde Sistema 14 renovado',
+            'skip_legacy_email' => '1',
         ]);
         $this->assertRemoteSuccess($response, 'No fue posible timbrar la factura.');
         return (string) ($response['mensaje'] ?? $response['message'] ?? 'La factura fue enviada a timbrado.');

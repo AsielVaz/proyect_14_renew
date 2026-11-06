@@ -98,19 +98,26 @@ final class PdfDocumentService
 
     private function coverHeader(ModernFiscalPdf $pdf, string $type, array $row): void
     {
-        $logoPath = $this->logoPath($row['logo'] ?? null);
-        if ($logoPath !== null) {
-            [$width, $height] = getimagesize($logoPath) ?: [0, 0];
-            if ($width > 0 && $height > 0) {
-                // El encabezado reserva toda la columna izquierda para el logo.
-                // Muchos archivos legados incluyen margen blanco interno, por eso
-                // se escala hasta el límite seguro sin invadir los datos del emisor.
-                $maxWidth = 68.0;
-                $maxHeight = 42.0;
-                $ratio = min($maxWidth / $width, $maxHeight / $height);
-                $drawWidth = $width * $ratio;
-                $drawHeight = $height * $ratio;
-                $pdf->Image($logoPath, 8, 1 + ($maxHeight - $drawHeight) / 2, $drawWidth, $drawHeight);
+        $logo = $this->logoPath($row['logo'] ?? null);
+        if ($logo !== null) {
+            $logoPath = $logo['path'];
+            try {
+                [$width, $height] = getimagesize($logoPath) ?: [0, 0];
+                if ($width > 0 && $height > 0) {
+                    // El encabezado reserva toda la columna izquierda para el logo.
+                    // Muchos archivos legados incluyen margen blanco interno, por eso
+                    // se escala hasta el límite seguro sin invadir los datos del emisor.
+                    $maxWidth = 68.0;
+                    $maxHeight = 42.0;
+                    $ratio = min($maxWidth / $width, $maxHeight / $height);
+                    $drawWidth = $width * $ratio;
+                    $drawHeight = $height * $ratio;
+                    $pdf->Image($logoPath, 8, 1 + ($maxHeight - $drawHeight) / 2, $drawWidth, $drawHeight);
+                }
+            } finally {
+                if ($logo['temporary']) {
+                    @unlink($logoPath);
+                }
             }
         } else {
             $pdf->SetFont('Arial', 'B', 14);
@@ -714,19 +721,74 @@ final class PdfDocumentService
         return $query->fetchAll();
     }
 
-    private function logoPath(?string $value): ?string
+    /** @return array{path:string, temporary:bool}|null */
+    private function logoPath(?string $value): ?array
     {
         $value = trim((string) $value);
         if ($value === '') return null;
+
+        $remote = $this->downloadLogo(legacy_asset_url($value));
+        if ($remote !== null) {
+            return ['path' => $remote, 'temporary' => true];
+        }
+
         $path = preg_replace('#^https?://[^/]+/#i', '', $value) ?? $value;
         $path = ltrim(str_replace('\\', '/', $path), '/');
         $workspace = dirname((string) (realpath(APP_ROOT) ?: APP_ROOT));
         foreach ([$workspace . '/sistema/' . $path, $workspace . '/sistema/img/' . basename($path)] as $candidate) {
             if (is_file($candidate) && in_array(strtolower(pathinfo($candidate, PATHINFO_EXTENSION)), ['png', 'jpg', 'jpeg'], true)) {
-                return $candidate;
+                return ['path' => $candidate, 'temporary' => false];
             }
         }
         return null;
+    }
+
+    private function downloadLogo(string $url): ?string
+    {
+        if ($url === '' || !str_starts_with($url, 'https://') || !function_exists('curl_init')) {
+            return null;
+        }
+
+        $handle = curl_init($url);
+        curl_setopt_array($handle, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
+            CURLOPT_USERAGENT => 'Sistema14-PDF/1.0',
+        ]);
+        $bytes = curl_exec($handle);
+        $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        if (!is_string($bytes) || $status < 200 || $status >= 300 || $bytes === '' || strlen($bytes) > 5 * 1024 * 1024) {
+            return null;
+        }
+
+        $image = function_exists('getimagesizefromstring') ? @getimagesizefromstring($bytes) : false;
+        $extension = match ($image[2] ?? null) {
+            IMAGETYPE_JPEG => 'jpg',
+            IMAGETYPE_PNG => 'png',
+            default => null,
+        };
+        if ($extension === null) {
+            return null;
+        }
+
+        $base = tempnam(sys_get_temp_dir(), 's14-logo-');
+        if ($base === false) {
+            return null;
+        }
+        $path = $base . '.' . $extension;
+        if (!@rename($base, $path) || file_put_contents($path, $bytes) !== strlen($bytes)) {
+            @unlink($base);
+            @unlink($path);
+            return null;
+        }
+        return $path;
     }
 
     private function status(array $row): string
