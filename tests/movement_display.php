@@ -42,4 +42,19 @@ foreach ($invoiceReferences as [$value, $expected]) {
     }
 }
 
-echo (count($cases) + 2 + count($invoiceReferences)) . " comprobaciones de presentación de movimientos superadas.\n";
+$repositoryReflection = new ReflectionClass(App\MovementRepository::class);
+$repository = $repositoryReflection->newInstanceWithoutConstructor();
+$sourceMethod = $repositoryReflection->getMethod('source');
+[$withDocumentSource] = $sourceMethod->invoke($repository, 'asignados', true, ['document'], '');
+[$withoutDocumentSource] = $sourceMethod->invoke($repository, 'asignados', true, ['none'], '');
+
+if (!str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) > 0')
+    || str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) <> 2')) {
+    throw new RuntimeException('La bandera id_factura = 2 debe incluirse en Con documento.');
+}
+if (!str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) <= 0')
+    || str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) = 2')) {
+    throw new RuntimeException('La bandera id_factura = 2 debe excluirse de Sin documento.');
+}
+
+echo (count($cases) + 4 + count($invoiceReferences)) . " comprobaciones de presentación de movimientos superadas.\n";

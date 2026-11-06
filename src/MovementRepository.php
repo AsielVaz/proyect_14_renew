@@ -1079,11 +1079,11 @@ final class MovementRepository
         foreach ($documentFilters as $documentFilter) {
             $documentConditions[] = match ($documentFilter) {
                 'internal' => "p.nombre = '13'",
-                'document' => "((COALESCE(p.id_factura, 0) > 0 AND COALESCE(p.id_factura, 0) <> 2)
+                'document' => "(COALESCE(p.id_factura, 0) > 0
                     OR (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
                         AND CAST(TRIM(p.id_factura_res) AS UNSIGNED) > 0))",
                 'none' => "COALESCE(p.nombre, '') <> '13'
-                    AND (COALESCE(p.id_factura, 0) <= 0 OR COALESCE(p.id_factura, 0) = 2)
+                    AND COALESCE(p.id_factura, 0) <= 0
                     AND NOT (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
                         AND CAST(TRIM(p.id_factura_res) AS UNSIGNED) > 0)",
             };
