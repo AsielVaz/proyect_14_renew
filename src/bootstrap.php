@@ -158,20 +158,15 @@ function legacy_asset_url(?string $path): string
     }
     $path = preg_replace('#^https?://[^/]+/#i', '', $path) ?? $path;
     $path = ltrim($path, '/');
+    if (str_starts_with($path, 'app/')) {
+        $path = substr($path, strlen('app/'));
+    }
     if (str_starts_with($path, 'sistema/')) {
         $path = substr($path, strlen('sistema/'));
     }
-    $base = rtrim(env_value('APP_URL'), '/');
-    $parts = parse_url($base);
-    $origin = ($parts['scheme'] ?? 'http') . '://' . ($parts['host'] ?? 'localhost');
-    if (isset($parts['port'])) {
-        $origin .= ':' . $parts['port'];
-    }
-    $applicationPath = rtrim((string) ($parts['path'] ?? ''), '/');
-    $parentPath = $applicationPath === '' ? '' : rtrim(str_replace('\\', '/', dirname($applicationPath)), '/.');
+    $base = rtrim(env_value('LEGACY_ASSET_BASE_URL', 'https://sistema14.com/app'), '/');
     $segments = array_values(array_filter(explode('/', preg_replace('#/+#', '/', $path) ?? $path), 'strlen'));
-    return $origin . ($parentPath !== '' ? '/' . ltrim($parentPath, '/') : '')
-        . '/sistema/' . implode('/', array_map('rawurlencode', $segments));
+    return $base . '/' . implode('/', array_map('rawurlencode', $segments));
 }
 
 function db(): PDO
@@ -463,5 +458,5 @@ function send_security_headers(): void
         || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443') {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
     }
-    header('Content-Security-Policy: default-src \'self\'; base-uri \'self\'; form-action \'self\'; frame-ancestors \'none\'; object-src \'none\'; img-src \'self\' data:; style-src \'self\' \'unsafe-inline\'; script-src \'self\' \'nonce-' . csp_nonce() . '\'; connect-src \'self\'');
+    header('Content-Security-Policy: default-src \'self\'; base-uri \'self\'; form-action \'self\'; frame-ancestors \'none\'; object-src \'none\'; img-src \'self\' data: https://sistema14.com; style-src \'self\' \'unsafe-inline\'; script-src \'self\' \'nonce-' . csp_nonce() . '\'; connect-src \'self\'');
 }
