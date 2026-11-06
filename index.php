@@ -1319,13 +1319,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             && array_key_exists($requestedMovementTypeFilter, $movementTypeFilterLabels)
                 ? $requestedMovementTypeFilter
                 : '';
-        $movementSupportsFullPagination = in_array($movementKey, ['cartera', 'asignados'], true);
+        $movementSupportsFullPagination = in_array($movementKey, ['sin-asignar', 'cartera', 'asignados'], true);
+        $movementSupportsShowAll = in_array($movementKey, ['cartera', 'asignados'], true);
         $movementHasAppliedFilter = $movementSearch !== '' || $movementFrom !== '' || $movementTo !== ''
             || $movementDocumentFilters !== [] || $movementTypeFilter !== '';
         if ($movementSupportsFullPagination && in_array($requestedMovementPerPage, ['25', '50', '100'], true)) {
             $movementPerPageValue = $requestedMovementPerPage;
             $movementPerPage = (int) $requestedMovementPerPage;
-        } elseif ($movementSupportsFullPagination && $requestedMovementPerPage === 'all' && $movementHasAppliedFilter) {
+        } elseif ($movementSupportsShowAll && $requestedMovementPerPage === 'all' && $movementHasAppliedFilter) {
             $movementPerPageValue = 'all';
             $movementPerPage = 0;
         }
@@ -1446,17 +1447,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </form>
             <?php endif; ?>
             <div class="panel-heading list-tools">
-                <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementKey === 'asignados' ? (int) $movementResult['total'] : count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy"><?= $movementKey === 'asignados' ? 'Total de resultados encontrados' : 'Resultados de la página actual' ?></p></div>
-                <form method="get" class="search">
+                <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementSupportsFullPagination ? (int) $movementResult['total'] : count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy"><?= $movementSupportsFullPagination ? 'Total de resultados encontrados' : 'Resultados de la página actual' ?></p></div>
+                <form method="get" class="search"<?= $movementKey === 'sin-asignar' ? ' data-visible-movement-search' : '' ?>>
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
-                    <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar movimientos…">
+                    <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar movimientos…"<?= $movementKey === 'sin-asignar' ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type"><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes. Sin selección se muestran todos.</small></fieldset><?php endif; ?>
-                    <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
+                    <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
                     <button class="button" type="submit">Buscar</button>
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
+                    <?php if ($movementKey === 'sin-asignar'): ?><small class="movement-visible-search-status" id="visibleMovementSearchStatus" data-visible-movement-status aria-live="polite"><?= number_format(count($movementResult['rows'])) ?> registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.</small><?php endif; ?>
                 </form>
             </div>
             <?php if ($movementAction === 'assign' && $movementResult['rows'] !== []): ?>
@@ -1469,9 +1471,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
             <?php endif; ?>
             <div class="table-wrap">
-                <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>">
+                <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>"<?= $movementKey === 'sin-asignar' ? ' data-visible-movement-table' : '' ?>>
                     <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction || $hasMovementContextActions): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
-                    <tbody>
+                    <tbody<?= $movementKey === 'sin-asignar' ? ' data-visible-movement-body' : '' ?>>
                     <?php foreach ($movementResult['rows'] as $row): ?>
                         <?php
                         $isWithdrawalMovement = strcasecmp(
@@ -1519,7 +1521,31 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && ($displayMovementInvoiceId > 0
                                 || $movementComplementId > 0
                                 || $hasMovementCreationActions); ?>
-                        <tr<?= $hasMovementContextMenu ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?>>
+                        <?php
+                        $visibleMovementSearchText = '';
+                        if ($movementKey === 'sin-asignar') {
+                            $visibleMovementSearchValues = [];
+                            foreach ($movement['columns'] as $searchColumnKey => $searchColumn) {
+                                $searchColumnConfig = is_array($searchColumn) ? $searchColumn : [];
+                                $searchColumnRaw = $row[$searchColumnKey] ?? '';
+                                $visibleMovementSearchValues[] = (string) $searchColumnRaw;
+                                $visibleMovementSearchValues[] = report_value($searchColumnRaw, $searchColumnConfig['format'] ?? 'text');
+                                if (is_array($searchColumn)) {
+                                    foreach ((array) ($searchColumn['secondary'] ?? []) as $searchSecondaryKey => $searchSecondaryLabel) {
+                                        $searchSecondaryKey = is_int($searchSecondaryKey) ? (string) $searchSecondaryLabel : (string) $searchSecondaryKey;
+                                        $searchSecondaryRaw = $row[$searchSecondaryKey] ?? '';
+                                        $visibleMovementSearchValues[] = (string) $searchSecondaryRaw;
+                                        $visibleMovementSearchValues[] = report_value(
+                                            $searchSecondaryRaw,
+                                            ((array) ($searchColumn['secondaryFormat'] ?? []))[$searchSecondaryKey] ?? 'text'
+                                        );
+                                    }
+                                }
+                            }
+                            $visibleMovementSearchText = implode(' ', $visibleMovementSearchValues);
+                        }
+                        ?>
+                        <tr<?= $hasMovementContextMenu ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?><?= $movementKey === 'sin-asignar' ? ' data-visible-search-row data-visible-search-text="' . e($visibleMovementSearchText) . '"' : '' ?>>
                             <?php foreach ($movement['columns'] as $columnKey => $column): ?>
                                 <?php
                                 $columnConfig = is_array($column) ? $column : [];
@@ -1605,6 +1631,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($movementResult['rows'] === []): ?><tr><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">No hay movimientos para mostrar.</td></tr><?php endif; ?>
+                    <?php if ($movementKey === 'sin-asignar' && $movementResult['rows'] !== []): ?><tr class="movement-visible-search-empty" data-visible-search-empty hidden><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">Ningún registro visible coincide. Presiona Enter para buscar en todo el historial.</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -2406,6 +2433,76 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 select.addEventListener('change', syncAssignmentRow);
                 syncAssignmentRow();
             }
+        });
+    }
+
+    const visibleMovementSearch = document.querySelector('[data-visible-movement-search]');
+    const visibleMovementInput = visibleMovementSearch?.querySelector('[data-visible-movement-input]');
+    const visibleMovementStatus = visibleMovementSearch?.querySelector('[data-visible-movement-status]');
+    const visibleMovementBody = document.querySelector('[data-visible-movement-body]');
+    if (visibleMovementSearch && visibleMovementInput && visibleMovementBody) {
+        const visibleMovementRows = Array.from(visibleMovementBody.querySelectorAll('[data-visible-search-row]'));
+        const visibleMovementEmpty = visibleMovementBody.querySelector('[data-visible-search-empty]');
+        const discardTimers = new Map();
+        const normalizeVisibleSearch = (value) => String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase('es-MX')
+            .replace(/\s+/g, ' ')
+            .trim();
+        visibleMovementRows.forEach((row) => {
+            row.dataset.normalizedVisibleSearch = normalizeVisibleSearch(row.dataset.visibleSearchText);
+        });
+
+        const showVisibleMovementRow = (row) => {
+            window.clearTimeout(discardTimers.get(row));
+            discardTimers.delete(row);
+            row.classList.remove('is-visible-search-discarded');
+            row.removeAttribute('aria-hidden');
+            if (row.hidden) {
+                row.hidden = false;
+                row.classList.add('is-visible-search-restored');
+                window.requestAnimationFrame(() => row.classList.remove('is-visible-search-restored'));
+            }
+        };
+        const discardVisibleMovementRow = (row) => {
+            window.clearTimeout(discardTimers.get(row));
+            if (row.hidden) return;
+            row.classList.add('is-visible-search-discarded');
+            row.setAttribute('aria-hidden', 'true');
+            const timer = window.setTimeout(() => {
+                row.hidden = true;
+                row.classList.remove('is-visible-search-discarded');
+                discardTimers.delete(row);
+            }, 170);
+            discardTimers.set(row, timer);
+        };
+        const filterVisibleMovements = () => {
+            const query = normalizeVisibleSearch(visibleMovementInput.value);
+            const terms = query.split(' ').filter(Boolean);
+            let matches = 0;
+            visibleMovementRows.forEach((row) => {
+                const searchable = row.dataset.normalizedVisibleSearch || '';
+                const matchesRow = terms.length === 0 || terms.every((term) => searchable.includes(term));
+                if (matchesRow) {
+                    matches += 1;
+                    showVisibleMovementRow(row);
+                } else {
+                    discardVisibleMovementRow(row);
+                }
+            });
+            if (visibleMovementEmpty) visibleMovementEmpty.hidden = matches !== 0;
+            if (visibleMovementStatus) {
+                visibleMovementStatus.textContent = query
+                    ? `${matches} de ${visibleMovementRows.length} registros visibles coinciden. Presiona Enter para buscar en todo el historial.`
+                    : `${visibleMovementRows.length} registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.`;
+            }
+        };
+        visibleMovementInput.addEventListener('input', filterVisibleMovements);
+        visibleMovementInput.addEventListener('search', filterVisibleMovements);
+        visibleMovementSearch.addEventListener('submit', () => {
+            if (visibleMovementStatus) visibleMovementStatus.textContent = 'Buscando en todo el historial…';
+            visibleMovementSearch.classList.add('is-searching-history');
         });
     }
 
