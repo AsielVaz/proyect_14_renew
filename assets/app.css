@@ -1609,6 +1609,17 @@ tbody tr:hover {
     font-size: 11px;
 }
 
+.document-stamp-cell {
+    min-width: 104px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.direct-stamp-form {
+    display: inline-flex;
+    margin: 0;
+}
+
 .record-menu-trigger {
     display: inline-grid;
     width: 34px;
