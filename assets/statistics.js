@@ -34,7 +34,9 @@
             return;
         }
 
-        const labels = Array.isArray(data.labels) ? data.labels : [];
+        const labels = Array.isArray(data.labels)
+            ? data.labels.map((label) => /^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/.test(String(label)) ? window.s14DisplayDate(label) : label)
+            : [];
         const series = Array.isArray(data.series) ? data.series : [];
         const horizontal = series.length === 1 && labels.length > 8;
         const valueFormatter = (value) => formatValue(value, data.format);

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App;
 
-final class ModernFiscalPdf extends \FPDF
+final class FiscalPdf extends \FPDF
 {
     public const NAVY = [19, 27, 45];
     public const ORANGE = [242, 106, 10];

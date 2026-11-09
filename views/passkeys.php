@@ -29,8 +29,8 @@
                     <div class="passkey-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 17h6M12 7v5m-2-2h4"/></svg></div>
                     <div class="passkey-card-copy">
                         <h3><?= e($passkey['name']) ?></h3>
-                        <p>Registrada: <time datetime="<?= e($passkey['created_at']) ?>"><?= e($passkey['created_at']) ?></time></p>
-                        <p>Último uso: <?= $passkey['last_used_at'] ? '<time datetime="' . e($passkey['last_used_at']) . '">' . e($passkey['last_used_at']) . '</time>' : 'Aún no utilizada' ?></p>
+                        <p>Registrada: <time datetime="<?= e($passkey['created_at']) ?>"><?= e(display_date($passkey['created_at'], true)) ?></time></p>
+                        <p>Último uso: <?= $passkey['last_used_at'] ? '<time datetime="' . e($passkey['last_used_at']) . '">' . e(display_date($passkey['last_used_at'], true)) . '</time>' : 'Aún no utilizada' ?></p>
                         <div class="passkey-tags">
                             <?php if ($passkey['backup_state']): ?><span>Sincronizada</span><?php elseif ($passkey['backup_eligible']): ?><span>Admite respaldo</span><?php endif; ?>
                             <?php foreach ($passkey['transports'] as $transport): ?><span><?= e($transport) ?></span><?php endforeach; ?>

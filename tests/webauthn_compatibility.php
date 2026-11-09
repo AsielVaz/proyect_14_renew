@@ -17,9 +17,9 @@ $assert = static function (bool $condition, string $message) use (&$passed): voi
 $config = webauthn_config();
 $assert($config['enabled'] === true, 'WebAuthn está habilitado');
 $assert(in_array($config['user_verification'], ['required', 'preferred', 'discouraged'], true), 'verificación de usuario válida');
-$assert($config['challenge_ttl'] === 120, 'TTL de autenticación compatible con el sistema anterior');
-$assert($config['enrollment_ttl'] === 300, 'TTL de registro compatible con el sistema anterior');
-$assert($config['max_credentials'] === 20, 'límite anterior de 20 credenciales conservado');
+$assert($config['challenge_ttl'] === 120, 'TTL de autenticación configurado en 120 segundos');
+$assert($config['enrollment_ttl'] === 300, 'TTL de registro configurado en 300 segundos');
+$assert($config['max_credentials'] === 20, 'límite configurado en 20 credenciales');
 $assert(class_exists(lbuchs\WebAuthn\WebAuthn::class), 'biblioteca cargada por Composer');
 
 $columns = db()->query('SHOW COLUMNS FROM usuarios_passkeys')->fetchAll();
@@ -49,7 +49,7 @@ $assert(passkey_repository()->findByCredentialId(random_bytes(32)) === null, 'cr
 $assert(hash_equals(
     (string) $rows[0]['user_handle'],
     passkey_repository()->stableUserHandle((int) $rows[0]['id_usuario'], $config['handle_secret'])
-), 'un usuario existente conserva literalmente su user_handle anterior');
+), 'un usuario existente conserva literalmente su user_handle almacenado');
 $userWithoutPasskey = db()->query(
     'SELECT u.id FROM usuarios u
      LEFT JOIN usuarios_passkeys p ON p.id_usuario = u.id

@@ -1,6 +1,6 @@
 # WebAuthn / Passkeys
 
-Sistema 14 admite autenticación y registro de Passkeys sin depender del sistema anterior. Las sesiones continúan usando `auth_user` y los mismos alias internos del login tradicional.
+Sistema 14 admite autenticación y registro de Passkeys. Las sesiones usan `auth_user` y los alias internos del acceso.
 
 ## Dependencia
 
@@ -10,7 +10,7 @@ Ejecutar en la carpeta de la aplicación:
 composer install --no-dev --optimize-autoloader
 ```
 
-Se utiliza `lbuchs/webauthn` 2.2 porque las credenciales existentes almacenan claves públicas PEM EC P-256, formato que esta biblioteca valida directamente. No se convierten, sobrescriben ni eliminan credenciales antiguas.
+Se utiliza `lbuchs/webauthn` 2.2 porque las credenciales almacenan claves públicas PEM EC P-256, formato que esta biblioteca valida directamente. No se convierten, sobrescriben ni eliminan credenciales existentes.
 
 ## Producción en dev1.sistema14.com
 
@@ -34,7 +34,7 @@ WEBAUTHN_MAX_CREDENTIALS=20
 
 `SESSION_COOKIE_DOMAIN` vacío genera una cookie exclusiva de `dev1.sistema14.com`. La aplicación rechaza al iniciar una combinación inválida de origen, RP ID, `APP_URL` o cookie insegura.
 
-La implementación anterior utilizaba el origen `https://sistema14.com` y el RP ID `sistema14.com`. El nuevo sistema conserva el mismo RP ID, que es lo que permite presentar esas credenciales desde el subdominio `dev1`. El origen validado debe ser `https://dev1.sistema14.com`, porque es el origen que el navegador incluye en las nuevas ceremonias. No se debe configurar el origen anterior en el nuevo login.
+El RP ID es `sistema14.com`, lo que permite presentar las credenciales desde el subdominio `dev1`. El origen validado debe ser `https://dev1.sistema14.com`, porque es el origen exacto que el navegador incluye en las ceremonias de autenticación y registro.
 
 Para usuarios que ya tienen Passkeys se reutiliza literalmente su `user_handle` almacenado. Para un usuario sin credenciales se genera un handle HMAC estable con `WEBAUTHN_HANDLE_SECRET`; el secreto real sólo debe estar en `.env`, nunca en el repositorio.
 
@@ -59,7 +59,7 @@ Las credenciales sincronizadas (`backup_eligible`) admiten contador cero. En cre
 
 ## Prueba en navegador
 
-La prueba criptográfica con una credencial antigua debe hacerse desde `https://dev1.sistema14.com`, con el dispositivo del propietario y sin modificar la base de datos manualmente:
+La prueba criptográfica con una credencial existente debe hacerse desde `https://dev1.sistema14.com`, con el dispositivo del propietario y sin modificar la base de datos manualmente:
 
 1. Abrir la pantalla de acceso y dejar vacío el identificador para una Passkey detectable, o escribir la cuenta para una credencial no detectable.
 2. Seleccionar **Iniciar sesión con Passkey** y completar la verificación del dispositivo.

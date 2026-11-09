@@ -17,12 +17,12 @@ final class PdfDocumentService
     {
         if (!class_exists(\FPDF::class, true)) {
             $configuredPath = trim((string) (getenv('FPDF_PATH') ?: ''));
-            $legacyPath = dirname((string) (realpath(APP_ROOT) ?: APP_ROOT))
+            $alternatePath = dirname((string) (realpath(APP_ROOT) ?: APP_ROOT))
                 . '/sistema/documentos/api/FPDF/fpdf.php';
             $candidates = array_filter([
                 $configuredPath,
                 APP_ROOT . '/vendor/setasign/fpdf/fpdf.php',
-                $legacyPath,
+                $alternatePath,
             ]);
             foreach ($candidates as $library) {
                 if (is_file($library) && is_readable($library)) {
@@ -84,9 +84,9 @@ final class PdfDocumentService
         return ['bytes' => $pdf->Output('S'), 'filename' => $name];
     }
 
-    private function document(): ModernFiscalPdf
+    private function document(): FiscalPdf
     {
-        $pdf = new ModernFiscalPdf('P', 'mm', 'Letter');
+        $pdf = new FiscalPdf('P', 'mm', 'Letter');
         $pdf->SetMargins(self::LEFT, 12, self::LEFT);
         $pdf->SetAutoPageBreak(true, 16);
         $pdf->AliasNbPages();
@@ -96,7 +96,7 @@ final class PdfDocumentService
         return $pdf;
     }
 
-    private function coverHeader(ModernFiscalPdf $pdf, string $type, array $row): void
+    private function coverHeader(FiscalPdf $pdf, string $type, array $row): void
     {
         $logo = $this->logoPath($row['logo'] ?? null);
         if ($logo !== null) {
@@ -105,7 +105,7 @@ final class PdfDocumentService
                 [$width, $height] = getimagesize($logoPath) ?: [0, 0];
                 if ($width > 0 && $height > 0) {
                     // El encabezado reserva toda la columna izquierda para el logo.
-                    // Muchos archivos legados incluyen margen blanco interno, por eso
+                    // Algunos logotipos incluyen margen blanco interno, por eso
                     // se escala hasta el límite seguro sin invadir los datos del emisor.
                     $maxWidth = 68.0;
                     $maxHeight = 42.0;
@@ -121,25 +121,25 @@ final class PdfDocumentService
             }
         } else {
             $pdf->SetFont('Arial', 'B', 14);
-            $pdf->SetTextColor(...ModernFiscalPdf::NAVY);
+            $pdf->SetTextColor(...FiscalPdf::NAVY);
             $pdf->SetXY(15, 13);
             $pdf->Cell(45, 10, 'SISTEMA 14', 0, 0, 'L');
         }
 
-        $pdf->SetTextColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetTextColor(...FiscalPdf::NAVY);
         $companyName = (string) ($row['empresa'] ?? 'EMISOR');
         $pdf->SetFont('Arial', 'B', mb_strlen($companyName) > 24 ? 12 : 14);
         $pdf->SetXY(83, 7);
         $pdf->Cell(119, 7, $pdf->encode($companyName), 0, 0, 'R');
         $pdf->SetFont('Arial', '', 8);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetXY(83, 13);
         $pdf->Cell(119, 4, $pdf->encode((string) ($row['empresa_rfc'] ?? '-')), 0, 0, 'R');
         $pdf->SetFont('Arial', '', 6.5);
         $pdf->SetXY(83, 18);
         $pdf->Cell(119, 4, $pdf->encode($this->truncate($pdf, (string) ($row['empresa_regimen'] ?? '-'), 119)), 0, 0, 'R');
 
-        $pdf->SetFillColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
         $pdf->Rect(139, 25, 63, 16, 'F');
         $pdf->SetFont('Arial', 'B', 10.5);
         $pdf->SetTextColor(255, 255, 255);
@@ -151,9 +151,9 @@ final class PdfDocumentService
         $pdf->Cell(57, 4, 'CFDI v4.0  |  ' . $this->status($row), 0, 0, 'C');
     }
 
-    private function fiscalIdentity(ModernFiscalPdf $pdf, array $row, string $subtitle): void
+    private function fiscalIdentity(FiscalPdf $pdf, array $row, string $subtitle): void
     {
-        $pdf->SetFillColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
         $pdf->Rect(0, 45, self::PAGE_WIDTH, 10, 'F');
         $uuid = trim((string) ($row['uuid'] ?? ''));
         $pdf->SetTextColor(161, 175, 197);
@@ -172,7 +172,7 @@ final class PdfDocumentService
         $pdf->SetY(58);
     }
 
-    private function parties(ModernFiscalPdf $pdf, array $row): void
+    private function parties(FiscalPdf $pdf, array $row): void
     {
         $top = 58.0;
         $gap = 6.0;
@@ -192,16 +192,16 @@ final class PdfDocumentService
         $pdf->SetY(93);
     }
 
-    private function partyCard(ModernFiscalPdf $pdf, float $x, float $y, float $width, string $title, array $lines): void
+    private function partyCard(FiscalPdf $pdf, float $x, float $y, float $width, string $title, array $lines): void
     {
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
         $pdf->SetFillColor(255, 255, 255);
         $pdf->Rect($x, $y, $width, 31, 'FD');
         $pdf->SetFont('Arial', 'B', 7);
-        $pdf->SetTextColor(...ModernFiscalPdf::ORANGE);
+        $pdf->SetTextColor(...FiscalPdf::ORANGE);
         $pdf->SetXY($x + 5, $y + 4);
         $pdf->Cell($width - 10, 4, $title, 0, 0, 'L');
-        $pdf->SetTextColor(...ModernFiscalPdf::INK);
+        $pdf->SetTextColor(...FiscalPdf::INK);
         $currentY = $y + 9;
         foreach ($lines as $index => $line) {
             $line = trim((string) $line);
@@ -214,7 +214,7 @@ final class PdfDocumentService
         }
     }
 
-    private function invoiceMetaBar(ModernFiscalPdf $pdf, array $invoice): void
+    private function invoiceMetaBar(FiscalPdf $pdf, array $invoice): void
     {
         $items = [
             ['FORMA DE PAGO', $this->satCode($invoice['forma_clave'] ?? null)],
@@ -226,11 +226,11 @@ final class PdfDocumentService
         $x = self::LEFT;
         foreach ($items as $index => [$label, $value]) {
             $pdf->SetFont('Arial', 'B', 5.5);
-            $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+            $pdf->SetTextColor(...FiscalPdf::MUTED);
             $pdf->SetXY($x + 1, 96);
             $pdf->Cell($widths[$index] - 2, 3, $pdf->encode($label), 0, 0, 'L');
             $pdf->SetFont('Arial', 'B', 7);
-            $pdf->SetTextColor(...ModernFiscalPdf::INK);
+            $pdf->SetTextColor(...FiscalPdf::INK);
             $pdf->SetXY($x + 1, 100);
             $pdf->Cell($widths[$index] - 2, 4, $pdf->encode($this->truncate($pdf, $value, $widths[$index] - 2)), 0, 0, 'L');
             $x += $widths[$index];
@@ -238,7 +238,7 @@ final class PdfDocumentService
         $pdf->SetY(107);
     }
 
-    private function invoiceTable(ModernFiscalPdf $pdf, array $details): void
+    private function invoiceTable(FiscalPdf $pdf, array $details): void
     {
         $widths = [14, 23, 22, 78, 24, 27];
         $headers = ['Cant.', 'Unidad', 'Clave SAT', 'Descripción', 'P. unitario', 'Importe'];
@@ -267,7 +267,7 @@ final class PdfDocumentService
         }
     }
 
-    private function invoiceTotals(ModernFiscalPdf $pdf, array $invoice, array $details): void
+    private function invoiceTotals(FiscalPdf $pdf, array $invoice, array $details): void
     {
         $subtotal = (float) ($invoice['xml_subtotal'] ?? 0);
         if ($subtotal <= 0) {
@@ -291,14 +291,14 @@ final class PdfDocumentService
             $this->continuationHeader($pdf, 'FACTURA', 'Resumen del comprobante');
         }
         $y = $pdf->GetY() + 5;
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
         $pdf->Line(self::LEFT, $y, 202, $y);
         $pdf->SetFont('Arial', '', 6.5);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetXY(self::LEFT + 1, $y + 5);
         $pdf->Cell(92, 4, 'TOTAL CON LETRA', 0, 0, 'L');
         $pdf->SetFont('Arial', 'BI', 7.5);
-        $pdf->SetTextColor(...ModernFiscalPdf::INK);
+        $pdf->SetTextColor(...FiscalPdf::INK);
         $pdf->SetXY(self::LEFT + 1, $y + 10);
         $pdf->MultiCell(92, 4, $pdf->encode($this->amountWords($total, (string) ($invoice['moneda_clave'] ?? 'MXN'))), 0, 'L');
         $this->totalsCard($pdf, 126, $y + 4, 76, [
@@ -310,7 +310,7 @@ final class PdfDocumentService
         $pdf->SetY($y + 43);
     }
 
-    private function paymentSummary(ModernFiscalPdf $pdf, array $row, array $relations): void
+    private function paymentSummary(FiscalPdf $pdf, array $row, array $relations): void
     {
         $this->sectionLabel($pdf, 'Información del pago');
         $total = array_sum(array_map(static fn (array $relation): float => (float) ($relation['monto'] ?? 0), $relations));
@@ -323,8 +323,8 @@ final class PdfDocumentService
             ['Número de operación', (string) (($row['num_operacion'] ?? '') ?: '-')],
             ['Cuenta beneficiaria', (string) (($row['cta_beneficiario'] ?? '') ?: '-')],
         ]);
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
-        $pdf->SetFillColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
         $pdf->roundRect(136, $y, 66, 39, 3, 'FD');
         $pdf->SetTextColor(196, 205, 220);
         $pdf->SetFont('Arial', 'B', 7);
@@ -341,7 +341,7 @@ final class PdfDocumentService
         $pdf->SetY($y + 47);
     }
 
-    private function relationsTable(ModernFiscalPdf $pdf, array $relations): void
+    private function relationsTable(FiscalPdf $pdf, array $relations): void
     {
         $this->sectionLabel($pdf, 'Documentos relacionados');
         $widths = [58, 25, 20, 29, 28, 28];
@@ -367,14 +367,14 @@ final class PdfDocumentService
         }
     }
 
-    private function compactFiscalBlock(ModernFiscalPdf $pdf, array $row, string $type): void
+    private function compactFiscalBlock(FiscalPdf $pdf, array $row, string $type): void
     {
         if ($pdf->GetY() + 54 > 265) {
             $pdf->AddPage();
             $this->continuationHeader($pdf, mb_strtoupper($type), 'Certificación fiscal');
         }
         $top = $pdf->GetY() + 2;
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
         $pdf->Line(self::LEFT, $top, 202, $top);
         $uuid = trim((string) ($row['uuid'] ?? ''));
         $qrPayload = $uuid !== '' ? $this->satVerificationUrl($row) : '';
@@ -383,35 +383,35 @@ final class PdfDocumentService
         $textX = 45.0;
         $textWidth = 157.0;
         $pdf->SetFont('Arial', 'B', 5.8);
-        $pdf->SetTextColor(...ModernFiscalPdf::INK);
+        $pdf->SetTextColor(...FiscalPdf::INK);
         $pdf->SetXY($textX, $top + 4);
         $pdf->Cell($textWidth, 3, 'Sello Digital del CFDI:', 0, 0, 'L');
         $pdf->SetFont('Courier', '', 4.3);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetXY($textX, $top + 8);
         $pdf->MultiCell($textWidth, 2.1, $pdf->encode($this->technicalWrap((string) (($row['sello_cfd'] ?? '') ?: 'Pendiente de timbrado'), 350)), 0, 'L');
 
         $pdf->SetFont('Arial', 'B', 5.8);
-        $pdf->SetTextColor(...ModernFiscalPdf::INK);
+        $pdf->SetTextColor(...FiscalPdf::INK);
         $pdf->SetXY($textX, $top + 17);
         $pdf->Cell($textWidth, 3, 'Sello del SAT:', 0, 0, 'L');
         $pdf->SetFont('Courier', '', 4.3);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetXY($textX, $top + 21);
         $pdf->MultiCell($textWidth, 2.1, $pdf->encode($this->technicalWrap((string) (($row['sello_sat'] ?? '') ?: 'Pendiente de timbrado'), 350)), 0, 'L');
 
         $pdf->SetFont('Arial', 'B', 5.8);
-        $pdf->SetTextColor(...ModernFiscalPdf::INK);
+        $pdf->SetTextColor(...FiscalPdf::INK);
         $pdf->SetXY(self::LEFT + 1, $top + 32);
         $pdf->Cell(self::CONTENT - 2, 3, $pdf->encode('Cadena original del complemento de certificación digital del SAT:'), 0, 0, 'L');
         $technical = (string) (($row['cadena'] ?? '') ?: ($row['certificado_fact'] ?? 'Información disponible después del timbrado.'));
         $pdf->SetFont('Courier', '', 4.2);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetXY(self::LEFT + 1, $top + 36);
         $pdf->MultiCell(self::CONTENT - 2, 2, $pdf->encode($this->technicalWrap($technical, 520)), 0, 'L');
 
         $pdf->SetFont('Arial', 'B', 5.5);
-        $pdf->SetTextColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetTextColor(...FiscalPdf::NAVY);
         $pdf->SetXY(self::LEFT + 1, $top + 45);
         $pdf->Cell(45, 3, $pdf->encode('No. Certificado SAT:'), 0, 0, 'L');
         $pdf->SetFont('Arial', '', 5.5);
@@ -430,14 +430,14 @@ final class PdfDocumentService
         $pdf->SetY($top + 57);
     }
 
-    private function drawQr(ModernFiscalPdf $pdf, float $x, float $y, float $size, string $payload): void
+    private function drawQr(FiscalPdf $pdf, float $x, float $y, float $size, string $payload): void
     {
         $pdf->SetFillColor(255, 255, 255);
         $pdf->Rect($x, $y, $size, $size, 'F');
         if ($payload === '' || !class_exists(\BaconQrCode\Encoder\Encoder::class)) {
-            $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+            $pdf->SetDrawColor(...FiscalPdf::BORDER);
             $pdf->Rect($x, $y, $size, $size, 'D');
-            $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+            $pdf->SetTextColor(...FiscalPdf::MUTED);
             $pdf->SetFont('Arial', 'B', 5.5);
             $pdf->SetXY($x, $y + 10);
             $pdf->Cell($size, 4, 'QR SAT', 0, 0, 'C');
@@ -462,7 +462,7 @@ final class PdfDocumentService
                 }
             }
         } catch (\Throwable) {
-            $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+            $pdf->SetDrawColor(...FiscalPdf::BORDER);
             $pdf->Rect($x, $y, $size, $size, 'D');
         }
     }
@@ -490,7 +490,7 @@ final class PdfDocumentService
         return trim(chunk_split($value, 92, ' '));
     }
 
-    private function fiscalPage(ModernFiscalPdf $pdf, array $row, string $type): void
+    private function fiscalPage(FiscalPdf $pdf, array $row, string $type): void
     {
         $pdf->AddPage();
         $this->continuationHeader($pdf, strtoupper($type), 'Información fiscal y certificación');
@@ -510,15 +510,15 @@ final class PdfDocumentService
         $technical = trim((string) (($row['cadena'] ?? '') ?: ($row['certificado_fact'] ?? '')));
         $this->technicalBox($pdf, $technical !== '' ? $technical : 'Información disponible después del timbrado.', 33);
         $pdf->SetFont('Arial', 'I', 7.5);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->MultiCell(self::CONTENT, 4, $pdf->encode('Este documento fue generado localmente por Sistema 14 a partir de la información fiscal almacenada. No sustituye al archivo XML firmado.'), 0, 'L');
     }
 
-    private function continuationHeader(ModernFiscalPdf $pdf, string $type, string $subtitle): void
+    private function continuationHeader(FiscalPdf $pdf, string $type, string $subtitle): void
     {
-        $pdf->SetFillColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
         $pdf->Rect(0, 0, self::PAGE_WIDTH, 28, 'F');
-        $pdf->SetFillColor(...ModernFiscalPdf::ORANGE);
+        $pdf->SetFillColor(...FiscalPdf::ORANGE);
         $pdf->Rect(0, 0, 5, 28, 'F');
         $pdf->SetFont('Arial', 'B', 12);
         $pdf->SetTextColor(255, 255, 255);
@@ -530,28 +530,28 @@ final class PdfDocumentService
         $pdf->SetY(36);
     }
 
-    private function sectionLabel(ModernFiscalPdf $pdf, string $label): void
+    private function sectionLabel(FiscalPdf $pdf, string $label): void
     {
         $pdf->SetFont('Arial', 'B', 8);
-        $pdf->SetTextColor(...ModernFiscalPdf::ORANGE);
+        $pdf->SetTextColor(...FiscalPdf::ORANGE);
         $pdf->Cell(self::CONTENT, 6, $pdf->encode(mb_strtoupper($label)), 0, 1, 'L');
     }
 
-    private function labelValue(ModernFiscalPdf $pdf, float $x, float $y, float $width, string $label, string $value): void
+    private function labelValue(FiscalPdf $pdf, float $x, float $y, float $width, string $label, string $value): void
     {
         $pdf->SetFont('Arial', 'B', 6.5);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetXY($x, $y);
         $pdf->Cell($width, 4, $pdf->encode(mb_strtoupper($label)), 0, 0, 'L');
         $pdf->SetFont('Arial', 'B', 8.5);
-        $pdf->SetTextColor(...ModernFiscalPdf::INK);
+        $pdf->SetTextColor(...FiscalPdf::INK);
         $pdf->SetXY($x, $y + 6);
         $pdf->Cell($width, 5, $pdf->encode($this->truncate($pdf, $value, $width)), 0, 0, 'L');
     }
 
-    private function tableHeader(ModernFiscalPdf $pdf, array $headers, array $widths): void
+    private function tableHeader(FiscalPdf $pdf, array $headers, array $widths): void
     {
-        $pdf->SetFillColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
         $pdf->SetTextColor(255, 255, 255);
         $pdf->SetFont('Arial', 'B', 6.5);
         foreach ($headers as $index => $header) {
@@ -560,17 +560,17 @@ final class PdfDocumentService
         $pdf->Ln();
     }
 
-    private function tableRow(ModernFiscalPdf $pdf, array $values, array $widths, float $height, float $lineHeight): void
+    private function tableRow(FiscalPdf $pdf, array $values, array $widths, float $height, float $lineHeight): void
     {
         $x = $pdf->GetX();
         $y = $pdf->GetY();
-        $pdf->SetFillColor(...ModernFiscalPdf::SOFT);
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+        $pdf->SetFillColor(...FiscalPdf::SOFT);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
         $pdf->Rect($x, $y, array_sum($widths), $height, 'FD');
         foreach ($values as $index => $value) {
             $width = $widths[$index];
             $pdf->SetXY($x + 2, $y + 2);
-            $pdf->SetTextColor(...ModernFiscalPdf::INK);
+            $pdf->SetTextColor(...FiscalPdf::INK);
             $pdf->SetFont('Arial', $index === count($values) - 1 ? 'B' : '', 6.7);
             if ($index === 3 && count($values) === 6 && $width >= 70) {
                 $pdf->MultiCell($width - 4, $lineHeight, $pdf->encode((string) $value), 0, 'L');
@@ -583,37 +583,37 @@ final class PdfDocumentService
         $pdf->SetXY(self::LEFT, $y + $height + 1);
     }
 
-    private function emptyRow(ModernFiscalPdf $pdf, string $message): void
+    private function emptyRow(FiscalPdf $pdf, string $message): void
     {
-        $pdf->SetFillColor(...ModernFiscalPdf::SOFT);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetFillColor(...FiscalPdf::SOFT);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $pdf->SetFont('Arial', 'I', 8);
         $pdf->Cell(self::CONTENT, 12, $pdf->encode($message), 0, 1, 'C', true);
     }
 
-    private function infoStrip(ModernFiscalPdf $pdf, float $x, float $y, float $width, array $items): void
+    private function infoStrip(FiscalPdf $pdf, float $x, float $y, float $width, array $items): void
     {
         $height = max(34, count($items) * 7 + 5);
-        $pdf->SetFillColor(...ModernFiscalPdf::SOFT);
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+        $pdf->SetFillColor(...FiscalPdf::SOFT);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
         $pdf->roundRect($x, $y, $width, $height, 3, 'FD');
         $currentY = $y + 5;
         foreach ($items as [$label, $value]) {
             $pdf->SetFont('Arial', 'B', 6.5);
-            $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+            $pdf->SetTextColor(...FiscalPdf::MUTED);
             $pdf->SetXY($x + 5, $currentY);
             $pdf->Cell(30, 4, $pdf->encode(mb_strtoupper($label)), 0, 0, 'L');
             $pdf->SetFont('Arial', '', 7);
-            $pdf->SetTextColor(...ModernFiscalPdf::INK);
+            $pdf->SetTextColor(...FiscalPdf::INK);
             $pdf->SetXY($x + 36, $currentY);
             $pdf->Cell($width - 41, 4, $pdf->encode($this->truncate($pdf, (string) $value, $width - 41)), 0, 0, 'L');
             $currentY += 7;
         }
     }
 
-    private function totalsCard(ModernFiscalPdf $pdf, float $x, float $y, float $width, array $items): void
+    private function totalsCard(FiscalPdf $pdf, float $x, float $y, float $width, array $items): void
     {
-        $pdf->SetFillColor(...ModernFiscalPdf::NAVY);
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
         $pdf->roundRect($x, $y, $width, 36, 3, 'F');
         $currentY = $y + 6;
         foreach ($items as $index => [$label, $value]) {
@@ -628,7 +628,7 @@ final class PdfDocumentService
         }
     }
 
-    private function twoColumnDetails(ModernFiscalPdf $pdf, array $items): void
+    private function twoColumnDetails(FiscalPdf $pdf, array $items): void
     {
         $gap = 6.0;
         $width = (self::CONTENT - $gap) / 2;
@@ -638,24 +638,24 @@ final class PdfDocumentService
             $row = intdiv($index, 2);
             $x = self::LEFT + $column * ($width + $gap);
             $y = $startY + $row * 22;
-            $pdf->SetFillColor(...ModernFiscalPdf::SOFT);
-            $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+            $pdf->SetFillColor(...FiscalPdf::SOFT);
+            $pdf->SetDrawColor(...FiscalPdf::BORDER);
             $pdf->roundRect($x, $y, $width, 17, 2.5, 'FD');
             $this->labelValue($pdf, $x + 4, $y + 3, $width - 8, $label, (string) $value);
         }
         $pdf->SetY($startY + 44);
     }
 
-    private function technicalBox(ModernFiscalPdf $pdf, string $text, float $height = 27): void
+    private function technicalBox(FiscalPdf $pdf, string $text, float $height = 27): void
     {
         $x = self::LEFT;
         $y = $pdf->GetY();
-        $pdf->SetFillColor(...ModernFiscalPdf::SOFT);
-        $pdf->SetDrawColor(...ModernFiscalPdf::BORDER);
+        $pdf->SetFillColor(...FiscalPdf::SOFT);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
         $pdf->roundRect($x, $y, self::CONTENT, $height, 2.5, 'FD');
         $pdf->SetXY($x + 4, $y + 4);
         $pdf->SetFont('Courier', '', 6.2);
-        $pdf->SetTextColor(...ModernFiscalPdf::MUTED);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
         $maximum = $height >= 33 ? 900 : 660;
         $pdf->MultiCell(self::CONTENT - 8, 3.1, $pdf->encode($this->limit($text, $maximum)), 0, 'L');
         $pdf->SetY($y + $height + 5);
@@ -727,7 +727,7 @@ final class PdfDocumentService
         $value = trim((string) $value);
         if ($value === '') return null;
 
-        $remote = $this->downloadLogo(legacy_asset_url($value));
+        $remote = $this->downloadLogo(company_asset_url($value));
         if ($remote !== null) {
             return ['path' => $remote, 'temporary' => true];
         }
@@ -890,7 +890,7 @@ final class PdfDocumentService
         return trim((string) preg_replace('/\s+/u', ' ', $value));
     }
 
-    private function truncate(ModernFiscalPdf $pdf, string $text, float $width): string
+    private function truncate(FiscalPdf $pdf, string $text, float $width): string
     {
         $text = $this->singleLine($text);
         if ($pdf->GetStringWidth($pdf->encode($text)) <= $width) return $text;

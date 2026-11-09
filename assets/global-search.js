@@ -70,7 +70,7 @@
         copy.className = 'global-search-result-copy';
         appendText(copy, 'strong', item.title || 'Resultado');
         appendText(copy, 'span', item.description || 'Sin descripción', 'global-search-result-description');
-        const meta = [item.meta, item.date].filter(Boolean).join(' · ');
+        const meta = [item.meta, item.date ? window.s14DisplayDate(item.date) : ''].filter(Boolean).join(' · ');
         if (meta) appendText(copy, 'small', meta);
         link.appendChild(copy);
 
@@ -107,7 +107,7 @@
                 link.href = complement.url;
                 const copy = document.createElement('span');
                 appendText(copy, 'strong', complement.title || 'Complemento');
-                appendText(copy, 'small', [complement.meta, complement.date].filter(Boolean).join(' · '));
+                appendText(copy, 'small', [complement.meta, complement.date ? window.s14DisplayDate(complement.date) : ''].filter(Boolean).join(' · '));
                 link.appendChild(copy);
                 appendText(link, 'span', complement.value || '', 'global-search-related-value');
                 related.appendChild(link);

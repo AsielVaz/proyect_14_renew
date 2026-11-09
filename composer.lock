@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e04bf65bf133e3452c83e5aac65a75c2",
+    "content-hash": "47b9c3c9036d2631a25e53277aa3e402",
     "packages": [
         {
             "name": "lbuchs/webauthn",

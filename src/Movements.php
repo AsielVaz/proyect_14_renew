@@ -41,7 +41,7 @@ final class Movements
             ],
             'cartera' => [
                 'label' => 'Movimientos por cartera',
-                'description' => 'Consulta histórica de movimientos acreditables por cartera. Es la vista equivalente al detalle del panel anterior.',
+                'description' => 'Consulta histórica de movimientos acreditables por cartera.',
                 'columns' => [
                     'id' => 'ID',
                     'empresa' => ['label' => 'Origen', 'secondary' => ['cuenta' => 'Cuenta']],

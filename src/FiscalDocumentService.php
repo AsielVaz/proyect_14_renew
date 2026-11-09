@@ -21,8 +21,8 @@ final class FiscalDocumentService
         $this->assertInvoice($id, false);
         $response = $this->post('/apiFactura.php', [
             'accion' => 'facturar', 'id' => $id, 'usuario' => $operatorId,
-            'nota' => 'Timbrado desde Sistema 14 renovado',
-            'skip_legacy_email' => '1',
+            'nota' => 'Timbrado desde Sistema 14',
+            'skip_automatic_email' => '1',
         ]);
         $this->assertRemoteSuccess($response, 'No fue posible timbrar la factura.');
         return (string) ($response['mensaje'] ?? $response['message'] ?? 'La factura fue enviada a timbrado.');
@@ -97,7 +97,7 @@ final class FiscalDocumentService
             CURLOPT_TIMEOUT => 0,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTPHEADER => ['Accept: application/json'],
-            CURLOPT_USERAGENT => 'Sistema14-Renovado/1.0',
+            CURLOPT_USERAGENT => 'Sistema14/1.0',
         ]);
         $body = curl_exec($handle);
         $this->refreshSessionActivity();
@@ -140,7 +140,7 @@ final class FiscalDocumentService
             return $this->normalizeRemoteResult($decoded);
         }
 
-        // Algunas respuestas del sistema legado mezclan cálculos, URLs, SQL y hasta
+        // Algunas respuestas del servicio fiscal mezclan cálculos, URLs, SQL y hasta
         // errores PHP después de un JSON válido. Se extraen objetos JSON completos
         // sin depender de que estén al inicio o al final de la respuesta.
         $failure = null;

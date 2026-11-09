@@ -6209,8 +6209,10 @@ body.has-invoice-email-modal {
 
 /* 12. Sistema global de movimiento ------------------------------------- */
 
-@view-transition {
-    navigation: auto;
+@media (prefers-reduced-motion: no-preference) {
+    @view-transition {
+        navigation: auto;
+    }
 }
 
 .sidebar {

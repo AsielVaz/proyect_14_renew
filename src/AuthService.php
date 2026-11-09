@@ -73,12 +73,12 @@ final class AuthService
         }
 
         // Compatibilidad exacta con Sistema 14. No se reescribe el hash en la BD.
-        $legacy = sha1(md5(sha1($email . $plainPassword)));
-        if (hash_equals($stored, $legacy)) {
+        $compatibleHash = sha1(md5(sha1($email . $plainPassword)));
+        if (hash_equals($stored, $compatibleHash)) {
             return true;
         }
 
-        // Permite hashes modernos si ya existieran, sin migrarlos durante el acceso.
+        // Permite hashes generados con password_hash sin modificarlos durante el acceso.
         $info = password_get_info($stored);
         return ($info['algo'] ?? null) !== null && ($info['algo'] ?? null) !== 0
             && password_verify($plainPassword, $stored);

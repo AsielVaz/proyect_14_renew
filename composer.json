@@ -1,6 +1,6 @@
 {
-    "name": "sistema14/renovacion",
-    "description": "Interfaz renovada de administración financiera para Sistema 14",
+    "name": "sistema14/sistema",
+    "description": "Sistema de administración financiera Sistema 14",
     "license": "proprietary",
     "require": {
         "lbuchs/webauthn": "^2.2",

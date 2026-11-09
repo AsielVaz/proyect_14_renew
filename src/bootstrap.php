@@ -151,7 +151,7 @@ function app_url(string $path = ''): string
     return $base . '/' . ltrim($path, '/');
 }
 
-function legacy_asset_url(?string $path): string
+function company_asset_url(?string $path): string
 {
     $path = trim((string) $path);
     if ($path === '') {
@@ -165,7 +165,7 @@ function legacy_asset_url(?string $path): string
     if (str_starts_with($path, 'sistema/')) {
         $path = substr($path, strlen('sistema/'));
     }
-    $base = rtrim(env_value('LEGACY_ASSET_BASE_URL', 'https://sistema14.com/app'), '/');
+    $base = rtrim(env_value('COMPANY_ASSET_BASE_URL', 'https://sistema14.com/app'), '/');
     $segments = array_values(array_filter(explode('/', preg_replace('#/+#', '/', $path) ?? $path), 'strlen'));
     return $base . '/' . implode('/', array_map('rawurlencode', $segments));
 }
@@ -380,7 +380,33 @@ function display_date(mixed $value, bool $includeTime = false): string
     $showTime = $includeTime
         && preg_match('/(?:T|\s)(\d{2}):(\d{2})/', $raw, $matches) === 1
         && ($matches[1] !== '00' || $matches[2] !== '00');
-    return $date->format($showTime ? 'd/m/Y H:i' : 'd/m/Y');
+    $weekdays = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    $months = [1 => 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    $formatted = sprintf(
+        '%s %s de %s del %s',
+        $weekdays[(int) $date->format('w')],
+        $date->format('d'),
+        $months[(int) $date->format('n')],
+        $date->format('Y')
+    );
+    return $showTime ? $formatted . ' · ' . $date->format('H:i') : $formatted;
+}
+
+function is_display_date_field(string $field): bool
+{
+    $field = strtolower(trim($field));
+    return $field === 'fecha'
+        || str_contains($field, 'fecha_')
+        || str_ends_with($field, '_fecha')
+        || in_array($field, ['created_at', 'updated_at', 'deleted_at', 'last_used_at', 'ultimo_uso'], true);
+}
+
+function display_field_value(string $field, mixed $value, string $format = 'text'): string
+{
+    if ($format === 'date' || $format === 'datetime' || ($format === 'text' && is_display_date_field($field))) {
+        return display_date($value, $format !== 'date');
+    }
+    return report_value($value, $format);
 }
 
 function filter_date_value(mixed $value): string

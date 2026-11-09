@@ -19,7 +19,7 @@
             <h1 id="loginTitle">Confirma tu identidad</h1>
             <p class="login-copy">Abre tu aplicación de autenticación e ingresa el código vigente.</p>
         <?php else: ?>
-            <h1 id="loginTitle">Bienvenido de nuevo</h1>
+            <h1 id="loginTitle">Bienvenido</h1>
             <p class="login-copy">Ingresa tus credenciales para continuar.</p>
         <?php endif; ?>
 

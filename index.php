@@ -419,7 +419,7 @@ try {
                 if (($result['status'] ?? '') === 'skipped') {
                     throw new RuntimeException((string) $result['message']);
                 }
-                flash('success', 'Se prepararon el PDF moderno y el XML de Sistema 14 para el correo del cliente. ' . ($result['message'] ?? ''));
+                flash('success', 'Se prepararon el PDF y el XML de Sistema 14 para el correo del cliente. ' . ($result['message'] ?? ''));
                 redirect('?invoice=list');
             } elseif ($postAction === 'invoice_delete') {
                 invoice_repository()->deletePending((int) ($_POST['id'] ?? 0));
@@ -772,7 +772,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <button type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5m4-3 4-4-4-4m4 4H9"/></svg>Cerrar sesión</button>
         </form>
     </div>
-    <p class="phase">Sistema 14 renovado · PHP <?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?></p>
+    <p class="phase">Sistema 14 · PHP <?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?></p>
 </aside>
 
 <main id="main-content">
@@ -891,7 +891,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <article class="company-card">
                                 <div class="company-card-head">
                                     <div class="company-card-media">
-                                        <?php if (trim((string) ($item['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($item['logo'])) ?>" alt="Logo de <?= e($item['razon']) ?>" loading="lazy" data-company-logo><span data-company-logo-fallback hidden><?= e($companyInitials) ?></span><?php else: ?><span><?= e($companyInitials) ?></span><?php endif; ?>
+                                        <?php if (trim((string) ($item['logo'] ?? '')) !== ''): ?><img src="<?= e(company_asset_url($item['logo'])) ?>" alt="Logo de <?= e($item['razon']) ?>" loading="lazy" data-company-logo><span data-company-logo-fallback hidden><?= e($companyInitials) ?></span><?php else: ?><span><?= e($companyInitials) ?></span><?php endif; ?>
                                     </div>
                                     <div class="company-card-identity"><span class="company-id-badge">#<?= e($item['id']) ?></span><h2 title="<?= e($item['razon']) ?>"><?= e($item['razon']) ?></h2><p><?= e($item['rfc'] ?: 'RFC no registrado') ?></p></div>
                                     <span class="company-status"><i aria-hidden="true"></i>Activa</span>
@@ -935,7 +935,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <header class="company-detail-hero">
                     <div class="company-detail-identity">
                         <div class="company-identity-logo">
-                            <?php if (trim((string) ($companyData['logo'] ?? '')) !== ''): ?><img src="<?= e(legacy_asset_url($companyData['logo'])) ?>" alt="Logo de <?= e($companyData['razon']) ?>" width="100" height="100" fetchpriority="high" data-company-logo><span data-company-logo-fallback hidden><?= e($companyInitials) ?></span><?php else: ?><span><?= e($companyInitials) ?></span><?php endif; ?>
+                            <?php if (trim((string) ($companyData['logo'] ?? '')) !== ''): ?><img src="<?= e(company_asset_url($companyData['logo'])) ?>" alt="Logo de <?= e($companyData['razon']) ?>" width="100" height="100" fetchpriority="high" data-company-logo><span data-company-logo-fallback hidden><?= e($companyInitials) ?></span><?php else: ?><span><?= e($companyInitials) ?></span><?php endif; ?>
                         </div>
                         <div class="company-detail-divider" aria-hidden="true"></div>
                         <div class="company-detail-copy"><p>Empresa #<?= e($companyData['id']) ?></p><h1><?= e($companyData['razon']) ?></h1><span><?= e($companyData['rfc'] ?: 'RFC no registrado') ?> · <?= e($companyAddress ?: 'Domicilio no registrado') ?></span></div>
@@ -962,7 +962,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                 ? '#' . ltrim((string) $account['color'], '#')
                                 : '#f26a0a';
                             $accountIdentity = mb_strtoupper(trim((string) $account['banco'] . ' ' . (string) $account['nombre_corto']));
-                            $accountLogo = str_contains($accountIdentity, 'ASP') ? legacy_asset_url('img/asp.jpg') : '';
+                            $accountLogo = str_contains($accountIdentity, 'ASP') ? company_asset_url('img/asp.jpg') : '';
                             $accountFallbackSource = trim((string) ($account['banco'] ?: $account['nombre_corto'] ?: 'Banco'));
                             $accountInitials = mb_strtoupper(mb_substr($accountFallbackSource, 0, 3));
                             ?>
@@ -971,7 +971,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                     <div class="company-bank-logo"><?php if ($accountLogo !== ''): ?><img src="<?= e($accountLogo) ?>" alt="Logo de <?= e($account['banco']) ?>" width="200" height="200" loading="lazy" data-company-logo><span data-company-logo-fallback hidden><?= e($accountInitials) ?></span><?php else: ?><span><?= e($accountInitials) ?></span><?php endif; ?></div>
                                     <div class="company-account-copy"><span class="company-account-bank"><i aria-hidden="true"></i><?= e($account['banco'] ?: 'Banco no registrado') ?> · <?= e($account['moneda'] ?: 'MXN') ?></span><h3><?= e($account['nombre_corto'] ?: ('Cuenta #' . $account['id'])) ?></h3><strong><?= e(report_value($account['saldo'], 'money')) ?></strong><p><?= e($account['numero_cuenta'] ?: 'Número no registrado') ?></p></div>
                                 </div>
-                                <dl class="company-account-metrics"><div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4-8 4-8-4 8-4Zm-8 9 8 4 8-4M4 17l8 4 8-4"/></svg>Capturas</dt><dd><?= number_format((int) $account['capturas']) ?></dd></div><div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2"/></svg>Última actividad</dt><dd><?= e($account['ultima_actividad'] ?: 'Sin movimientos') ?></dd></div></dl>
+                                <dl class="company-account-metrics"><div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4-8 4-8-4 8-4Zm-8 9 8 4 8-4M4 17l8 4 8-4"/></svg>Capturas</dt><dd><?= number_format((int) $account['capturas']) ?></dd></div><div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16M8 14h2m4 0h2m-8 3h2"/></svg>Última actividad</dt><dd><?= $account['ultima_actividad'] ? e(display_date($account['ultima_actividad'], true)) : 'Sin movimientos' ?></dd></div></dl>
                                 <footer class="company-account-actions"><a class="is-primary" href="?companies=account&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm3 5h6m-6 4h6m-6 4h4"/></svg>Estado de cuenta</a><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>&amp;account=<?= e($account['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg>Capturas</a><a href="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;account_id=<?= e($account['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-4 3 2 5-6"/></svg>Analizar captura</a></footer>
                             </article>
                         <?php endforeach; ?>
@@ -1021,11 +1021,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </tr></thead><tbody>
                     <?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr>
                         <?php if ($isCaptures): ?>
-                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e(trim((string) ($row['fecha'] . ' ' . $row['hora']))) ?></td><td><span class="movement-cell-main"><?= e($row['nombre_corto'] ?: ('Cuenta #' . $row['cuenta_id'])) ?></span><span class="movement-cell-secondary"><?= e(($row['banco'] ?: 'Banco no identificado') . ' · ' . ($row['moneda'] ?: 'MXN')) ?></span></td><td><?= number_format((int) $row['movimientos']) ?></td><td><?= e(report_value($row['depositos'], 'money')) ?></td><td><?= e(report_value($row['retiros'], 'money')) ?></td><td><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id']) ?>">Ver detalle</a></td>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e(display_date(trim((string) ($row['fecha'] . ' ' . $row['hora'])), true)) ?></td><td><span class="movement-cell-main"><?= e($row['nombre_corto'] ?: ('Cuenta #' . $row['cuenta_id'])) ?></span><span class="movement-cell-secondary"><?= e(($row['banco'] ?: 'Banco no identificado') . ' · ' . ($row['moneda'] ?: 'MXN')) ?></span></td><td><?= number_format((int) $row['movimientos']) ?></td><td><?= e(report_value($row['depositos'], 'money')) ?></td><td><?= e(report_value($row['retiros'], 'money')) ?></td><td><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id']) ?>">Ver detalle</a></td>
                         <?php elseif ($isAccount): ?>
-                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary movement-description-text"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e(display_date($row['fecha'] ?: $row['fecha_sistema'], true)) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary movement-description-text"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
                         <?php else: ?>
-                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e($row['fecha_banco'] ?: ($row['fecha_operacion'] ?: $row['fecha_captura'])) ?></td><td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['cuenta'] ?: 'Sin cuenta') ?></span></td><td><span class="movement-cell-main"><?= e($row['tipo_movimiento'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['status'] ?: 'Sin estado') ?></span></td><td><span class="movement-cell-main"><?= e(report_value($row['monto'], 'money')) ?></span><span class="movement-cell-secondary">Acreditable: <?= e(report_value($row['saldo_acreditable'], 'money')) ?></span></td><td><?= e($row['factura'] ?: '—') ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
+                            <td><span class="movement-cell-main">#<?= e($row['id']) ?></span></td><td><?= e(display_date($row['fecha_banco'] ?: ($row['fecha_operacion'] ?: $row['fecha_captura']), true)) ?></td><td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['cuenta'] ?: 'Sin cuenta') ?></span></td><td><span class="movement-cell-main"><?= e($row['tipo_movimiento'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['status'] ?: 'Sin estado') ?></span></td><td><span class="movement-cell-main"><?= e(report_value($row['monto'], 'money')) ?></span><span class="movement-cell-secondary">Acreditable: <?= e(report_value($row['saldo_acreditable'], 'money')) ?></span></td><td><?= e($row['factura'] ?: '—') ?></td><td><?php if ($row['id_captura']): ?><a href="?companies=capture&amp;id=<?= e($companyData['id']) ?>&amp;capture_id=<?= e($row['id_captura']) ?>">#<?= e($row['id_captura']) ?></a><?php else: ?>—<?php endif; ?></td>
                         <?php endif; ?>
                     </tr><?php endforeach; ?>
                     <?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">No hay registros para los filtros seleccionados.</td></tr><?php endif; ?>
@@ -1035,9 +1035,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php elseif ($companyView === 'capture'): ?>
             <?php $capturePageQuery = ['companies' => 'capture', 'id' => $companyData['id'], 'capture_id' => $companyCapture['id']]; ?>
             <section class="report-intro"><p><a href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Capturas de <?= e($companyData['razon']) ?></a> · Captura #<?= e($companyCapture['id']) ?></p><span class="operation-badge"><?= e(($companyCapture['banco'] ?: 'Banco') . ' · ' . ($companyCapture['nombre_corto'] ?: ('Cuenta #' . $companyCapture['cuenta_id']))) ?></span></section>
-            <div class="company-summary-grid capture-summary"><article><span>Movimientos</span><strong><?= number_format((int) ($companyCapture['summary']['movimientos'] ?? 0)) ?></strong></article><article><span>Depósitos</span><strong><?= e(report_value($companyCapture['summary']['depositos'] ?? 0, 'money')) ?></strong></article><article><span>Retiros</span><strong><?= e(report_value($companyCapture['summary']['retiros'] ?? 0, 'money')) ?></strong></article><article><span>Fecha de captura</span><strong><?= e(trim((string) ($companyCapture['fecha'] . ' ' . $companyCapture['hora']))) ?></strong></article></div>
-            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Contenido importado</p><h2>Archivo bancario original</h2><p class="panel-copy"><?php if ((int) $companyCapture['captura_longitud'] > 50000): ?>Vista limitada a los primeros 50,000 caracteres de <?= number_format((int) $companyCapture['captura_longitud']) ?>.<?php else: ?>Contenido completo almacenado por el sistema legado.<?php endif; ?></p></div><a class="button" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Volver</a></div><pre class="capture-raw"><?= e($companyCapture['captura']) ?></pre></section>
-            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Desglose</p><h2>Movimientos de la captura</h2></div></div><div class="table-wrap"><table class="movement-table"><thead><tr><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Tipo</th></tr></thead><tbody><?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr><td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e($row['fecha'] ?: $row['fecha_sistema']) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary movement-description-text"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?= e($row['tipo_movimiento'] ?: '—') ?></td></tr><?php endforeach; ?><?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">La captura no contiene movimientos desglosados.</td></tr><?php endif; ?></tbody></table></div><div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div></section>
+            <div class="company-summary-grid capture-summary"><article><span>Movimientos</span><strong><?= number_format((int) ($companyCapture['summary']['movimientos'] ?? 0)) ?></strong></article><article><span>Depósitos</span><strong><?= e(report_value($companyCapture['summary']['depositos'] ?? 0, 'money')) ?></strong></article><article><span>Retiros</span><strong><?= e(report_value($companyCapture['summary']['retiros'] ?? 0, 'money')) ?></strong></article><article><span>Fecha de captura</span><strong><?= e(display_date(trim((string) ($companyCapture['fecha'] . ' ' . $companyCapture['hora'])), true)) ?></strong></article></div>
+            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Contenido importado</p><h2>Archivo bancario original</h2><p class="panel-copy"><?php if ((int) $companyCapture['captura_longitud'] > 50000): ?>Vista limitada a los primeros 50,000 caracteres de <?= number_format((int) $companyCapture['captura_longitud']) ?>.<?php else: ?>Contenido completo almacenado en la captura.<?php endif; ?></p></div><a class="button" href="?companies=captures&amp;id=<?= e($companyData['id']) ?>">Volver</a></div><pre class="capture-raw"><?= e($companyCapture['captura']) ?></pre></section>
+            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Desglose</p><h2>Movimientos de la captura</h2></div></div><div class="table-wrap"><table class="movement-table"><thead><tr><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Tipo</th></tr></thead><tbody><?php foreach ($companyResult['rows'] ?? [] as $row): ?><tr><td><span class="movement-cell-main">#<?= e($row['id']) ?></span><?php if ($row['pago_id']): ?><span class="movement-cell-secondary">Pago #<?= e($row['pago_id']) ?></span><?php endif; ?></td><td><?= e(display_date($row['fecha'] ?: $row['fecha_sistema'], true)) ?></td><td><span class="movement-cell-main"><?= e($row['referencia'] ?: 'Sin referencia') ?></span><span class="movement-cell-secondary movement-description-text"><?= e($row['descripcion'] ?: $row['descrip_det']) ?></span></td><td><?= e(report_value($row['deposito'], 'money')) ?></td><td><?= e(report_value($row['retiro'], 'money')) ?></td><td><?= e(report_value($row['saldo'], 'money')) ?></td><td><?= e($row['tipo_movimiento'] ?: '—') ?></td></tr><?php endforeach; ?><?php if (($companyResult['rows'] ?? []) === []): ?><tr><td colspan="7" class="empty">La captura no contiene movimientos desglosados.</td></tr><?php endif; ?></tbody></table></div><div class="pagination"><?php if (($companyResult['page'] ?? 1) > 1): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><span>Página <?= e($companyResult['page'] ?? 1) ?></span><?php if ($companyResult['hasNext'] ?? false): ?><a class="button" href="?<?= e(http_build_query($capturePageQuery + ['page' => $companyResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div></section>
         <?php endif; ?>
     <?php elseif ($complementModule): ?>
         <?php if ($complementView === 'create'): ?>
@@ -1150,7 +1150,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     <?php elseif ($invoiceModule): ?>
         <?php if ($invoiceView === 'create'): ?>
             <?php $invoiceData = invoice_repository()->formData(); $invoiceInitialCompanyId = (int) ($invoicePaymentPrefill['company_id'] ?? 0); $invoiceInitialClientId = (int) ($invoicePaymentPrefill['client_id'] ?? 0); $invoiceInitialReceiverId = (int) ($invoicePaymentPrefill['receiver_id'] ?? 0); ?>
-            <section class="report-intro"><p>Genera la factura usando los mismos catálogos de empresas, clientes, razones sociales, conceptos y claves fiscales del sistema anterior.</p><span class="operation-badge">Guardado transaccional</span></section>
+            <section class="report-intro"><p>Genera facturas con los catálogos de empresas, clientes, razones sociales, conceptos y claves fiscales de Sistema 14.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="invoiceForm" data-confirm="¿Guardar esta factura y todos sus conceptos?" data-confirm-title="Confirmar factura"<?= $invoicePaymentPrefill ? ' data-prefill-receiver="' . e($invoiceInitialReceiverId) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_create">
                 <section class="panel invoice-form-panel">
@@ -1259,7 +1259,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                     <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
                                     <a data-record-action data-action-label="Ver PDF" data-action-icon="▧" href="?document=invoice_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">Ver PDF</a>
                                     <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/gateWayFactura.php?factura=<?= e($row['id']) ?>" target="_blank" rel="noopener">XML</a>
-                                    <form method="post" data-confirm="¿Reenviar al correo principal del cliente el PDF moderno y el XML timbrado?" data-confirm-title="Reenviar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
+                                    <form method="post" data-confirm="¿Reenviar al correo principal del cliente el PDF y el XML timbrado?" data-confirm-title="Reenviar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
                                 <?php endif; ?>
                                 <button type="button" data-record-action data-action-label="Enviar a correo" data-action-icon="mail" data-invoice-email-trigger data-invoice-id="<?= e($row['id']) ?>" data-invoice-folio="<?= e(trim((string) (($row['serie'] ?? '') . ($row['folio'] ?? ''))) ?: ('#' . $row['id'])) ?>" data-invoice-email="<?= e($row['cliente_correo'] ?? '') ?>">Enviar a correo</button>
                             </div>
@@ -1529,13 +1529,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                 $searchColumnConfig = is_array($searchColumn) ? $searchColumn : [];
                                 $searchColumnRaw = $row[$searchColumnKey] ?? '';
                                 $visibleMovementSearchValues[] = (string) $searchColumnRaw;
-                                $visibleMovementSearchValues[] = report_value($searchColumnRaw, $searchColumnConfig['format'] ?? 'text');
+                                $visibleMovementSearchValues[] = display_field_value((string) $searchColumnKey, $searchColumnRaw, $searchColumnConfig['format'] ?? 'text');
                                 if (is_array($searchColumn)) {
                                     foreach ((array) ($searchColumn['secondary'] ?? []) as $searchSecondaryKey => $searchSecondaryLabel) {
                                         $searchSecondaryKey = is_int($searchSecondaryKey) ? (string) $searchSecondaryLabel : (string) $searchSecondaryKey;
                                         $searchSecondaryRaw = $row[$searchSecondaryKey] ?? '';
                                         $visibleMovementSearchValues[] = (string) $searchSecondaryRaw;
-                                        $visibleMovementSearchValues[] = report_value(
+                                        $visibleMovementSearchValues[] = display_field_value(
+                                            $searchSecondaryKey,
                                             $searchSecondaryRaw,
                                             ((array) ($searchColumn['secondaryFormat'] ?? []))[$searchSecondaryKey] ?? 'text'
                                         );
@@ -1552,14 +1553,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                 $format = $columnConfig['format'] ?? 'text';
                                 $secondaryColumns = (array) ($columnConfig['secondary'] ?? []);
                                 $secondaryFormats = (array) ($columnConfig['secondaryFormat'] ?? []);
-                                $titleParts = [report_value($row[$columnKey] ?? null, $format)];
+                                $titleParts = [display_field_value((string) $columnKey, $row[$columnKey] ?? null, $format)];
                                 foreach ($secondaryColumns as $secondaryKey => $secondaryLabel) {
                                     if (is_int($secondaryKey)) {
                                         $secondaryKey = (string) $secondaryLabel;
                                         $secondaryLabel = '';
                                     }
                                     if (($row[$secondaryKey] ?? null) !== null && ($row[$secondaryKey] ?? '') !== '') {
-                                        $secondaryValue = report_value($row[$secondaryKey], $secondaryFormats[$secondaryKey] ?? 'text');
+                                        $secondaryValue = display_field_value((string) $secondaryKey, $row[$secondaryKey], $secondaryFormats[$secondaryKey] ?? 'text');
                                         $titleParts[] = ($secondaryLabel !== '' ? $secondaryLabel . ': ' : '') . $secondaryValue;
                                     }
                                 }
@@ -1569,7 +1570,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                     <?php if ($columnKey === 'cep' && filter_var($row[$columnKey] ?? '', FILTER_VALIDATE_URL)): ?>
                                         <a href="<?= e($row[$columnKey]) ?>" target="_blank" rel="noopener">Abrir comprobante</a>
                                     <?php else: ?>
-                                        <?= e(report_value($row[$columnKey] ?? null, $format)) ?>
+                                        <?= e(display_field_value((string) $columnKey, $row[$columnKey] ?? null, $format)) ?>
                                     <?php endif; ?>
                                     </span>
                                     <?php foreach ($secondaryColumns as $secondaryKey => $secondaryLabel): ?>
@@ -1585,7 +1586,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                         ?>
                                         <span class="movement-cell-secondary<?= in_array($secondaryKey, ['detalles', 'detalle', 'descripcion', 'descripcion_detallada'], true) ? ' movement-detail-text' : '' ?>">
                                             <?php if ($secondaryLabel !== ''): ?><b><?= e($secondaryLabel) ?>:</b><?php endif; ?>
-                                            <?= e(report_value($secondaryRaw, $secondaryFormats[$secondaryKey] ?? 'text')) ?>
+                                            <?= e(display_field_value((string) $secondaryKey, $secondaryRaw, $secondaryFormats[$secondaryKey] ?? 'text')) ?>
                                         </span>
                                     <?php endforeach; ?>
                                 </td>
@@ -1688,7 +1689,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         ?>
         <section class="report-intro statistics-intro">
             <p><?= e($statistic['description']) ?></p>
-            <span class="operation-badge">Datos al <?= e(date('d/m/Y')) ?></span>
+            <span class="operation-badge">Datos al <?= e(display_date(date('Y-m-d'))) ?></span>
         </section>
         <section class="panel statistics-filter-panel">
             <form method="get" class="statistics-filters">
@@ -1749,7 +1750,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </section>
             <?php else: ?>
                 <section class="panel statistics-chart-panel statistics-chart-main">
-                    <div class="panel-heading"><div><p class="eyebrow">Periodo <?= e($statFrom) ?> a <?= e($statTo) ?></p><h2><?= e($statistic['label']) ?></h2></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Periodo <?= e(display_date($statFrom)) ?> a <?= e(display_date($statTo)) ?></p><h2><?= e($statistic['label']) ?></h2></div></div>
                     <?php $renderStatisticChart($statisticsResult, 'statisticsChartMain'); ?>
                 </section>
             <?php endif; ?>
@@ -1789,7 +1790,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <tr class="<?= ($row['estado'] ?? '') === 'Fuera de rango' ? 'row-warning' : '' ?>">
                             <?php foreach ($report['columns'] as $columnKey => $column): ?>
                                 <?php $format = is_array($column) ? ($column['format'] ?? 'text') : 'text'; ?>
-                                <td><?= e(report_value($row[$columnKey] ?? null, $format)) ?></td>
+                                <td><?= e(display_field_value((string) $columnKey, $row[$columnKey] ?? null, $format)) ?></td>
                             <?php endforeach; ?>
                         </tr>
                     <?php endforeach; ?>
@@ -1889,7 +1890,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <section class="panel wallet-panel">
             <div class="panel-heading wallet-heading">
                 <span class="wallet-heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4V7Zm4 0V4h8v3M8 12h8"/></svg></span>
-                <div><p class="eyebrow">Panel anterior renovado</p><h2>Carteras de clientes</h2><p class="panel-copy">Saldos, movimientos, cheques y facturas pendientes con la información calculada por el sistema.</p></div>
+                <div><p class="eyebrow">Operación financiera</p><h2>Carteras de clientes</h2><p class="panel-copy">Saldos, movimientos, cheques y facturas pendientes con la información calculada por el sistema.</p></div>
             </div>
             <div class="wallet-toolbar">
                 <div class="wallet-filters" role="group" aria-label="Filtrar carteras de esta página">
@@ -1918,7 +1919,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6"/></svg>Cheques pendientes</dt><dd><?= number_format((int) $wallet['cheques_pend']) ?> · <?= e(report_value($wallet['cheques_pend_dinero'], 'money')) ?></dd></div>
                             <div><dt><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h4"/></svg>Facturas sin pago</dt><dd><?= number_format((int) $wallet['facturas_sin_pago']) ?></dd></div>
                         </dl>
-                        <footer><small><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5V5Zm3-2v4m8-4v4M5 9h14"/></svg><span data-wallet-updated>Actualizado <?= e($wallet['ultima_act'] ?: 'sin fecha') ?></span></small><a href="?movement=cartera&amp;client=<?= e($wallet['id']) ?>">Ver movimientos <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg></a></footer>
+                        <footer><small><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v15H5V5Zm3-2v4m8-4v4M5 9h14"/></svg><span data-wallet-updated>Actualizado <?= $wallet['ultima_act'] ? e(display_date($wallet['ultima_act'], true)) : 'sin fecha' ?></span></small><a href="?movement=cartera&amp;client=<?= e($wallet['id']) ?>">Ver movimientos <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg></a></footer>
                     </article>
                 <?php endforeach; ?>
                 <?php if ($dashboardWallets['rows'] === []): ?><p class="empty wallet-empty">No se encontraron carteras.</p><?php endif; ?>
@@ -2010,7 +2011,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <tbody>
                     <?php foreach ($result['rows'] as $row): ?>
                         <tr>
-                            <?php foreach ($catalog['list'] as $column): ?><td><?= e($row[$column] ?? '') ?></td><?php endforeach; ?>
+                            <?php foreach ($catalog['list'] as $column): ?><td><?= e(display_field_value((string) $column, $row[$column] ?? '')) ?></td><?php endforeach; ?>
                             <td class="actions">
                                 <a href="?catalog=<?= e($key) ?>&amp;action=form&amp;id=<?= e($row['id']) ?>">Editar</a>
                                 <form method="post" data-confirm="¿Eliminar definitivamente este registro?" data-confirm-title="Eliminar registro">
@@ -2068,7 +2069,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <button type="button" data-stamp-treatment="T"><strong>Típico</strong><span>IVA 16%</span></button>
             <button type="button" data-stamp-treatment="T0"><strong>Tasa 0</strong><span>IVA 0%</span></button>
             <button type="button" data-stamp-treatment="SV"><strong>Sin IVA</strong><span>Operación no gravada</span></button>
-            <button type="button" disabled title="El sistema fiscal anterior no implementa este timbrado"><strong>Retención 4%</strong><span>No disponible</span></button>
+            <button type="button" disabled title="Este tratamiento fiscal no está disponible para timbrado"><strong>Retención 4%</strong><span>No disponible</span></button>
         </div>
         <div class="glass-modal-actions"><button type="button" class="button" id="complementStampCancel">Cancelar</button></div>
     </section>
@@ -3172,7 +3173,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             }
             row.appendChild(invoiceCell);
             [
-                [invoice.fecha_timbrado || 'Sin fecha', ''],
+                [invoice.fecha_timbrado ? window.s14DisplayDate(invoice.fecha_timbrado) : 'Sin fecha', ''],
                 [invoiceMoney.format(Number(invoice.total_iva)), 'pending-invoice-money'],
                 [invoiceMoney.format(Number(invoice.pagado)), 'pending-invoice-money'],
                 [invoiceMoney.format(Number(invoice.saldo)), 'pending-invoice-money'],
@@ -3661,7 +3662,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 const row = document.createElement('tr');
                 const cells = [
                     String(index + 1),
-                    [movement.date, movement.time].filter(Boolean).join(' · ') || '—',
+                    movement.date ? window.s14DisplayDate([movement.date, movement.time].filter(Boolean).join(' ')) : '—',
                     description || 'Sin descripción',
                     movement.type || '—',
                     invoiceMoney.format(Number(movement.amount) || 0),
@@ -4049,6 +4050,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     });
 })();
 </script>
+<script src="assets/date-display.js"></script>
 <script src="assets/ui-motion.js"></script>
 <script src="assets/movement-highlights.js"></script>
 <script src="assets/wallet-balance.js"></script>

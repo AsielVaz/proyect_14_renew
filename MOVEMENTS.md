@@ -1,4 +1,4 @@
-# Migración de movimientos
+# Movimientos
 
 La navegación y columnas de las vistas están en `src/Movements.php`. Las consultas, cálculos y operaciones transaccionales están en `src/MovementRepository.php`.
 
@@ -7,7 +7,7 @@ La navegación y columnas de las vistas están en `src/Movements.php`. Las consu
 - Movimientos sin asignar: consulta, selector de cartera buscable por cualquier fragmento del nombre o ID, previsualización de comisiones y asignación conjunta únicamente de los movimientos seleccionados.
 - Movimientos asignados: consulta, desasignación y asociación manual de documentos existentes.
 - Reasignación: reversión de comisiones anteriores y cálculo completo para la cartera nueva.
-- Ingreso de pagos: consulta general equivalente a la pantalla anterior.
+- Log de movimientos: consulta general de pagos y movimientos registrados.
 - Traspasos: creación y eliminación conjunta de la entrada y la salida.
 - Movimientos STP: consulta paginada.
 - Correos manuales: composición con plantilla por empresa, conceptos calculados, edición HTML, adjuntos PDF y revisión final obligatoria.
@@ -30,7 +30,7 @@ Al confirmar, el servidor vuelve a bloquear y validar el pago y el documento den
 
 El módulo aparece dentro de **Movimientos** únicamente para los operadores autorizados (IDs 1, 32 y 82). El flujo separa la generación de la plantilla, la revisión y el envío. La revisión crea un token temporal ligado a destinatarios, asunto, HTML y adjuntos; si algún dato cambia, el servidor rechaza el envío hasta que se vuelva a revisar. El token vence a los 30 minutos y se consume antes de contactar al proveedor, para reducir envíos duplicados.
 
-Las 16 plantillas proporcionadas están integradas en `src/manual-email-templates.php`; el módulo no depende del archivo del sistema anterior. La redacción asistida sólo se utiliza cuando el mensaje principal está vacío y existen conceptos. La configuración externa se toma exclusivamente de variables de entorno:
+Las 16 plantillas proporcionadas están integradas en `src/manual-email-templates.php`. La redacción asistida sólo se utiliza cuando el mensaje principal está vacío y existen conceptos. La configuración externa se toma exclusivamente de variables de entorno:
 
 - `DEEPSEEK_API_KEY` y `DEEPSEEK_MODEL` para redacción asistida.
 - `MANDRILL_API_KEY` para envío.
@@ -66,7 +66,7 @@ Para un depósito `D`, comisión principal `C` y subcomisiones `S1...S4`:
 
 La suma del saldo acreditable y todos los abonos de comisión se valida para conservar el monto original.
 
-Los retiros no generan comisión y se acreditan con signo negativo, igual que en el flujo anterior.
+Los retiros no generan comisión y se acreditan con signo negativo.
 
 ## Desasignación y reasignación
 
@@ -79,7 +79,7 @@ Las nuevas asignaciones guardan una relación exacta entre pago principal y pago
 5. Se registra la operación en auditoría.
 6. Se confirma todo junto; ante cualquier error se revierte todo.
 
-Para asignaciones históricas sin relación explícita, se conserva compatibilidad buscando las comisiones mediante monto, fecha de asignación original, captura y cartera de origen. Esto corrige el problema anterior que sólo intentaba eliminarlas usando la fecha actual.
+Para asignaciones sin relación explícita, las comisiones se localizan mediante monto, fecha de asignación, captura y cartera de origen.
 
 La reasignación ejecuta la desasignación y la nueva asignación dentro de una única transacción.
 
@@ -102,10 +102,10 @@ Las tres tablas auxiliares se crean automáticamente si no existen:
 - `s14_traspaso_links`
 - `s14_movimiento_auditoria`
 
-## Diferencias intencionales respecto al código anterior
+## Reglas de implementación
 
 - Se utilizan PDO y parámetros preparados.
 - No se realizan escrituras parciales: todas las operaciones son atómicas.
 - La desasignación tardía sí elimina las comisiones históricas relacionadas.
 - La eliminación de traspasos no presupone que la salida tenga `ID entrada + 1`.
-- Se registra auditoría local en lugar de depender de funciones externas de correo y notificaciones.
+- Se registra auditoría local para cada operación relevante.

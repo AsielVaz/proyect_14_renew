@@ -173,7 +173,7 @@ function handle_authentication(): void
 
         $email = trim((string) ($_POST['email'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
-        // El sistema legado usa la columna `email` como identificador, pero contiene
+        // La columna `email` funciona como identificador, pero también puede contener
         // cuentas históricas como "usuario@admin" que no son correos RFC válidos.
         $invalidIdentifier = $email === '' || strlen($email) > 254
             || preg_match('/[\x00-\x1F\x7F]/', $email) === 1;

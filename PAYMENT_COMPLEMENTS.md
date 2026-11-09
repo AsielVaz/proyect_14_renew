@@ -1,11 +1,11 @@
 # Complementos de pago
 
-El módulo `?complement=list` replica la captura y consulta de complementos de recepción de pagos del sistema anterior sobre las mismas tablas:
+El módulo `?complement=list` administra la captura y consulta de complementos de recepción de pagos sobre las tablas:
 
 - `facturas_complementos`: encabezado del CFDI tipo P.
 - `facturar_rel_complementos`: documentos relacionados, parcialidad, saldo anterior, importe pagado y saldo insoluto.
 - `facturas`: facturas PPD que pueden recibir el pago.
-- `complementos_folio`: folio interno generado por el proceso fiscal legado, cuando existe.
+- `complementos_folio`: folio interno generado por el proceso fiscal, cuando existe.
 
 ## Flujo
 
@@ -21,19 +21,19 @@ El total del complemento se deriva de la suma de sus documentos relacionados; no
 
 ## Estado fiscal
 
-Los registros nuevos quedan con estado `Pendiente` y sin UUID. El botón **Timbrar** abre la selección explícita del tratamiento fiscal y sólo después envía el complemento al servicio fiscal legado. Antes de hacerlo, el servidor comprueba que el registro exista y continúe sin UUID. Un registro pendiente puede eliminarse junto con sus relaciones; uno timbrado no puede borrarse y debe seguir el proceso de cancelación fiscal correspondiente.
+Los registros capturados quedan con estado `Pendiente` y sin UUID. El botón **Timbrar** abre la selección explícita del tratamiento fiscal y sólo después envía el complemento al servicio fiscal. Antes de hacerlo, el servidor comprueba que el registro exista y continúe sin UUID. Un registro pendiente puede eliminarse junto con sus relaciones; uno timbrado no puede borrarse y debe seguir el proceso de cancelación fiscal correspondiente.
 
-La respuesta del servicio legado puede mezclar el JSON de éxito o el UUID con cálculos, SQL y errores producidos por tareas secundarias como la generación del PDF. El cliente fiscal extrae el resultado útil y considera exitoso el timbrado cuando encuentra `Respuesta: true` o un UUID válido; las respuestas explícitamente negativas sin evidencia fiscal continúan tratándose como error.
+La respuesta del servicio fiscal puede mezclar el JSON de éxito o el UUID con cálculos y mensajes producidos por tareas secundarias como la generación del PDF. El cliente fiscal extrae el resultado útil y considera exitoso el timbrado cuando encuentra `Respuesta: true` o un UUID válido; las respuestas explícitamente negativas sin evidencia fiscal continúan tratándose como error.
 
 Cada fila dispone de menú contextual con clic derecho y botón accesible de acciones. Los pendientes ofrecen timbrado, detalle, PDF y eliminación; los timbrados ofrecen detalle, reenvío, PDF y XML. Las pruebas no ejecutan acciones fiscales ni envíos de correo reales.
 
 La opción **Ver facturas asociadas** abre el detalle del complemento y consulta las relaciones por su ID, por lo que sólo presenta las facturas pagadas mediante ese complemento.
 
-El tratamiento legado se conserva en `facturas_complementos.cadena`:
+El tratamiento fiscal se registra en `facturas_complementos.cadena`:
 
 - `T`: típico, IVA 16%.
 - `T0`: tasa 0%.
 - `SV`: sin IVA.
 - `4`: retención 4%.
 
-El tratamiento `4` se conserva en datos, pero se muestra deshabilitado al timbrar porque el flujo anterior presentaba el botón sin implementar ninguna llamada fiscal para esa opción.
+El tratamiento `4` se conserva en datos, pero se muestra deshabilitado mientras no exista una operación de timbrado autorizada para esa opción.

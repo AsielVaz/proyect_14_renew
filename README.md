@@ -1,6 +1,6 @@
-# Sistema 14 — renovación fase 1
+# Sistema 14
 
-Aplicación autocontenida para PHP 8 que administra los catálogos existentes de la base MariaDB `iohanes_14`. No requiere el proyecto anterior ni el archivo externo `funciones.php`.
+Aplicación oficial en PHP 8 para la administración financiera y operativa de Sistema 14 sobre la base MariaDB `iohanes_14`.
 
 ## Ejecutar
 
@@ -16,9 +16,9 @@ Para producción, usar HTTPS, cambiar `APP_URL`, generar un `APP_KEY` aleatorio 
 
 ## Alcance
 
-- Autenticación con los mismos usuarios y contraseñas legadas, sin modificar datos durante el acceso.
+- Autenticación con los usuarios y contraseñas registrados, sin modificar datos durante el acceso.
 - Segundo factor TOTP únicamente para cuentas que ya tienen configurado el campo `usuarios.2fa`.
-- Inicio de sesión y administración de WebAuthn/Passkeys, reutilizando credenciales PEM compatibles de `usuarios_passkeys` sin depender del sistema anterior.
+- Inicio de sesión y administración de WebAuthn/Passkeys con las credenciales PEM compatibles de `usuarios_passkeys`.
 - Sesiones endurecidas, CSRF, rotación del identificador, vencimiento por inactividad y límite de intentos fuera de MariaDB.
 - Catálogos con listado, búsqueda, paginación, alta, edición y eliminación.
 - Reportes operativos con filtros, paginación y exportación CSV.
@@ -27,12 +27,12 @@ Para producción, usar HTTPS, cambiar `APP_URL`, generar un `APP_KEY` aleatorio 
 - Facturación con consulta, búsqueda, alta transaccional, catálogos fiscales y conceptos dinámicos.
 - Complementos de pago con consulta, detalle, captura de múltiples facturas PPD, cálculo de saldos y guardado transaccional.
 - Panel de empresas con directorio, cuentas activas, saldos, capturas, contenido bancario y movimientos por empresa o cuenta.
-- Panel principal de carteras con saldos, movimientos, cheques y facturas pendientes, usando la misma información calculada del sistema anterior.
+- Panel principal de carteras con saldos, movimientos, cheques y facturas pendientes.
 - Búsqueda general desde cualquier módulo (`Ctrl + K`) sobre pagos, facturas y movimientos de capturas de estados de cuenta, con acceso directo al resultado.
 - Listados con paginación rápida sin ejecutar conteos globales en cada solicitud, pensados para PHP y MariaDB alojados en servicios separados.
 - PDO con parámetros preparados, escape HTML, protección CSRF y encabezados de seguridad del navegador.
 - No modifica el esquema de la base ni copia información.
-- El guardado de facturas y sus conceptos, el timbrado manual y el reenvío están integrados. Las acciones fiscales sólo se ejecutan tras confirmación; la cancelación permanece fuera del sistema renovado porque el módulo legado no tenía una operación funcional que replicar.
+- El guardado de facturas y sus conceptos, el timbrado manual y el reenvío están integrados. Las acciones fiscales sólo se ejecutan tras confirmación; la cancelación se realiza mediante el proceso fiscal autorizado correspondiente.
 
 Antes de usarlo en producción debe crearse un usuario de base de datos con permisos mínimos y retirarse la cuenta `root` de la configuración de la aplicación.
 
@@ -45,7 +45,7 @@ Los estilos están separados en dos niveles:
 
 El HTML carga primero `theme.css` y después `app.css`. Los componentes usan variables semánticas como `--color-primary`, `--color-surface` y `--radius-panel`; por ello un rediseño de paleta no requiere modificar PHP. Se recomienda conservar los nombres de las variables para no romper componentes existentes.
 
-La correspondencia entre cada reporte nuevo, su pantalla anterior y sus métodos de backend está documentada en `REPORTS.md`.
+La definición, filtros y optimizaciones de los reportes están documentados en `REPORTS.md`.
 
 Las reglas transaccionales de asignación, comisiones, desasignación y traspasos están documentadas en `MOVEMENTS.md`. El operador de movimientos se obtiene del usuario autenticado mediante `current_operator_id()`.
 
@@ -53,8 +53,8 @@ La configuración de correos manuales también se detalla en `MOVEMENTS.md`. Sus
 
 El flujo, los catálogos y las reglas de persistencia del módulo de facturación están documentados en `INVOICES.md`.
 
-La equivalencia del flujo legado de complementos de recepción de pagos y sus validaciones está documentada en `PAYMENT_COMPLEMENTS.md`.
+El flujo de complementos de recepción de pagos y sus validaciones está documentado en `PAYMENT_COMPLEMENTS.md`.
 
-La equivalencia del panel legado de empresas, cuentas, capturas y movimientos está documentada en `COMPANIES.md`.
+El panel de empresas, cuentas, capturas y movimientos está documentado en `COMPANIES.md`.
 
 La configuración, compatibilidad y pruebas de las llaves de acceso están documentadas en `WEBAUTHN.md`.

@@ -813,7 +813,7 @@ final class MovementRepository
             $link->execute(['id' => $entryId]);
             $exitId = (int) ($link->fetchColumn() ?: 0);
             if ($exitId === 0) {
-                $legacy = $this->pdo->prepare(
+                $fallback = $this->pdo->prepare(
                     "SELECT id FROM pagos
                      WHERE descripcion = 'Traspaso' AND tipo_movimiento = 'Retiro'
                        AND origen_traspaso <=> :origin AND destino_traspaso <=> :destination
@@ -821,12 +821,12 @@ final class MovementRepository
                        AND ABS(monto + :amount) < 0.00001
                      ORDER BY ABS(id - :entry_id) LIMIT 1 FOR UPDATE"
                 );
-                $legacy->execute([
+                $fallback->execute([
                     'origin' => $entry['origen_traspaso'], 'destination' => $entry['destino_traspaso'],
                     'assigned_at' => $entry['fecha_asignacion'], 'detail' => $entry['detalle'],
                     'amount' => abs((float) $entry['monto']), 'entry_id' => $entryId,
                 ]);
-                $exitId = (int) ($legacy->fetchColumn() ?: 0);
+                $exitId = (int) ($fallback->fetchColumn() ?: 0);
             }
             if ($exitId === 0) {
                 throw new RuntimeException('No se encontró la salida compensatoria; no se eliminó ningún movimiento.');
@@ -951,7 +951,7 @@ final class MovementRepository
         $commissionIds = array_map('intval', $linked->fetchAll(PDO::FETCH_COLUMN));
 
         if ($commissionIds === []) {
-            $legacy = $this->pdo->prepare(
+            $fallback = $this->pdo->prepare(
                 "SELECT id FROM pagos
                  WHERE monto = :amount AND fecha_asignacion <=> :assigned_at
                    AND tipo_movimiento LIKE 'Abono por comisi%'
@@ -960,11 +960,11 @@ final class MovementRepository
                    AND detalle = 'Abono de porcentaje por comision'
                  FOR UPDATE"
             );
-            $legacy->execute([
+            $fallback->execute([
                 'amount' => $payment['monto'], 'assigned_at' => $payment['fecha_asignacion'],
                 'capture_id' => $payment['id_captura'], 'origin_client' => $payment['nombre'],
             ]);
-            $commissionIds = array_map('intval', $legacy->fetchAll(PDO::FETCH_COLUMN));
+            $commissionIds = array_map('intval', $fallback->fetchAll(PDO::FETCH_COLUMN));
         }
 
         if ($commissionIds !== []) {
