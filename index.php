@@ -327,7 +327,10 @@ if ($complementModule && isset($_GET['data'])) {
     try {
         $data = match ((string) $_GET['data']) {
             'receivers' => payment_complement_repository()->receivers((int) ($_GET['client'] ?? 0)),
-            'invoice' => payment_complement_repository()->invoiceByUuid((string) ($_GET['uuid'] ?? '')),
+            'invoice' => payment_complement_repository()->invoiceByUuid(
+                (string) ($_GET['uuid'] ?? ''),
+                (string) ($_GET['lookup_mode'] ?? '') === 'manual' ? (int) ($_GET['company_id'] ?? 0) : 0
+            ),
             'pending_invoices' => payment_complement_repository()->pendingInvoicesForPayment(
                 (int) ($_GET['payment_id'] ?? 0),
                 (int) ($_GET['company_id'] ?? 0),
@@ -1079,7 +1082,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren desde el movimiento, pero puedes cambiarlos. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas pendientes relacionadas con la clave corta seleccionada.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas pendientes relacionadas con la clave corta seleccionada. Si pegas manualmente un UUID, puede pertenecer a otro cliente o razón social, pero siempre debe corresponder a la empresa emisora elegida.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
                     <?php if ($paymentComplementContext): ?>
                         <section class="pending-invoices-panel" id="pendingInvoicesPanel" aria-labelledby="pendingInvoicesTitle" tabindex="-1" hidden>
                             <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes de la clave corta</h3><span id="pendingInvoicesSummary">Consulta las facturas PPD relacionadas con la clave seleccionada.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
@@ -3060,6 +3063,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const resetComplementLine = (row) => {
         row.dataset.validated = 'false';
         row.dataset.balance = '0';
+        row.dataset.lookupMode = 'strict';
+        const manualToken = row.querySelector('[name="invoice_manual_token[]"]');
+        if (manualToken) manualToken.value = '';
         row.querySelector('[data-complement-invoice]').textContent = 'UUID pendiente de consulta';
         row.querySelector('[data-complement-balance]').textContent = '—';
         row.querySelector('[data-complement-remaining]').textContent = '—';
@@ -3071,6 +3077,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     const lookupComplementInvoice = async (row) => {
         const uuidInput = row.querySelector('[name="invoice_uuid[]"]');
+        const manualToken = row.querySelector('[name="invoice_manual_token[]"]');
         const button = row.querySelector('[data-complement-lookup]');
         const uuid = uuidInput.value.trim();
         if (!uuid || !complementClient.value || !complementCompany.value || !complementReceiver.value) {
@@ -3080,21 +3087,38 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         button.disabled = true;
         button.textContent = 'Consultando…';
         try {
-            const response = await fetch(`?complement=create&data=invoice&uuid=${encodeURIComponent(uuid)}`, {headers: {'Accept': 'application/json'}});
+            const lookupUrl = new URL(window.location.href);
+            lookupUrl.search = '';
+            lookupUrl.searchParams.set('complement', 'create');
+            lookupUrl.searchParams.set('data', 'invoice');
+            lookupUrl.searchParams.set('uuid', uuid);
+            if (row.dataset.lookupMode === 'manual') {
+                lookupUrl.searchParams.set('lookup_mode', 'manual');
+                lookupUrl.searchParams.set('company_id', complementCompany.value);
+            }
+            const response = await fetch(lookupUrl, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
             const result = await response.json();
             if (!response.ok || !result.ok || !result.data) throw new Error('No se encontró una factura con ese UUID.');
             const invoice = result.data;
             if (Number(invoice.metodo_pago) !== 2) throw new Error('La factura encontrada no usa el método PPD.');
-            if (String(invoice.client_id) !== complementClient.value || String(invoice.company_id) !== complementCompany.value || String(invoice.receiver_id) !== complementReceiver.value) {
-                throw new Error('La factura no corresponde al cliente, emisor y razón social seleccionados.');
+            if (String(invoice.company_id) !== complementCompany.value) {
+                throw new Error('La factura no corresponde a la empresa emisora seleccionada.');
+            }
+            const manualPaste = row.dataset.lookupMode === 'manual';
+            if (!manualPaste && (String(invoice.client_id) !== complementClient.value || String(invoice.receiver_id) !== complementReceiver.value)) {
+                throw new Error('La factura no corresponde al cliente y razón social seleccionados.');
+            }
+            if (manualPaste && !invoice.manual_lookup_token) {
+                throw new Error('No fue posible autorizar la relación manual por UUID. Pégalo nuevamente.');
             }
             if (Number(invoice.saldo) <= 0) throw new Error('La factura ya no tiene saldo pendiente.');
             const duplicate = Array.from(complementLines.querySelectorAll('[name="invoice_uuid[]"]')).some((item) => item !== uuidInput && item.value.trim().toUpperCase() === String(invoice.uuid).toUpperCase());
             if (duplicate) throw new Error('Esta factura ya fue agregada al complemento.');
             uuidInput.value = invoice.uuid;
+            manualToken.value = manualPaste ? invoice.manual_lookup_token : '';
             row.dataset.validated = 'true';
             row.dataset.balance = String(invoice.saldo);
-            row.querySelector('[data-complement-invoice]').textContent = `#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente}`;
+            row.querySelector('[data-complement-invoice]').textContent = `${manualPaste ? 'UUID pegado · empresa verificada · ' : ''}#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente}`;
             row.querySelector('[data-complement-balance]').textContent = invoiceMoney.format(Number(invoice.saldo));
             const amount = row.querySelector('[name="amount[]"]');
             amount.disabled = false;
@@ -3124,9 +3148,16 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         row.dataset.complementLine = 'true';
         row.dataset.validated = 'false';
         row.dataset.balance = '0';
-        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal" required><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="number" name="amount[]" min="0.01" step="0.01" required disabled></td><td><input type="number" name="installment[]" min="1" step="1" value="1" required></td><td data-complement-remaining>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
+        row.dataset.lookupMode = 'strict';
+        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal" required><input type="hidden" name="invoice_manual_token[]" value=""><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="number" name="amount[]" min="0.01" step="0.01" required disabled></td><td><input type="number" name="installment[]" min="1" step="1" value="1" required></td><td data-complement-remaining>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
         const uuid = row.querySelector('[name="invoice_uuid[]"]');
-        uuid.addEventListener('input', () => resetComplementLine(row));
+        uuid.addEventListener('paste', () => { row.dataset.pendingManualPaste = 'true'; });
+        uuid.addEventListener('input', (event) => {
+            const pasted = event.inputType === 'insertFromPaste' || row.dataset.pendingManualPaste === 'true';
+            delete row.dataset.pendingManualPaste;
+            resetComplementLine(row);
+            row.dataset.lookupMode = pasted ? 'manual' : 'strict';
+        });
         row.querySelector('[data-complement-lookup]').addEventListener('click', () => lookupComplementInvoice(row));
         row.querySelector('[name="amount[]"]').addEventListener('input', recalculateComplement);
         row.querySelector('[data-complement-remove]').addEventListener('click', () => {

@@ -12,8 +12,10 @@ El módulo `?complement=list` administra la captura y consulta de complementos d
 1. Se seleccionan empresa emisora, cliente, razón social, forma y fecha del pago.
 2. Cada factura se consulta por UUID. La pantalla muestra su saldo actual y propone la siguiente parcialidad.
 3. Al guardar se vuelven a consultar y bloquear las facturas dentro de una transacción.
-4. Se valida que sean PPD, pertenezcan al mismo emisor y receptor, no estén repetidas y que ningún importe exceda el saldo.
+4. Se valida que sean PPD, pertenezcan al mismo emisor, no estén repetidas y que ningún importe exceda el saldo. Cliente y receptor también deben coincidir salvo en la excepción autorizada para un UUID pegado manualmente.
 5. El encabezado y todas sus relaciones se insertan atómicamente usando `lastInsertId()`.
+
+Cuando una factura se agrega desde el buscador de pendientes, debe coincidir con empresa, cliente y clave corta del encabezado. Si el operador **pega manualmente el UUID** en una partida, se permite que la factura pertenezca a otro cliente o razón social, pero la empresa emisora debe coincidir. La consulta manual genera una autorización firmada, ligada al operador, factura y empresa durante diez minutos; el servidor vuelve a comprobarla al guardar, además de validar PPD, saldo, parcialidad e importe.
 
 El alta también puede iniciarse desde el menú contextual de una factura PPD. En ese flujo se valida la factura por su ID en el servidor, se bloquean emisor, cliente y clave corta, y se precarga el UUID con el saldo pendiente completo y la siguiente parcialidad.
 

@@ -88,13 +88,21 @@ final class PaymentComplementRepository
         return $query->fetchAll();
     }
 
-    public function invoiceByUuid(string $uuid): ?array
+    public function invoiceByUuid(string $uuid, int $manualCompanyId = 0): ?array
     {
         $uuid = strtoupper(trim($uuid));
         if ($uuid === '') {
             return null;
         }
-        return $this->findInvoice('UPPER(f.uuid) = :value', $uuid);
+        $invoice = $this->findInvoice('UPPER(f.uuid) = :value', $uuid);
+        if (!$invoice || $manualCompanyId <= 0) {
+            return $invoice;
+        }
+        if ((int) $invoice['company_id'] !== $manualCompanyId) {
+            throw new RuntimeException('La factura pegada no pertenece a la empresa emisora seleccionada.');
+        }
+        $invoice['manual_lookup_token'] = $this->manualLookupToken($invoice, $manualCompanyId);
+        return $invoice;
     }
 
     public function invoiceById(int $id): ?array
@@ -290,6 +298,7 @@ final class PaymentComplementRepository
         $uuids = (array) ($input['invoice_uuid'] ?? []);
         $amounts = (array) ($input['amount'] ?? []);
         $installments = (array) ($input['installment'] ?? []);
+        $manualLookupTokens = (array) ($input['invoice_manual_token'] ?? []);
         $sourceInvoiceId = (int) ($input['source_invoice_id'] ?? 0);
 
         if ($clientId <= 0 || $receiverId <= 0 || $companyId <= 0 || $formId <= 0) {
@@ -378,9 +387,17 @@ final class PaymentComplementRepository
                 if ((int) $invoice['metodo_pago'] !== 2) {
                     throw new RuntimeException('La factura ' . $uuid . ' no usa el método PPD.');
                 }
-                if ((int) $invoice['nombre'] !== $clientId || (int) $invoice['razon'] !== $companyId
-                    || (int) $invoice['id_clave_corta'] !== $receiverId) {
-                    throw new RuntimeException('La factura ' . $uuid . ' no corresponde al cliente, emisor y razón social seleccionados.');
+                if ((int) $invoice['razon'] !== $companyId) {
+                    throw new RuntimeException('La factura ' . $uuid . ' no corresponde a la empresa emisora seleccionada.');
+                }
+                $manualLookupAuthorized = $this->validManualLookupToken(
+                    (string) ($manualLookupTokens[$index] ?? ''),
+                    $invoice,
+                    $companyId
+                );
+                if (!$manualLookupAuthorized
+                    && ((int) $invoice['nombre'] !== $clientId || (int) $invoice['id_clave_corta'] !== $receiverId)) {
+                    throw new RuntimeException('La factura ' . $uuid . ' no corresponde al cliente y razón social seleccionados. Pega nuevamente el UUID para relacionarla sólo por empresa.');
                 }
                 $paidQuery->execute(['invoice' => $invoice['id']]);
                 $paid = round((float) $paidQuery->fetchColumn(), 2);
@@ -493,6 +510,48 @@ final class PaymentComplementRepository
         if (!$query->fetchColumn()) {
             throw new RuntimeException('Selecciona un valor válido para ' . $label . '.');
         }
+    }
+
+    private function manualLookupToken(array $invoice, int $companyId): string
+    {
+        $payload = json_encode([
+            'invoice' => (int) ($invoice['id'] ?? 0),
+            'uuid' => strtoupper(trim((string) ($invoice['uuid'] ?? ''))),
+            'company' => $companyId,
+            'operator' => \current_operator_id(),
+            'expires' => time() + 600,
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $encoded = rtrim(strtr(base64_encode($payload), '+/', '-_'), '=');
+        $signature = hash_hmac('sha256', $encoded, \env_value('APP_KEY'));
+        return $encoded . '.' . $signature;
+    }
+
+    private function validManualLookupToken(string $token, array $invoice, int $companyId): bool
+    {
+        $parts = explode('.', trim($token), 2);
+        if (count($parts) !== 2 || !hash_equals(
+            hash_hmac('sha256', $parts[0], \env_value('APP_KEY')),
+            $parts[1]
+        )) {
+            return false;
+        }
+        $padding = (4 - strlen($parts[0]) % 4) % 4;
+        $decoded = base64_decode(strtr($parts[0] . str_repeat('=', $padding), '-_', '+/'), true);
+        if ($decoded === false) {
+            return false;
+        }
+        try {
+            $payload = json_decode($decoded, true, 8, JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            return false;
+        }
+        return is_array($payload)
+            && (int) ($payload['invoice'] ?? 0) === (int) ($invoice['id'] ?? 0)
+            && hash_equals((string) ($payload['uuid'] ?? ''), strtoupper(trim((string) ($invoice['uuid'] ?? ''))))
+            && (int) ($payload['company'] ?? 0) === $companyId
+            && (int) ($payload['company'] ?? 0) === (int) ($invoice['razon'] ?? $invoice['company_id'] ?? 0)
+            && (int) ($payload['operator'] ?? 0) === \current_operator_id()
+            && (int) ($payload['expires'] ?? 0) >= time();
     }
 
     private static function positiveIntegerReference(mixed $value): int
