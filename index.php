@@ -1003,7 +1003,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php elseif ($companyView === 'analyze'): ?>
             <section class="report-intro capture-analysis-breadcrumb"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · Analizar captura bancaria</p><span class="operation-badge"><?= e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) ?></span></section>
             <section class="panel capture-analyzer-panel">
-                <div class="panel-heading capture-analyzer-heading"><span class="capture-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg></span><div><p class="eyebrow">Paso previo a la carga</p><h2>Analizar movimientos</h2><p class="panel-copy">Pega la captura conservando su formato. Se validarán duplicados, claves cortas y comisiones antes de guardar.</p></div><a class="button capture-back-button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Volver al panel</a></div>
+                <div class="panel-heading capture-analyzer-heading"><span class="capture-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h5M9 12h7m-7 4h7"/></svg></span><div><p class="eyebrow">Paso previo a la carga</p><h2>Analizar movimientos</h2><p class="panel-copy">Pega la captura conservando su formato. Se validarán claves cortas y comisiones antes de guardar; todos los renglones se tratarán como movimientos nuevos.</p></div><a class="button capture-back-button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Volver al panel</a></div>
                 <form id="captureAnalyzer" class="capture-analyzer" data-parser-url="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;data=parse" data-loader-url="?companies=analyze&amp;id=<?= e($companyData['id']) ?>&amp;data=load" data-company-id="<?= e($companyData['id']) ?>" data-account-id="<?= e($companyResult['account']['id']) ?>">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <label class="field capture-input-field"><span>Contenido de la captura *</span><div id="captureEditor" class="capture-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-describedby="captureEditorHelp" data-placeholder="Pega aquí la tabla o captura copiada desde el portal bancario…"></div><small id="captureEditorHelp">Puedes pegar una tabla HTML o contenido tabulado. Máximo 2 MB y 500 movimientos.</small></label>
@@ -1021,13 +1021,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     </div>
                 </section>
                 <div class="company-summary-grid capture-analysis-summary" id="captureAnalysisSummary"></div>
-                <div class="table-wrap capture-results-table"><table class="movement-table"><thead><tr><th>#</th><th>Fecha</th><th>Descripción / referencia</th><th>Tipo</th><th>Importe</th><th>Duplicado</th><th>Clave corta asociada</th></tr></thead><tbody id="captureAnalysisRows"></tbody></table></div>
+                <div class="table-wrap capture-results-table"><table class="movement-table"><thead><tr><th>#</th><th>Fecha</th><th>Descripción / referencia</th><th>Tipo</th><th>Importe</th><th>Clave corta asociada</th></tr></thead><tbody id="captureAnalysisRows"></tbody></table></div>
                 <section class="capture-commission-summary" id="captureCommissionSummary" hidden>
                     <div class="capture-commission-heading"><div><p class="eyebrow">Proyección automática</p><h3>Resumen de comisiones</h3><span>Se generará únicamente para movimientos nuevos con clave corta identificada.</span></div><strong id="captureCommissionTotal">$0.00</strong></div>
                     <div class="capture-commission-kpis"><div><span>Movimientos asignables</span><strong id="captureCommissionMovements">0</strong></div><div><span>Registros de comisión</span><strong id="captureCommissionCount">0</strong></div></div>
                     <div class="table-wrap"><table class="capture-commission-table"><thead><tr><th>Cartera receptora</th><th>Comisión estimada</th></tr></thead><tbody id="captureCommissionRows"></tbody></table></div>
                 </section>
-                <div class="capture-analysis-note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></svg></span><strong>Revisión previa</strong><span>“Sin clave asociada” no impide cargar el movimiento: se registrará como <b>sin asignar</b>. Los duplicados serán omitidos.</span></div>
+                <div class="capture-analysis-note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10h.01"/></svg></span><strong>Revisión previa</strong><span>“Sin clave asociada” no impide cargar el movimiento: se registrará como <b>sin asignar</b>. Aunque dos renglones sean idénticos, ambos se cargarán.</span></div>
                 <div class="capture-load-actions"><div><strong id="captureLoadTitle">Revisa el resultado antes de cargar</strong><span id="captureLoadStatus">La carga volverá a validar todos los datos en el servidor.</span></div><button type="button" class="button primary" id="loadCaptureMovements" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg><span>Cargar movimientos al sistema</span></button></div>
             </section>
         <?php elseif (in_array($companyView, ['captures', 'movements', 'account'], true)): ?>
@@ -3825,7 +3825,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const analyzeLabel = analyzeCaptureButton.querySelector('span');
         analyzeCaptureButton.disabled = true;
         analyzeLabel.textContent = 'Analizando…';
-        resetCaptureResult('Analizando duplicados, claves cortas y comisiones…');
+        resetCaptureResult('Analizando claves cortas y comisiones…');
         try {
             const parserPayload = new FormData();
             parserPayload.set('csrf_token', captureAnalyzer.querySelector('[name="csrf_token"]').value);
@@ -3853,14 +3853,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     description || 'Sin descripción',
                     movement.type || '—',
                     invoiceMoney.format(Number(movement.amount) || 0),
-                    movement.duplicate ? 'Sí' : 'No',
                     match.associated ? `Sí · ${match.key} · ${match.client}` : 'No · Sin clave asociada',
                 ];
                 cells.forEach((value, cellIndex) => {
                     const cell = document.createElement('td');
                     cell.textContent = value;
                     if (cellIndex === 2) cell.classList.add('movement-description-text');
-                    if (cellIndex === 6) cell.className = match.associated ? 'short-key-found' : 'short-key-missing';
+                    if (cellIndex === 5) cell.className = match.associated ? 'short-key-found' : 'short-key-missing';
                     row.appendChild(cell);
                 });
                 captureRows.appendChild(row);
@@ -3869,9 +3868,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             const newCount = Number(analysis.summary.new) || 0;
             const associated = Number(analysis.summary.with_key) || 0;
             const withoutKey = Number(analysis.summary.without_key) || 0;
-            const duplicateCount = Number(analysis.summary.duplicates) || 0;
             appendCaptureSummary('detected', 'Detectados', movementCount, 'Movimientos leídos');
-            appendCaptureSummary('new', 'Nuevos', newCount, 'No encontrados previamente');
+            appendCaptureSummary('new', 'Por cargar', newCount, 'Todos los renglones detectados');
             appendCaptureSummary('key', 'Con clave corta', associated, 'Asociación encontrada');
             appendCaptureSummary('missing', 'Sin clave corta', withoutKey, 'Se cargarán sin asignar');
             const bankBalance = analysis.bank_balance;
@@ -3902,8 +3900,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 : `Cargar ${newCount} movimientos al sistema`;
             captureLoadTitle.textContent = newCount > 0 ? 'Análisis listo para cargar' : 'No hay movimientos nuevos';
             captureLoadStatus.textContent = newCount > 0
-                ? `${associated} con clave corta; ${withoutKey} sin clave; ${duplicateCount} duplicados serán omitidos.`
-                : 'Todos los movimientos detectados ya existen en el sistema.';
+                ? `${associated} con clave corta; ${withoutKey} sin clave; se cargarán todos, incluso si son idénticos.`
+                : 'No se detectaron movimientos válidos para cargar.';
             captureResult.hidden = false;
             captureResult.scrollIntoView({
                 behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',

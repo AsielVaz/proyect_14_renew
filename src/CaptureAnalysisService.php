@@ -87,29 +87,18 @@ final class CaptureAnalysisService
             throw new RuntimeException('No se detectó una tabla bancaria con columnas de fecha e importe, cargo o abono.');
         }
 
-        $duplicate = $this->pdo->prepare('SELECT id FROM captura_edo_cta
-            WHERE cuenta = :account AND fecha = :date
-            AND ABS(COALESCE(deposito, 0) - :deposit) < 0.005
-            AND ABS(COALESCE(retiro, 0) - :withdrawal) < 0.005
-            AND ABS(COALESCE(saldo, 0) - :balance) < 0.005 LIMIT 1');
         $summary = [
-            'detected' => count($movements), 'new' => 0, 'duplicates' => 0,
+            'detected' => count($movements), 'new' => count($movements),
             'deposits' => 0, 'withdrawals' => 0, 'new_total' => 0.0,
             'with_key' => 0, 'without_key' => 0,
         ];
         foreach ($movements as &$movement) {
-            $duplicate->execute([
-                'account' => $accountId, 'date' => $movement['date'], 'deposit' => $movement['deposit'],
-                'withdrawal' => $movement['withdrawal'], 'balance' => $movement['balance'],
-            ]);
-            $movement['duplicate'] = $duplicate->fetchColumn() !== false;
-            $summary[$movement['duplicate'] ? 'duplicates' : 'new']++;
             if ($movement['type'] === 'Deposito') {
                 $summary['deposits']++;
-                if (!$movement['duplicate']) $summary['new_total'] += $movement['amount'];
+                $summary['new_total'] += $movement['amount'];
             } else {
                 $summary['withdrawals']++;
-                if (!$movement['duplicate']) $summary['new_total'] -= $movement['amount'];
+                $summary['new_total'] -= $movement['amount'];
             }
         }
         unset($movement);
@@ -126,7 +115,7 @@ final class CaptureAnalysisService
             ];
             $movement['short_key'] = $match;
             $summary[$match['associated'] ? 'with_key' : 'without_key']++;
-            if (!$movement['duplicate'] && $match['associated']) {
+            if ($match['associated']) {
                 $commissionMovements[] = [
                     'sourceIndex' => $index,
                     'amount' => $movement['amount'],
@@ -155,9 +144,6 @@ final class CaptureAnalysisService
         $change = 0.0;
         $movementCount = 0;
         foreach ($movements as $movement) {
-            if (($movement['duplicate'] ?? false) === true) {
-                continue;
-            }
             $change += (float) ($movement['deposit'] ?? 0.0);
             $change -= (float) ($movement['withdrawal'] ?? 0.0);
             $movementCount++;
@@ -183,13 +169,7 @@ final class CaptureAnalysisService
             }
 
             $analysis = $this->analyze($companyId, $accountId, $html, $operatorId);
-            $newMovements = array_values(array_filter(
-                $analysis['movements'],
-                static fn (array $movement): bool => !$movement['duplicate']
-            ));
-            if ($newMovements === []) {
-                throw new RuntimeException('Todos los movimientos detectados ya existen. No se cargó información duplicada.');
-            }
+            $newMovements = $analysis['movements'];
 
             $now = new \DateTimeImmutable();
             $captureInsert = $this->pdo->prepare('INSERT INTO captura
@@ -321,7 +301,6 @@ final class CaptureAnalysisService
             return [
                 'captureId' => $captureId,
                 'loaded' => count($newMovements),
-                'duplicatesSkipped' => (int) $analysis['summary']['duplicates'],
                 'assigned' => $assigned,
                 'unassigned' => $unassigned,
                 'commissions' => $commissions,
