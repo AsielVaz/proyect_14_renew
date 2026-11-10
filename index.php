@@ -994,6 +994,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </section>
             <section class="panel capture-analysis-result" id="captureAnalysisResult" aria-live="polite" hidden>
                 <div class="panel-heading capture-result-heading"><span class="capture-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10h3v10H5Zm6 0V4h3v16h-3Zm6 0v-7h3v7h-3Z"/></svg></span><div><p class="eyebrow">Resultado del análisis</p><h2>Movimientos detectados</h2><p class="panel-copy" id="captureAnalysisMessage"></p></div></div>
+                <section class="capture-bank-balance" id="captureBankBalance" aria-labelledby="captureBankBalanceTitle" hidden>
+                    <div class="capture-bank-balance-heading"><p class="eyebrow">Proyección del saldo de la cuenta</p><h3 id="captureBankBalanceTitle">Antes y después de cargar</h3></div>
+                    <div class="capture-bank-balance-grid">
+                        <article><span>Saldo anterior a la captura</span><strong id="captureBankBalanceBefore">$0.00</strong><small id="captureBankBalanceBeforeDetail">Saldo registrado antes de cargar</small></article>
+                        <span class="capture-bank-balance-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></span>
+                        <article class="is-after"><span>Saldo posterior a la captura</span><strong id="captureBankBalanceAfter">$0.00</strong><small id="captureBankBalanceChange">Después de sumar depósitos y restar retiros</small></article>
+                    </div>
+                </section>
                 <div class="company-summary-grid capture-analysis-summary" id="captureAnalysisSummary"></div>
                 <div class="table-wrap capture-results-table"><table class="movement-table"><thead><tr><th>#</th><th>Fecha</th><th>Descripción / referencia</th><th>Tipo</th><th>Importe</th><th>Duplicado</th><th>Clave corta asociada</th></tr></thead><tbody id="captureAnalysisRows"></tbody></table></div>
                 <section class="capture-commission-summary" id="captureCommissionSummary" hidden>
@@ -1335,6 +1343,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         }
         $movementClientId = filter_input(INPUT_GET, 'client', FILTER_VALIDATE_INT) ?: null;
         $movementClient = $movementClientId ? movement_repository()->client($movementClientId) : null;
+        $movementHasVisibleSearch = in_array($movementKey, ['sin-asignar', 'asignados'], true);
         $isTransferForm = $movementAction === 'transfer' && $action === 'form';
         $isDocumentAssignment = $movementKey === 'asignados'
             && $action === 'assign-document'
@@ -1451,17 +1460,17 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php endif; ?>
             <div class="panel-heading list-tools">
                 <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementSupportsFullPagination ? (int) $movementResult['total'] : count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy"><?= $movementSupportsFullPagination ? 'Total de resultados encontrados' : 'Resultados de la página actual' ?></p></div>
-                <form method="get" class="search"<?= $movementKey === 'sin-asignar' ? ' data-visible-movement-search' : '' ?>>
+                <form method="get" class="search"<?= $movementHasVisibleSearch ? ' data-visible-movement-search' : '' ?>>
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
-                    <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar movimientos…"<?= $movementKey === 'sin-asignar' ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>>
+                    <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type"><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes. Sin selección se muestran todos.</small></fieldset><?php endif; ?>
                     <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
                     <button class="button" type="submit">Buscar</button>
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
-                    <?php if ($movementKey === 'sin-asignar'): ?><small class="movement-visible-search-status" id="visibleMovementSearchStatus" data-visible-movement-status aria-live="polite"><?= number_format(count($movementResult['rows'])) ?> registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.</small><?php endif; ?>
+                    <?php if ($movementHasVisibleSearch): ?><small class="movement-visible-search-status" id="visibleMovementSearchStatus" data-visible-movement-status aria-live="polite"><?= number_format(count($movementResult['rows'])) ?> registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.</small><?php endif; ?>
                 </form>
             </div>
             <?php if ($movementAction === 'assign' && $movementResult['rows'] !== []): ?>
@@ -1474,9 +1483,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
             <?php endif; ?>
             <div class="table-wrap">
-                <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>"<?= $movementKey === 'sin-asignar' ? ' data-visible-movement-table' : '' ?>>
+                <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>"<?= $movementHasVisibleSearch ? ' data-visible-movement-table' : '' ?>>
                     <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction || $hasMovementContextActions): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
-                    <tbody<?= $movementKey === 'sin-asignar' ? ' data-visible-movement-body' : '' ?>>
+                    <tbody<?= $movementHasVisibleSearch ? ' data-visible-movement-body' : '' ?>>
                     <?php foreach ($movementResult['rows'] as $row): ?>
                         <?php
                         $isWithdrawalMovement = strcasecmp(
@@ -1526,7 +1535,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                 || $hasMovementCreationActions); ?>
                         <?php
                         $visibleMovementSearchText = '';
-                        if ($movementKey === 'sin-asignar') {
+                        if ($movementHasVisibleSearch) {
                             $visibleMovementSearchValues = [];
                             foreach ($movement['columns'] as $searchColumnKey => $searchColumn) {
                                 $searchColumnConfig = is_array($searchColumn) ? $searchColumn : [];
@@ -1549,7 +1558,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             $visibleMovementSearchText = implode(' ', $visibleMovementSearchValues);
                         }
                         ?>
-                        <tr<?= $hasMovementContextMenu ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?><?= $movementKey === 'sin-asignar' ? ' data-visible-search-row data-visible-search-text="' . e($visibleMovementSearchText) . '"' : '' ?>>
+                        <tr<?= $hasMovementContextMenu ? ' data-record-row' : '' ?><?= $movementAction === 'assign' ? ' data-assignment-row' : '' ?><?= $movementHasVisibleSearch ? ' data-visible-search-row data-visible-search-text="' . e($visibleMovementSearchText) . '"' : '' ?>>
                             <?php foreach ($movement['columns'] as $columnKey => $column): ?>
                                 <?php
                                 $columnConfig = is_array($column) ? $column : [];
@@ -1635,7 +1644,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($movementResult['rows'] === []): ?><tr><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">No hay movimientos para mostrar.</td></tr><?php endif; ?>
-                    <?php if ($movementKey === 'sin-asignar' && $movementResult['rows'] !== []): ?><tr class="movement-visible-search-empty" data-visible-search-empty hidden><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">Ningún registro visible coincide. Presiona Enter para buscar en todo el historial.</td></tr><?php endif; ?>
+                    <?php if ($movementHasVisibleSearch && $movementResult['rows'] !== []): ?><tr class="movement-visible-search-empty" data-visible-search-empty hidden><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">Ningún registro visible coincide. Presiona Enter para buscar en todo el historial.</td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -1828,6 +1837,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <article class="summary-card summary-card-primary">
                 <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 11v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg></span>
                 <div><span>Saldos internos</span><strong><?= e(report_value($dashboardOverview['internalBalance'], 'money')) ?></strong><small>Cartera interna #13</small></div>
+            </article>
+            <article class="summary-card summary-card-stp">
+                <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h16M6 10v8m4-8v8m4-8v8m4-8v8M3 18h18M12 3l9 5H3l9-5Z"/></svg></span>
+                <div><span>Saldo STP Umbrella</span><strong><?= e(report_value($dashboardOverview['stpUmbrellaBalance'], 'money')) ?></strong><small><?= !empty($dashboardOverview['stpUmbrellaUpdatedAt']) ? 'Actualizado ' . e(display_date($dashboardOverview['stpUmbrellaUpdatedAt'], true)) : 'Sin actualización registrada' ?></small></div>
             </article>
             <a class="summary-card summary-card-link" href="?movement=sin-asignar" aria-label="Ver movimientos sin asignar">
                 <span class="summary-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span>
@@ -3566,6 +3579,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const captureRows = document.getElementById('captureAnalysisRows');
     const captureSummary = document.getElementById('captureAnalysisSummary');
     const captureMessage = document.getElementById('captureAnalysisMessage');
+    const captureBankBalance = document.getElementById('captureBankBalance');
+    const captureBankBalanceBefore = document.getElementById('captureBankBalanceBefore');
+    const captureBankBalanceBeforeDetail = document.getElementById('captureBankBalanceBeforeDetail');
+    const captureBankBalanceAfter = document.getElementById('captureBankBalanceAfter');
+    const captureBankBalanceChange = document.getElementById('captureBankBalanceChange');
     const analyzeCaptureButton = document.getElementById('analyzeCapture');
     const captureCommissionSummary = document.getElementById('captureCommissionSummary');
     const captureCommissionTotal = document.getElementById('captureCommissionTotal');
@@ -3611,6 +3629,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         captureSummary?.replaceChildren();
         captureCommissionRows?.replaceChildren();
         if (captureResult) captureResult.hidden = true;
+        if (captureBankBalance) captureBankBalance.hidden = true;
         if (captureCommissionSummary) captureCommissionSummary.hidden = true;
         if (loadCaptureButton) {
             loadCaptureButton.disabled = true;
@@ -3718,6 +3737,24 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             appendCaptureSummary('new', 'Nuevos', newCount, 'No encontrados previamente');
             appendCaptureSummary('key', 'Con clave corta', associated, 'Asociación encontrada');
             appendCaptureSummary('missing', 'Sin clave corta', withoutKey, 'Se cargarán sin asignar');
+            const bankBalance = analysis.bank_balance;
+            if (captureBankBalance && bankBalance) {
+                let bankMoney = invoiceMoney;
+                try {
+                    bankMoney = new Intl.NumberFormat('es-MX', {
+                        style: 'currency', currency: bankBalance.currency || 'MXN'
+                    });
+                } catch (_) {
+                    bankMoney = invoiceMoney;
+                }
+                const change = Number(bankBalance.change) || 0;
+                const projectedMovements = Number(bankBalance.movement_count) || 0;
+                captureBankBalanceBefore.textContent = bankMoney.format(Number(bankBalance.before) || 0);
+                captureBankBalanceAfter.textContent = bankMoney.format(Number(bankBalance.after) || 0);
+                captureBankBalanceBeforeDetail.textContent = 'Saldo registrado antes de cargar';
+                captureBankBalanceChange.textContent = `${projectedMovements} movimiento${projectedMovements === 1 ? '' : 's'} nuevo${projectedMovements === 1 ? '' : 's'} · ${change >= 0 ? 'aumento' : 'disminución'} de ${bankMoney.format(Math.abs(change))}`;
+                captureBankBalance.hidden = false;
+            }
             captureMessage.textContent = `${associated} de ${movementCount} movimientos tienen una clave corta asociada en la tabla claves_cortas.`;
             renderCaptureCommissions(analysis.commission_preview || {});
             analyzedCapture = capture;

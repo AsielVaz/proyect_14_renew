@@ -23,6 +23,7 @@ Las consultas están centralizadas en `src/CompanyPanelRepository.php`. Todas va
 - Cada captura se relaciona con su cuenta mediante `captura.nombre_corto` y con sus renglones mediante `captura_edo_cta.id_captura`.
 - Los logotipos se obtienen desde la URL de recursos configurada para las empresas.
 - El análisis previo se ejecuta sin escrituras mediante `CaptureAnalysisService`: reconoce tablas con encabezados de fecha, importe/cargo/abono, descripción, referencia y saldo. Después vuelve a comprobar cada descripción y referencia directamente contra `claves_cortas`. El resultado muestra explícitamente “Con clave corta” o “Sin clave corta”, junto con el cliente asociado.
+- El análisis muestra el saldo registrado de la cuenta antes de la carga y proyecta el saldo posterior sumando los depósitos y restando los retiros nuevos pegados. Los duplicados no modifican la proyección porque tampoco se guardan durante la carga.
 
 ## Carga de capturas
 

@@ -79,6 +79,11 @@ final class MovementRepository
                 $searchableColumns[] = is_int($key) ? (string) $value : (string) $key;
             }
         }
+        if (in_array($view, ['sin-asignar', 'asignados'], true)) {
+            $searchableColumns = array_merge($searchableColumns, [
+                '__descripcion', '__detalle', '__descripcion_detallada', 'detalles',
+            ]);
+        }
         $searchableColumns = array_values(array_unique($searchableColumns));
         $queryText = 'SELECT * FROM (' . $source . ') movement_data';
         $params = [];

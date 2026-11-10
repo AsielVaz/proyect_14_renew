@@ -98,7 +98,9 @@ final class DashboardRepository
 
     public function overview(int $operatorId): array
     {
-        $query = $this->pdo->prepare("SELECT wallet_summary.*, payment_summary.*, pending_summary.*, capture_summary.*, exchange_summary.exchange_rate
+        $query = $this->pdo->prepare("SELECT wallet_summary.*, payment_summary.*, pending_summary.*, capture_summary.*,
+            exchange_summary.exchange_rate, stp_umbrella_summary.stp_umbrella_balance,
+            stp_umbrella_summary.stp_umbrella_updated_at
             FROM (
                 SELECT COUNT(*) AS wallets,
                     COALESCE(SUM(COALESCE(s.saldoss, 0)), 0) AS wallet_balance,
@@ -141,7 +143,12 @@ final class DashboardRepository
             ) capture_summary
             CROSS JOIN (
                 SELECT COALESCE((SELECT tipo_cambio FROM tipo_cambio ORDER BY id DESC LIMIT 1), 0) AS exchange_rate
-            ) exchange_summary");
+            ) exchange_summary
+            CROSS JOIN (
+                SELECT
+                    COALESCE((SELECT saldo FROM stp_saldos_umbrella ORDER BY id DESC LIMIT 1), 0) AS stp_umbrella_balance,
+                    (SELECT fecha FROM stp_saldos_umbrella ORDER BY id DESC LIMIT 1) AS stp_umbrella_updated_at
+            ) stp_umbrella_summary");
         $query->execute(['operator_one' => $operatorId, 'operator_restricted' => $operatorId]);
         $summary = $query->fetch() ?: [];
 
@@ -154,6 +161,8 @@ final class DashboardRepository
             'walletBalance' => (float) ($summary['wallet_balance'] ?? 0),
             'walletPending' => (float) ($summary['wallet_pending'] ?? 0),
             'internalBalance' => (float) ($summary['internal_balance'] ?? 0),
+            'stpUmbrellaBalance' => (float) ($summary['stp_umbrella_balance'] ?? 0),
+            'stpUmbrellaUpdatedAt' => $summary['stp_umbrella_updated_at'] ?? null,
             'pendingCount' => (int) ($summary['pending_count'] ?? 0),
             'pendingBalance' => $pendingBalance,
             'balanceDifference' => (float) ($summary['captured_balance'] ?? 0) - (float) ($summary['credited_balance'] ?? 0) - $pendingBalance,

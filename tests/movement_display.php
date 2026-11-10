@@ -47,6 +47,7 @@ $repository = $repositoryReflection->newInstanceWithoutConstructor();
 $sourceMethod = $repositoryReflection->getMethod('source');
 [$withDocumentSource] = $sourceMethod->invoke($repository, 'asignados', true, ['document'], '');
 [$withoutDocumentSource] = $sourceMethod->invoke($repository, 'asignados', true, ['none'], '');
+[$unassignedSource] = $sourceMethod->invoke($repository, 'sin-asignar', true, [], '');
 
 if (!str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) > 0')
     || str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) <> 2')) {
@@ -55,6 +56,14 @@ if (!str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) > 0')
 if (!str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) <= 0')
     || str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) = 2')) {
     throw new RuntimeException('La bandera id_factura = 2 debe excluirse de Sin documento.');
+}
+foreach ([$withDocumentSource, $unassignedSource] as $movementSource) {
+    foreach (['p.descripcion AS __descripcion', 'p.detalle AS __detalle',
+        'p.descripcion_detallada AS __descripcion_detallada'] as $searchField) {
+        if (!str_contains($movementSource, $searchField)) {
+            throw new RuntimeException('El buscador de movimientos debe incluir descripción y detalle.');
+        }
+    }
 }
 
 echo (count($cases) + 4 + count($invoiceReferences)) . " comprobaciones de presentación de movimientos superadas.\n";

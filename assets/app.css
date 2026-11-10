@@ -401,7 +401,7 @@ textarea:focus {
 
 .dashboard-summary {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 14px;
     margin-bottom: 20px;
 }
@@ -3809,6 +3809,82 @@ body.has-invoice-email-modal {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     margin: 0;
     padding: 0 24px 20px;
+}
+
+.capture-bank-balance {
+    margin: 0 24px 20px;
+    padding: 18px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-page);
+}
+
+.capture-bank-balance-heading {
+    margin-bottom: 14px;
+}
+
+.capture-bank-balance-heading h3 {
+    margin: 2px 0 0;
+}
+
+.capture-bank-balance-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr);
+    gap: 12px;
+    align-items: stretch;
+}
+
+.capture-bank-balance-grid article {
+    display: grid;
+    gap: 4px;
+    padding: 16px 18px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+}
+
+.capture-bank-balance-grid article.is-after {
+    border-color: var(--color-primary);
+    box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.capture-bank-balance-grid article > span,
+.capture-bank-balance-grid article small {
+    color: var(--color-muted);
+    font-size: 12px;
+}
+
+.capture-bank-balance-grid article strong {
+    font-size: clamp(24px, 3vw, 32px);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+
+.capture-bank-balance-arrow {
+    display: grid;
+    place-items: center;
+    color: var(--color-primary);
+}
+
+.capture-bank-balance-arrow svg {
+    width: 28px;
+    height: 28px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+@media (max-width: 680px) {
+    .capture-bank-balance-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .capture-bank-balance-arrow {
+        height: 24px;
+        transform: rotate(90deg);
+    }
 }
 
 .capture-analysis-summary .capture-summary-card {
@@ -8252,10 +8328,6 @@ main::before {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .dashboard-summary .summary-card:last-child {
-        grid-column: 1 / -1;
-    }
-
     .wallet-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -8335,10 +8407,6 @@ main::before {
     .dashboard-summary,
     .wallet-grid {
         grid-template-columns: 1fr;
-    }
-
-    .dashboard-summary .summary-card:last-child {
-        grid-column: auto;
     }
 
     .wallet-card dl {

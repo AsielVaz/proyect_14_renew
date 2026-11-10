@@ -323,8 +323,11 @@ final class CompanyPanelRepository
 
     private function assertAccount(int $companyId, int $accountId): array
     {
-        $query = $this->pdo->prepare("SELECT id, banco, nombre_corto, moneda, numero_cuenta,
-            clabe_interbancaria FROM bancos WHERE id = :id AND razon = :company AND status_banco = 'AC'");
+        $query = $this->pdo->prepare("SELECT b.id, b.banco, b.nombre_corto, b.moneda, b.numero_cuenta,
+            b.clabe_interbancaria,
+            COALESCE((SELECT SUM(COALESCE(ce.deposito, 0)) - SUM(COALESCE(ce.retiro, 0))
+                FROM captura_edo_cta ce WHERE ce.cuenta = b.id), 0) AS saldo
+            FROM bancos b WHERE b.id = :id AND b.razon = :company AND b.status_banco = 'AC'");
         $query->execute(['id' => $accountId, 'company' => $companyId]);
         $account = $query->fetch();
         if (!$account) {

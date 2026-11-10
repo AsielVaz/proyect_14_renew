@@ -137,11 +137,37 @@ final class CaptureAnalysisService
         }
         unset($movement);
 
+        $bankBalance = self::projectBankBalance((float) ($account['saldo'] ?? 0.0), $movements);
+        $currency = strtoupper(trim((string) ($account['moneda'] ?? 'MXN')));
+        $bankBalance['currency'] = preg_match('/^[A-Z]{3}$/', $currency) ? $currency : 'MXN';
+
         return [
             'account' => $account,
             'summary' => $summary,
+            'bank_balance' => $bankBalance,
             'movements' => $movements,
             'commission_preview' => $this->movements->previewCaptureAssignments($commissionMovements),
+        ];
+    }
+
+    public static function projectBankBalance(float $currentBalance, array $movements): array
+    {
+        $change = 0.0;
+        $movementCount = 0;
+        foreach ($movements as $movement) {
+            if (($movement['duplicate'] ?? false) === true) {
+                continue;
+            }
+            $change += (float) ($movement['deposit'] ?? 0.0);
+            $change -= (float) ($movement['withdrawal'] ?? 0.0);
+            $movementCount++;
+        }
+
+        return [
+            'before' => round($currentBalance, 2),
+            'after' => round($currentBalance + $change, 2),
+            'change' => round($change, 2),
+            'movement_count' => $movementCount,
         ];
     }
 

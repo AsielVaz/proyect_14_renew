@@ -27,7 +27,7 @@ Para producción, usar HTTPS, cambiar `APP_URL`, generar un `APP_KEY` aleatorio 
 - Facturación con consulta, búsqueda, alta transaccional, catálogos fiscales y conceptos dinámicos.
 - Complementos de pago con consulta, detalle, captura de múltiples facturas PPD, cálculo de saldos y guardado transaccional.
 - Panel de empresas con directorio, cuentas activas, saldos, capturas, contenido bancario y movimientos por empresa o cuenta.
-- Panel principal de carteras con saldos, movimientos, cheques y facturas pendientes.
+- Panel principal de carteras con saldos, movimientos, cheques y facturas pendientes, además del último saldo y fecha disponibles en `stp_saldos_umbrella`.
 - Búsqueda general desde cualquier módulo (`Ctrl + K`) sobre pagos, facturas y movimientos de capturas de estados de cuenta, con acceso directo al resultado.
 - Listados con paginación rápida sin ejecutar conteos globales en cada solicitud, pensados para PHP y MariaDB alojados en servicios separados.
 - PDO con parámetros preparados, escape HTML, protección CSRF y encabezados de seguridad del navegador.

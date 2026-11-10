@@ -14,6 +14,8 @@ La navegación y columnas de las vistas están en `src/Movements.php`. Las consu
 
 Cada operación de escritura valida CSRF y se ejecuta dentro de una transacción de base de datos. El operador se obtiene de la sesión autenticada mediante `current_operator_id()`.
 
+Los buscadores de **Movimientos sin asignar** y **Movimientos asignados** incluyen los campos originales `pagos.descripcion`, `pagos.detalle` y `pagos.descripcion_detallada`. Al escribir filtran inmediatamente los registros de la página visible; al presionar Enter ejecutan la consulta sobre todo el histórico y conservan los filtros activos.
+
 ## Asociación manual de documentos
 
 Los depósitos asignados que todavía no tengan `id_factura` ni una referencia entera válida en `id_factura_res` ofrecen la acción **Asignar documento**. La vista busca facturas y complementos que:
