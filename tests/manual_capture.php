@@ -51,10 +51,26 @@ foreach ($catalog as $company) {
 }
 
 $page = capture_analysis_service()->manualPage(1, 1, 25);
-foreach (['rows', 'page', 'perPage', 'hasNext'] as $key) {
+foreach (['rows', 'page', 'perPage', 'total', 'pages', 'hasNext'] as $key) {
     if (!array_key_exists($key, $page)) {
         throw new RuntimeException('El historial de capturas manuales no devolvió la estructura esperada.');
     }
+}
+
+foreach (['all', 'deleted'] as $section) {
+    $history = capture_analysis_service()->capturePage($section, 1, 1, 25, '');
+    foreach (['rows', 'page', 'perPage', 'total', 'pages', 'hasNext'] as $key) {
+        if (!array_key_exists($key, $history)) {
+            throw new RuntimeException('El historial de capturas no devolvió la estructura esperada para ' . $section . '.');
+        }
+    }
+}
+
+$view = file_get_contents(dirname(__DIR__) . '/views/manual-captures.php');
+if ($view === false || !str_contains($view, 'account.replaceChildren')
+    || !str_contains($view, 'nonce="<?= e(csp_nonce()) ?>"')
+    || str_contains($view, 'data-company-id=')) {
+    throw new RuntimeException('El selector de cuentas no reconstruye las opciones al cambiar de empresa.');
 }
 
 echo "manual_capture: ok\n";

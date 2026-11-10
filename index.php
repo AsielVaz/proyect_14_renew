@@ -150,6 +150,9 @@ $securityView = (string) ($_GET['security'] ?? '');
 $securityModule = $securityView === 'passkeys';
 $dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$statisticsModule && !$securityModule;
 $action = (string) ($_GET['action'] ?? 'list');
+$captureSection = in_array((string) ($_GET['view'] ?? 'manual'), ['all', 'manual', 'deleted'], true)
+    ? (string) ($_GET['view'] ?? 'manual')
+    : 'manual';
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
@@ -444,10 +447,17 @@ try {
                     $message .= ' Se generó la factura automática #' . $result['automaticInvoiceId'] . '.';
                 }
                 flash('success', $message);
+                redirect('?movement=capturas-manuales&view=manual');
             } elseif ($postAction === 'manual_capture_delete' && $movementKey === 'capturas-manuales') {
                 $captureId = (int) ($_POST['capture_id'] ?? 0);
                 capture_analysis_service()->deleteManual($captureId, $operatorId);
-                flash('success', 'La captura manual #' . $captureId . ' y sus movimientos asociados fueron eliminados.');
+                flash('success', 'La captura manual #' . $captureId . ' y sus movimientos asociados fueron eliminados. Se conservó una copia en Capturas eliminadas.');
+                redirect('?movement=capturas-manuales&view=manual');
+            } elseif ($postAction === 'capture_delete' && $movementKey === 'capturas-manuales') {
+                $captureId = (int) ($_POST['capture_id'] ?? 0);
+                capture_analysis_service()->deleteCapture($captureId, $operatorId);
+                flash('success', 'La captura #' . $captureId . ' fue eliminada y archivada para consulta.');
+                redirect('?movement=capturas-manuales&view=deleted');
             } elseif ($postAction === 'movement_assignment_preview') {
                 $expectsJson = true;
                 $preview = movement_repository()->previewAssignments((array) ($_POST['assignments'] ?? []));
@@ -551,8 +561,10 @@ try {
     }
     flash('error', $exception->getMessage());
     $target = $movementKey === 'capturas-manuales' && (string) ($_POST['action'] ?? '') === 'manual_capture_create'
-        ? '?movement=capturas-manuales&action=form'
-        : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './'))));
+        ? '?movement=capturas-manuales&view=manual&action=form'
+        : ($movementKey === 'capturas-manuales'
+            ? '?movement=capturas-manuales&view=' . rawurlencode((string) ($_POST['return_view'] ?? 'manual'))
+            : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './')))));
     redirect($target);
 }
 
@@ -810,7 +822,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php if ($catalog && $action !== 'form'): ?>
                 <a class="button primary" href="?catalog=<?= e($key) ?>&amp;action=form">+ Nuevo registro</a>
             <?php elseif ($movementKey === 'capturas-manuales' && $action !== 'form'): ?>
-                <a class="button primary" href="?movement=capturas-manuales&amp;action=form">+ Nueva captura</a>
+                <a class="button primary" href="?movement=capturas-manuales&amp;view=manual&amp;action=form">+ Nueva captura</a>
             <?php elseif ($movementKey === 'traspasos' && $action !== 'form'): ?>
                 <a class="button primary" href="?movement=traspasos&amp;action=form">+ Nuevo traspaso</a>
             <?php elseif ($invoiceView === 'list'): ?>
@@ -1308,11 +1320,24 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $manualCapturePerPage = in_array((int) ($_GET['per_page'] ?? 25), [25, 50, 100], true)
                 ? (int) $_GET['per_page']
                 : 25;
-            $manualCaptureResult = capture_analysis_service()->manualPage(
-                max(1, (int) ($_GET['page'] ?? 1)),
-                current_operator_id(),
-                $manualCapturePerPage
-            );
+            $captureSearch = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 120);
+            $manualCaptureResult = $captureSection === 'manual'
+                ? capture_analysis_service()->manualPage(
+                    max(1, (int) ($_GET['page'] ?? 1)),
+                    current_operator_id(),
+                    $manualCapturePerPage,
+                    $captureSearch
+                )
+                : capture_analysis_service()->capturePage(
+                    $captureSection,
+                    max(1, (int) ($_GET['page'] ?? 1)),
+                    current_operator_id(),
+                    $manualCapturePerPage,
+                    $captureSearch
+                );
+            $deletedCaptureDetail = $captureSection === 'deleted' && $action === 'detail'
+                ? capture_analysis_service()->deletedCapture((int) ($_GET['capture_id'] ?? 0), current_operator_id())
+                : null;
             ?>
             <?php require __DIR__ . '/views/manual-captures.php'; ?>
         <?php else: ?>

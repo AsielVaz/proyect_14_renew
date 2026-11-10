@@ -313,6 +313,11 @@ final class CompanyPanelRepository
         return $this->assertAccount($companyId, $accountId);
     }
 
+    public function assertCompanyAccess(int $companyId, int $operatorId): void
+    {
+        $this->assertAccess($companyId, $operatorId);
+    }
+
     public function manualCaptureCatalog(int $operatorId): array
     {
         $restricted = !in_array($operatorId, self::RESTRICTED_OPERATORS, true)

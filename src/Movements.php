@@ -64,7 +64,7 @@ final class Movements
             ],
             'capturas-manuales' => [
                 'label' => 'Capturas manuales',
-                'description' => 'Registra movimientos bancarios individuales y conserva su relación con la captura, cuenta y cartera.',
+                'description' => 'Consulta capturas bancarias, registra movimientos manuales y revisa el historial de eliminaciones.',
                 'action' => 'manual_capture',
                 'columns' => [],
             ],

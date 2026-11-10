@@ -322,7 +322,7 @@ final class CaptureAnalysisService
         return $this->companies->manualCaptureCatalog($operatorId);
     }
 
-    public function manualPage(int $page, int $operatorId, int $perPage = 25): array
+    public function manualPage(int $page, int $operatorId, int $perPage = 25, string $search = ''): array
     {
         $page = max(1, $page);
         $perPage = in_array($perPage, [25, 50, 100], true) ? $perPage : 25;
@@ -331,12 +331,35 @@ final class CaptureAnalysisService
             $this->manualCatalog($operatorId)
         );
         if ($companyIds === []) {
-            return ['rows' => [], 'page' => 1, 'perPage' => $perPage, 'hasNext' => false];
+            return ['rows' => [], 'page' => 1, 'perPage' => $perPage, 'total' => 0, 'pages' => 1, 'hasNext' => false];
         }
 
         $placeholders = implode(',', array_fill(0, count($companyIds), '?'));
         $offset = ($page - 1) * $perPage;
         $limit = $perPage + 1;
+        $search = mb_substr(trim($search), 0, 120);
+        $searchSql = '';
+        $searchParams = [];
+        if ($search !== '') {
+            $searchSql = " AND (CAST(c.id AS CHAR) LIKE ? OR e.razon LIKE ? OR b.banco LIKE ?
+                OR b.nombre_corto LIKE ? OR ce.descripcion LIKE ? OR ce.descrip_det LIKE ?
+                OR CAST(p.monto AS CHAR) LIKE ?)";
+            $searchParams = array_fill(0, 7, '%' . $search . '%');
+        }
+        $where = "FROM pagos p
+            INNER JOIN captura c ON c.id = p.id_captura
+            INNER JOIN empresas e ON e.id = CAST(c.razon AS UNSIGNED)
+            INNER JOIN bancos b ON b.id = CAST(c.nombre_corto AS UNSIGNED)
+            INNER JOIN captura_edo_cta ce ON ce.id_captura = c.id
+            LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
+            WHERE p.tipo_captura = 'Manual' AND p.banco <> '99'
+              AND p.tipo_movimiento <> 'Abono por comisión'
+              AND c.captura LIKE 'Captura Manual%'
+              AND CAST(c.razon AS UNSIGNED) IN ({$placeholders}) {$searchSql}";
+        $params = array_merge($companyIds, $searchParams);
+        $count = $this->pdo->prepare("SELECT COUNT(DISTINCT c.id) {$where}");
+        $count->execute($params);
+        $total = (int) $count->fetchColumn();
 
         // El sistema anterior listaba desde pagos/tipo_captura. Mantener ese punto de
         // entrada permite aprovechar el orden por ID y evita conteos completos costosos.
@@ -347,18 +370,9 @@ final class CaptureAnalysisService
             CASE WHEN ce.tipo_movimiento = 'Retiro' THEN ce.retiro ELSE ce.deposito END AS amount,
             ce.saldo AS balance, COALESCE(NULLIF(ce.descripcion, ''), ce.descrip_det) AS detail,
             p.id AS payment_id, cl.nombre AS client
-            FROM pagos p
-            INNER JOIN captura c ON c.id = p.id_captura
-            INNER JOIN empresas e ON e.id = CAST(c.razon AS UNSIGNED)
-            INNER JOIN bancos b ON b.id = CAST(c.nombre_corto AS UNSIGNED)
-            INNER JOIN captura_edo_cta ce ON ce.id_captura = c.id
-            LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
-            WHERE p.tipo_captura = 'Manual' AND p.banco <> '99'
-              AND p.tipo_movimiento <> 'Abono por comisión'
-              AND c.captura LIKE 'Captura Manual%'
-              AND CAST(c.razon AS UNSIGNED) IN ({$placeholders})
+            {$where}
             ORDER BY p.id DESC LIMIT {$limit} OFFSET {$offset}");
-        $query->execute($companyIds);
+        $query->execute($params);
         $rows = $query->fetchAll();
         $hasNext = count($rows) > $perPage;
         if ($hasNext) {
@@ -369,8 +383,142 @@ final class CaptureAnalysisService
             'rows' => $rows,
             'page' => $page,
             'perPage' => $perPage,
+            'total' => $total,
+            'pages' => max(1, (int) ceil($total / $perPage)),
             'hasNext' => $hasNext,
         ];
+    }
+
+    public function capturePage(
+        string $section,
+        int $page,
+        int $operatorId,
+        int $perPage = 25,
+        string $search = ''
+    ): array {
+        $section = in_array($section, ['all', 'deleted'], true) ? $section : 'all';
+        $page = max(1, $page);
+        $perPage = in_array($perPage, [25, 50, 100], true) ? $perPage : 25;
+        $search = mb_substr(trim($search), 0, 120);
+        $offset = ($page - 1) * $perPage;
+        $params = [];
+        $access = !in_array($operatorId, [1, 31, 82], true)
+            ? ' AND CAST(c.razon AS UNSIGNED) <> 132'
+            : '';
+        $searchSql = '';
+        if ($search !== '') {
+            $searchSql = " AND (CAST(c.id AS CHAR) LIKE :search_id OR e.razon LIKE :search_company
+                OR b.banco LIKE :search_bank OR b.nombre_corto LIKE :search_account)";
+            $like = '%' . $search . '%';
+            $params = [
+                'search_id' => $like,
+                'search_company' => $like,
+                'search_bank' => $like,
+                'search_account' => $like,
+            ];
+        }
+
+        if ($section === 'deleted') {
+            $from = "FROM captura_eliminadas c
+                LEFT JOIN empresas e ON e.id = CAST(c.razon AS UNSIGNED)
+                LEFT JOIN bancos b ON b.id = CAST(c.nombre_corto AS UNSIGNED)
+                LEFT JOIN usuarios u ON u.id = c.usuario_elimina
+                WHERE 1 = 1 {$access} {$searchSql}";
+            $count = $this->pdo->prepare("SELECT COUNT(*) {$from}");
+            $count->execute($params);
+            $total = (int) $count->fetchColumn();
+            $query = $this->pdo->prepare("SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
+                CAST(c.nombre_corto AS UNSIGNED) AS account_id, c.fecha AS captured_date,
+                c.hora AS captured_time, c.fecha_elimina AS deleted_at,
+                COALESCE(e.razon, CONCAT('Empresa #', c.razon)) AS company,
+                COALESCE(b.banco, 'Banco no identificado') AS banco,
+                COALESCE(b.nombre_corto, CONCAT('Cuenta #', c.nombre_corto)) AS nombre_corto,
+                COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.appat, u.apmat)), ''),
+                    CONCAT('Usuario #', COALESCE(c.usuario_elimina, 0))) AS deleted_by
+                {$from} ORDER BY c.id DESC LIMIT {$perPage} OFFSET {$offset}");
+        } else {
+            $from = "FROM captura c
+                LEFT JOIN empresas e ON e.id = CAST(c.razon AS UNSIGNED)
+                LEFT JOIN bancos b ON b.id = CAST(c.nombre_corto AS UNSIGNED)
+                WHERE c.captura NOT LIKE 'Captura Manual%' {$access} {$searchSql}";
+            $count = $this->pdo->prepare("SELECT COUNT(*) {$from}");
+            $count->execute($params);
+            $total = (int) $count->fetchColumn();
+            $query = $this->pdo->prepare("SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
+                CAST(c.nombre_corto AS UNSIGNED) AS account_id, c.fecha AS captured_date,
+                c.hora AS captured_time,
+                COALESCE(e.razon, CONCAT('Empresa #', c.razon)) AS company,
+                COALESCE(b.banco, 'Banco no identificado') AS banco,
+                COALESCE(b.nombre_corto, CONCAT('Cuenta #', c.nombre_corto)) AS nombre_corto,
+                COALESCE(NULLIF(b.moneda, ''), 'MXN') AS currency,
+                (SELECT COUNT(*) FROM captura_edo_cta ce WHERE ce.id_captura = c.id) AS movements,
+                (SELECT COALESCE(SUM(ce.deposito), 0) FROM captura_edo_cta ce WHERE ce.id_captura = c.id) AS deposits,
+                (SELECT COALESCE(SUM(ce.retiro), 0) FROM captura_edo_cta ce WHERE ce.id_captura = c.id) AS withdrawals
+                {$from} ORDER BY c.id DESC LIMIT {$perPage} OFFSET {$offset}");
+        }
+        $query->execute($params);
+
+        return [
+            'rows' => $query->fetchAll(),
+            'page' => $page,
+            'perPage' => $perPage,
+            'total' => $total,
+            'pages' => max(1, (int) ceil($total / $perPage)),
+            'hasNext' => $page * $perPage < $total,
+        ];
+    }
+
+    public function deletedCapture(int $captureId, int $operatorId): array
+    {
+        if ($captureId <= 0) {
+            throw new RuntimeException('La captura eliminada seleccionada no es válida.');
+        }
+        $query = $this->pdo->prepare("SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
+            CAST(c.nombre_corto AS UNSIGNED) AS account_id, LEFT(c.captura, 50000) AS captura,
+            CHAR_LENGTH(c.captura) AS captura_longitud, c.fecha, c.hora, c.fecha_elimina,
+            COALESCE(e.razon, CONCAT('Empresa #', c.razon)) AS company,
+            COALESCE(b.banco, 'Banco no identificado') AS banco,
+            COALESCE(b.nombre_corto, CONCAT('Cuenta #', c.nombre_corto)) AS nombre_corto,
+            COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.appat, u.apmat)), ''),
+                CONCAT('Usuario #', COALESCE(c.usuario_elimina, 0))) AS deleted_by
+            FROM captura_eliminadas c
+            LEFT JOIN empresas e ON e.id = CAST(c.razon AS UNSIGNED)
+            LEFT JOIN bancos b ON b.id = CAST(c.nombre_corto AS UNSIGNED)
+            LEFT JOIN usuarios u ON u.id = c.usuario_elimina
+            WHERE c.id = :id");
+        $query->execute(['id' => $captureId]);
+        $capture = $query->fetch();
+        if (!$capture) {
+            throw new RuntimeException('La captura eliminada ya no existe.');
+        }
+        $this->companies->assertCompanyAccess((int) $capture['company_id'], $operatorId);
+        return $capture;
+    }
+
+    public function deleteCapture(int $captureId, int $operatorId): void
+    {
+        $user = $this->pdo->prepare('SELECT tipo FROM usuarios WHERE id = :id');
+        $user->execute(['id' => $operatorId]);
+        if (!in_array((string) $user->fetchColumn(), ['administrador', 'administrador_b'], true)) {
+            throw new RuntimeException('Solo un administrador puede eliminar una captura bancaria.');
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $capture = $this->captureForDeletion($captureId, $operatorId);
+            $this->archiveCapture($capture, $operatorId);
+            $this->pdo->prepare("UPDATE facturas SET status = 'CAPDEL' WHERE id_captura = :capture")
+                ->execute(['capture' => $captureId]);
+            $this->pdo->prepare('DELETE FROM pagos WHERE id_captura = :capture')->execute(['capture' => $captureId]);
+            $this->pdo->prepare('DELETE FROM captura_edo_cta WHERE id_captura = :capture')->execute(['capture' => $captureId]);
+            $this->pdo->prepare('DELETE FROM captura WHERE id = :capture')->execute(['capture' => $captureId]);
+            $this->logCaptureDeletion($capture, $operatorId, 'Eliminar Captura');
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     public function createManual(array $input, int $operatorId): array
@@ -528,7 +676,8 @@ final class CaptureAnalysisService
         $this->pdo->beginTransaction();
         try {
             $captureQuery = $this->pdo->prepare("SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
-                CAST(c.nombre_corto AS UNSIGNED) AS account_id, c.captura
+                CAST(c.nombre_corto AS UNSIGNED) AS account_id, c.razon, c.nombre_corto,
+                c.captura, c.fecha, c.hora
                 FROM captura c WHERE c.id = :id FOR UPDATE");
             $captureQuery->execute(['id' => $captureId]);
             $capture = $captureQuery->fetch();
@@ -583,6 +732,8 @@ final class CaptureAnalysisService
                 }
                 $this->pdo->prepare('DELETE FROM facturas WHERE id = :id')->execute(['id' => $invoiceId]);
             }
+
+            $this->archiveCapture($capture, $operatorId);
 
             $paymentIds = array_map(static fn (array $payment): int => (int) $payment['id'], $paymentRows);
             if ($paymentIds !== []) {
@@ -645,6 +796,53 @@ final class CaptureAnalysisService
             WHERE table_schema = DATABASE() AND table_name = :table');
         $query->execute(['table' => $table]);
         return (int) $query->fetchColumn() > 0;
+    }
+
+    private function captureForDeletion(int $captureId, int $operatorId): array
+    {
+        if ($captureId <= 0) {
+            throw new RuntimeException('La captura seleccionada no es válida.');
+        }
+        $query = $this->pdo->prepare('SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
+            CAST(c.nombre_corto AS UNSIGNED) AS account_id, c.razon, c.nombre_corto,
+            c.captura, c.fecha, c.hora FROM captura c WHERE c.id = :id FOR UPDATE');
+        $query->execute(['id' => $captureId]);
+        $capture = $query->fetch();
+        if (!$capture) {
+            throw new RuntimeException('La captura ya no existe.');
+        }
+        $this->companies->assertCompanyAccess((int) $capture['company_id'], $operatorId);
+        return $capture;
+    }
+
+    private function archiveCapture(array $capture, int $operatorId): void
+    {
+        $archive = $this->pdo->prepare('INSERT INTO captura_eliminadas
+            (razon, nombre_corto, captura, fecha, hora, usuario_elimina, fecha_elimina)
+            VALUES (:company, :account, :capture, :date, :time, :operator, NOW())');
+        $archive->execute([
+            'company' => (string) ($capture['razon'] ?? $capture['company_id']),
+            'account' => (string) ($capture['nombre_corto'] ?? $capture['account_id']),
+            'capture' => (string) ($capture['captura'] ?? ''),
+            'date' => (string) $capture['fecha'],
+            'time' => (string) $capture['hora'],
+            'operator' => $operatorId,
+        ]);
+    }
+
+    private function logCaptureDeletion(array $capture, int $operatorId, string $action): void
+    {
+        $now = new \DateTimeImmutable();
+        $log = $this->pdo->prepare('INSERT INTO bitacora
+            (usuario_registra, hora_registra, fecha_registra, accion, monto, empresa)
+            VALUES (:operator, :time, :date, :action, 0, :company)');
+        $log->execute([
+            'operator' => $operatorId,
+            'time' => $now->format('H:i:s'),
+            'date' => $now->format('Y-m-d'),
+            'action' => $action,
+            'company' => (int) $capture['company_id'],
+        ]);
     }
 
     private function tableRows(DOMXPath $xpath, DOMElement $table): array
