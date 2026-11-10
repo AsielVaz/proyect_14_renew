@@ -73,4 +73,14 @@ if ($view === false || !str_contains($view, 'account.replaceChildren')
     throw new RuntimeException('El selector de cuentas no reconstruye las opciones al cambiar de empresa.');
 }
 
+$captureService = file_get_contents(dirname(__DIR__) . '/src/CaptureAnalysisService.php');
+if ($captureService === false
+    || !str_contains($captureService, 'private function paymentIdsForCapture')
+    || !str_contains($captureService, 'private function deletePaymentsByIds')
+    || !str_contains($captureService, 'COALESCE(origen_traspaso, 0) = 0')
+    || !str_contains($captureService, 'COALESCE(destino_traspaso, 0) = 0')
+    || str_contains($captureService, "DELETE FROM pagos WHERE id_captura = :capture")) {
+    throw new RuntimeException('La eliminación de capturas no está aislada de los movimientos de traspaso.');
+}
+
 echo "manual_capture: ok\n";

@@ -505,10 +505,11 @@ final class CaptureAnalysisService
         $this->pdo->beginTransaction();
         try {
             $capture = $this->captureForDeletion($captureId, $operatorId);
+            $paymentIds = $this->paymentIdsForCapture($captureId);
             $this->archiveCapture($capture, $operatorId);
             $this->pdo->prepare("UPDATE facturas SET status = 'CAPDEL' WHERE id_captura = :capture")
                 ->execute(['capture' => $captureId]);
-            $this->pdo->prepare('DELETE FROM pagos WHERE id_captura = :capture')->execute(['capture' => $captureId]);
+            $this->deletePaymentsByIds($paymentIds);
             $this->pdo->prepare('DELETE FROM captura_edo_cta WHERE id_captura = :capture')->execute(['capture' => $captureId]);
             $this->pdo->prepare('DELETE FROM captura WHERE id = :capture')->execute(['capture' => $captureId]);
             $this->logCaptureDeletion($capture, $operatorId, 'Eliminar Captura');
@@ -698,7 +699,10 @@ final class CaptureAnalysisService
             }
 
             $payments = $this->pdo->prepare('SELECT id, id_factura, id_factura_res FROM pagos
-                WHERE id_captura = :capture FOR UPDATE');
+                WHERE id_captura = :capture
+                  AND COALESCE(origen_traspaso, 0) = 0
+                  AND COALESCE(destino_traspaso, 0) = 0
+                FOR UPDATE');
             $payments->execute(['capture' => $captureId]);
             $paymentRows = $payments->fetchAll();
             foreach ($paymentRows as $payment) {
@@ -749,7 +753,7 @@ final class CaptureAnalysisService
                            OR pago_comision_id IN ({$paymentPlaceholders})")->execute($linkParams);
                 }
             }
-            $this->pdo->prepare('DELETE FROM pagos WHERE id_captura = :capture')->execute(['capture' => $captureId]);
+            $this->deletePaymentsByIds($paymentIds);
             $this->pdo->prepare('DELETE FROM captura_edo_cta WHERE id_captura = :capture')->execute(['capture' => $captureId]);
             $this->pdo->prepare('DELETE FROM captura WHERE id = :capture')->execute(['capture' => $captureId]);
 
@@ -813,6 +817,37 @@ final class CaptureAnalysisService
         }
         $this->companies->assertCompanyAccess((int) $capture['company_id'], $operatorId);
         return $capture;
+    }
+
+    private function paymentIdsForCapture(int $captureId): array
+    {
+        if ($captureId <= 0) {
+            throw new RuntimeException('La captura seleccionada no es válida.');
+        }
+        $query = $this->pdo->prepare('SELECT id FROM pagos
+            WHERE id_captura = :capture
+              AND COALESCE(origen_traspaso, 0) = 0
+              AND COALESCE(destino_traspaso, 0) = 0
+            FOR UPDATE');
+        $query->execute(['capture' => $captureId]);
+        return array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    private function deletePaymentsByIds(array $paymentIds): void
+    {
+        $paymentIds = array_values(array_unique(array_filter(
+            array_map('intval', $paymentIds),
+            static fn (int $id): bool => $id > 0
+        )));
+        if ($paymentIds === []) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($paymentIds), '?'));
+        $delete = $this->pdo->prepare("DELETE FROM pagos WHERE id IN ({$placeholders})");
+        $delete->execute($paymentIds);
+        if ($delete->rowCount() !== count($paymentIds)) {
+            throw new RuntimeException('No fue posible eliminar exactamente los pagos asociados a la captura.');
+        }
     }
 
     private function archiveCapture(array $capture, int $operatorId): void
