@@ -1114,6 +1114,44 @@ textarea:focus {
     width: min(340px, 50vw);
 }
 
+.movement-filter-toolbar {
+    flex: 1 0 100%;
+    align-items: flex-start;
+    justify-content: flex-start;
+}
+
+.movement-query-filter {
+    display: grid;
+    flex: 1 1 280px;
+    gap: 4px;
+    max-width: 340px;
+}
+
+.movement-query-filter > span,
+.movement-company-filter-group > span {
+    color: var(--color-muted);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    line-height: 14px;
+    text-transform: uppercase;
+}
+
+.movement-query-filter input {
+    min-height: 40px;
+}
+
+.movement-filter-toolbar .movement-document-filters legend,
+.movement-filter-toolbar .movement-type-filter > span,
+.movement-filter-toolbar .movement-page-size > span {
+    margin-bottom: 0;
+    line-height: 14px;
+}
+
+.movement-filter-submit {
+    margin-top: 18px;
+}
+
 .movement-visible-search-status {
     flex: 1 0 100%;
     min-height: 18px;
@@ -1256,9 +1294,13 @@ textarea:focus {
     min-height: 40px;
 }
 
+.movement-company-filter-group {
+    display: grid;
+    gap: 4px;
+}
+
 .movement-company-filter {
     position: relative;
-    align-self: flex-end;
 }
 
 .movement-company-filter > summary {
@@ -4659,6 +4701,180 @@ body.has-invoice-email-modal {
     }
 }
 
+/* Capturas bancarias manuales */
+.manual-capture-form {
+    display: grid;
+    gap: 22px;
+    padding: 24px;
+}
+
+.manual-capture-section {
+    min-width: 0;
+    margin: 0;
+    padding: 20px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    background: var(--color-surface-subtle);
+}
+
+.manual-capture-section > legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 9px;
+    color: var(--color-text);
+}
+
+.manual-capture-section > legend > span {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--color-primary);
+    color: var(--color-surface);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.manual-capture-section > legend > strong {
+    font-size: 16px;
+}
+
+.manual-capture-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 16px;
+}
+
+.manual-capture-grid.is-origin {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.manual-capture-form select,
+.manual-capture-form input {
+    min-height: 44px;
+}
+
+.manual-capture-form select:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+}
+
+.manual-capture-detail {
+    margin-top: 16px;
+}
+
+.manual-capture-detail textarea {
+    min-height: 94px;
+    resize: vertical;
+}
+
+.manual-capture-preview {
+    display: grid;
+    gap: 15px;
+    padding: 20px;
+    border: 1px solid var(--color-primary-border);
+    border-radius: var(--radius-card);
+    background: var(--color-primary-soft);
+}
+
+.manual-capture-preview h3 {
+    margin: 0;
+}
+
+.manual-capture-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.manual-capture-preview-grid article {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-navigation);
+    background: var(--color-surface);
+}
+
+.manual-capture-preview-grid span,
+.manual-capture-preview-grid small {
+    color: var(--color-muted);
+    font-size: 11px;
+}
+
+.manual-capture-preview-grid strong {
+    overflow-wrap: anywhere;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+}
+
+.manual-capture-preview-grid strong.is-deposit {
+    color: var(--color-success);
+}
+
+.manual-capture-preview-grid strong.is-withdrawal {
+    color: var(--color-danger-dark);
+}
+
+.manual-capture-actions {
+    justify-content: flex-end;
+}
+
+.manual-capture-actions .button {
+    min-width: 180px;
+}
+
+.manual-capture-history .movement-description-text {
+    display: block;
+    max-width: 320px;
+    white-space: normal;
+}
+
+.manual-capture-history td form {
+    margin: 0;
+}
+
+.manual-capture-history .button.danger {
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+@media (max-width: 1050px) {
+    .manual-capture-grid {
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .manual-capture-form {
+        gap: 16px;
+        padding: 16px;
+    }
+
+    .manual-capture-section {
+        padding: 16px;
+    }
+
+    .manual-capture-grid,
+    .manual-capture-grid.is-origin,
+    .manual-capture-preview-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .manual-capture-actions {
+        align-items: stretch;
+        flex-direction: column-reverse;
+    }
+
+    .manual-capture-actions .button {
+        width: 100%;
+    }
+}
+
 /* Correos manuales */
 .manual-email-intro > div { max-width: 760px; }
 .manual-email-intro h2 { margin: 2px 0 6px; font-size: clamp(24px, 3vw, 34px); }
@@ -5488,13 +5704,25 @@ body.has-invoice-email-modal {
         width: 100%;
     }
 
+    .movement-query-filter,
     .movement-type-filter,
     .movement-type-filter select,
     .movement-page-size,
     .movement-page-size select,
+    .movement-company-filter-group,
     .movement-company-filter,
     .movement-company-filter > summary {
         width: 100%;
+    }
+
+    .movement-query-filter {
+        max-width: none;
+    }
+
+    .movement-filter-submit {
+        width: 100%;
+        min-height: 44px;
+        margin-top: 0;
     }
 
     .movement-company-filter > summary {

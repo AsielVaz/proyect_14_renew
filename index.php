@@ -434,7 +434,21 @@ try {
         } elseif ($movement) {
             $paymentId = (int) ($_POST['payment_id'] ?? 0);
             $operatorId = current_operator_id();
-            if ($postAction === 'movement_assignment_preview') {
+            if ($postAction === 'manual_capture_create' && $movementKey === 'capturas-manuales') {
+                $result = capture_analysis_service()->createManual($_POST, $operatorId);
+                $message = 'Captura manual #' . $result['captureId'] . ' registrada como movimiento #' . $result['paymentId'] . '.';
+                if ((int) $result['assignedClientId'] > 0) {
+                    $message .= ' Se asignó a ' . ($result['assignedClient'] ?: ('la cartera #' . $result['assignedClientId'])) . '.';
+                }
+                if ((int) ($result['automaticInvoiceId'] ?? 0) > 0) {
+                    $message .= ' Se generó la factura automática #' . $result['automaticInvoiceId'] . '.';
+                }
+                flash('success', $message);
+            } elseif ($postAction === 'manual_capture_delete' && $movementKey === 'capturas-manuales') {
+                $captureId = (int) ($_POST['capture_id'] ?? 0);
+                capture_analysis_service()->deleteManual($captureId, $operatorId);
+                flash('success', 'La captura manual #' . $captureId . ' y sus movimientos asociados fueron eliminados.');
+            } elseif ($postAction === 'movement_assignment_preview') {
                 $expectsJson = true;
                 $preview = movement_repository()->previewAssignments((array) ($_POST['assignments'] ?? []));
                 header('Content-Type: application/json; charset=UTF-8');
@@ -536,7 +550,9 @@ try {
         exit;
     }
     flash('error', $exception->getMessage());
-    $target = $complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './')));
+    $target = $movementKey === 'capturas-manuales' && (string) ($_POST['action'] ?? '') === 'manual_capture_create'
+        ? '?movement=capturas-manuales&action=form'
+        : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './'))));
     redirect($target);
 }
 
@@ -793,6 +809,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </button>
             <?php if ($catalog && $action !== 'form'): ?>
                 <a class="button primary" href="?catalog=<?= e($key) ?>&amp;action=form">+ Nuevo registro</a>
+            <?php elseif ($movementKey === 'capturas-manuales' && $action !== 'form'): ?>
+                <a class="button primary" href="?movement=capturas-manuales&amp;action=form">+ Nueva captura</a>
             <?php elseif ($movementKey === 'traspasos' && $action !== 'form'): ?>
                 <a class="button primary" href="?movement=traspasos&amp;action=form">+ Nuevo traspaso</a>
             <?php elseif ($invoiceView === 'list'): ?>
@@ -1284,6 +1302,19 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php if ($movementKey === 'correos-manuales'): ?>
             <?php $manualEmailCompanies = manual_email_service()->companies(); ?>
             <?php require __DIR__ . '/views/manual-email.php'; ?>
+        <?php elseif ($movementKey === 'capturas-manuales'): ?>
+            <?php
+            $manualCaptureCatalog = capture_analysis_service()->manualCatalog(current_operator_id());
+            $manualCapturePerPage = in_array((int) ($_GET['per_page'] ?? 25), [25, 50, 100], true)
+                ? (int) $_GET['per_page']
+                : 25;
+            $manualCaptureResult = capture_analysis_service()->manualPage(
+                max(1, (int) ($_GET['page'] ?? 1)),
+                current_operator_id(),
+                $manualCapturePerPage
+            );
+            ?>
+            <?php require __DIR__ . '/views/manual-captures.php'; ?>
         <?php else: ?>
         <?php
         $movementPage = max(1, (int) ($_GET['page'] ?? 1));
@@ -1480,34 +1511,37 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php endif; ?>
             <div class="panel-heading list-tools">
                 <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementSupportsFullPagination ? (int) $movementResult['total'] : count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy"><?= $movementSupportsFullPagination ? 'Total de resultados encontrados' : 'Resultados de la página actual' ?></p></div>
-                <form method="get" class="search"<?= $movementHasVisibleSearch ? ' data-visible-movement-search' : '' ?>>
+                <form method="get" class="search<?= $movementKey === 'asignados' ? ' movement-filter-toolbar' : '' ?>"<?= $movementHasVisibleSearch ? ' data-visible-movement-search' : '' ?>>
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
-                    <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>>
+                    <?php if ($movementKey === 'asignados'): ?><label class="movement-query-filter"><span>Buscar movimientos</span><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>></label><?php else: ?><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>><?php endif; ?>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type"><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?>
                         <?php $selectedMovementCompanyCount = count($movementCompanies) - count($movementExcludedCompanies); ?>
-                        <details class="movement-company-filter" data-company-filter>
-                            <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V6h7v14M11 10h9v10M7 9h1m-1 4h1m-1 4h1m7-3h1m-1 3h1"/></svg><span>Empresas</span><b data-company-filter-count><?= $selectedMovementCompanyCount === count($movementCompanies) ? 'Todas' : e($selectedMovementCompanyCount . ' de ' . count($movementCompanies)) ?></b></summary>
-                            <div class="movement-company-filter-panel">
-                                <header><div><strong>Empresas visibles</strong><small>Desmarca las que no quieras mostrar.</small></div><span data-company-filter-live role="status" aria-live="polite"><?= e($selectedMovementCompanyCount . ' seleccionadas') ?></span></header>
-                                <label class="movement-company-filter-search"><span class="sr-only">Buscar empresa dentro del filtro</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg><input type="search" placeholder="Buscar empresa…" autocomplete="off" data-company-filter-search></label>
-                                <div class="movement-company-filter-actions"><button type="button" data-company-filter-all>Marcar todas</button><button type="button" data-company-filter-none>Desmarcar todas</button></div>
-                                <div class="movement-company-filter-options" data-company-filter-options>
-                                    <?php foreach ($movementCompanies as $company): ?>
-                                        <?php $companyExcluded = in_array((int) $company['id'], $movementExcludedCompanies, true); ?>
-                                        <label data-company-filter-option data-company-search="<?= e(mb_strtolower((string) $company['razon']) . ' ' . $company['id']) ?>"><input type="checkbox" value="<?= e($company['id']) ?>" data-company-filter-checkbox <?= $companyExcluded ? '' : 'checked' ?>><span><strong><?= e($company['razon']) ?></strong><small>#<?= e($company['id']) ?></small></span></label>
-                                    <?php endforeach; ?>
-                                    <p class="movement-company-filter-empty" data-company-filter-empty hidden>No hay empresas que coincidan.</p>
+                        <div class="movement-company-filter-group">
+                            <span>Empresas</span>
+                            <details class="movement-company-filter" data-company-filter>
+                                <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V6h7v14M11 10h9v10M7 9h1m-1 4h1m-1 4h1m7-3h1m-1 3h1"/></svg><span>Seleccionar</span><b data-company-filter-count><?= $selectedMovementCompanyCount === count($movementCompanies) ? 'Todas' : e($selectedMovementCompanyCount . ' de ' . count($movementCompanies)) ?></b></summary>
+                                <div class="movement-company-filter-panel">
+                                    <header><div><strong>Empresas visibles</strong><small>Desmarca las que no quieras mostrar.</small></div><span data-company-filter-live role="status" aria-live="polite"><?= e($selectedMovementCompanyCount . ' seleccionadas') ?></span></header>
+                                    <label class="movement-company-filter-search"><span class="sr-only">Buscar empresa dentro del filtro</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg><input type="search" placeholder="Buscar empresa…" autocomplete="off" data-company-filter-search></label>
+                                    <div class="movement-company-filter-actions"><button type="button" data-company-filter-all>Marcar todas</button><button type="button" data-company-filter-none>Desmarcar todas</button></div>
+                                    <div class="movement-company-filter-options" data-company-filter-options>
+                                        <?php foreach ($movementCompanies as $company): ?>
+                                            <?php $companyExcluded = in_array((int) $company['id'], $movementExcludedCompanies, true); ?>
+                                            <label data-company-filter-option data-company-search="<?= e(mb_strtolower((string) $company['razon']) . ' ' . $company['id']) ?>"><input type="checkbox" value="<?= e($company['id']) ?>" data-company-filter-checkbox <?= $companyExcluded ? '' : 'checked' ?>><span><strong><?= e($company['razon']) ?></strong><small>#<?= e($company['id']) ?></small></span></label>
+                                        <?php endforeach; ?>
+                                        <p class="movement-company-filter-empty" data-company-filter-empty hidden>No hay empresas que coincidan.</p>
+                                    </div>
+                                    <footer><button class="button primary" type="submit">Aplicar empresas</button></footer>
                                 </div>
-                                <footer><button class="button primary" type="submit">Aplicar empresas</button></footer>
-                            </div>
-                        </details>
+                            </details>
+                        </div>
                     <?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes. Sin selección se muestran todos.</small></fieldset><?php endif; ?>
                     <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
-                    <button class="button" type="submit">Buscar</button>
+                    <button class="button<?= $movementKey === 'asignados' ? ' movement-filter-submit' : '' ?>" type="submit">Buscar</button>
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
                     <?php if ($movementHasVisibleSearch): ?><small class="movement-visible-search-status" id="visibleMovementSearchStatus" data-visible-movement-status aria-live="polite"><?= number_format(count($movementResult['rows'])) ?> registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.</small><?php endif; ?>
                 </form>

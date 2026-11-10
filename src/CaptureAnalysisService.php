@@ -338,6 +338,336 @@ final class CaptureAnalysisService
         }
     }
 
+    public function manualCatalog(int $operatorId): array
+    {
+        return $this->companies->manualCaptureCatalog($operatorId);
+    }
+
+    public function manualPage(int $page, int $operatorId, int $perPage = 25): array
+    {
+        $page = max(1, $page);
+        $perPage = in_array($perPage, [25, 50, 100], true) ? $perPage : 25;
+        $companyIds = array_map(
+            static fn (array $company): int => (int) $company['id'],
+            $this->manualCatalog($operatorId)
+        );
+        if ($companyIds === []) {
+            return ['rows' => [], 'page' => 1, 'perPage' => $perPage, 'hasNext' => false];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($companyIds), '?'));
+        $offset = ($page - 1) * $perPage;
+        $limit = $perPage + 1;
+
+        // El sistema anterior listaba desde pagos/tipo_captura. Mantener ese punto de
+        // entrada permite aprovechar el orden por ID y evita conteos completos costosos.
+        $query = $this->pdo->prepare("SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
+            c.fecha AS captured_date, c.hora AS captured_time,
+            e.razon AS company, b.banco, b.nombre_corto, COALESCE(NULLIF(b.moneda, ''), 'MXN') AS currency,
+            ce.id AS statement_id, ce.fecha AS bank_date, ce.tipo_movimiento,
+            CASE WHEN ce.tipo_movimiento = 'Retiro' THEN ce.retiro ELSE ce.deposito END AS amount,
+            ce.saldo AS balance, COALESCE(NULLIF(ce.descripcion, ''), ce.descrip_det) AS detail,
+            p.id AS payment_id, cl.nombre AS client
+            FROM pagos p
+            INNER JOIN captura c ON c.id = p.id_captura
+            INNER JOIN empresas e ON e.id = CAST(c.razon AS UNSIGNED)
+            INNER JOIN bancos b ON b.id = CAST(c.nombre_corto AS UNSIGNED)
+            INNER JOIN captura_edo_cta ce ON ce.id_captura = c.id
+            LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
+            WHERE p.tipo_captura = 'Manual' AND p.banco <> '99'
+              AND p.tipo_movimiento <> 'Abono por comisión'
+              AND c.captura LIKE 'Captura Manual%'
+              AND CAST(c.razon AS UNSIGNED) IN ({$placeholders})
+            ORDER BY p.id DESC LIMIT {$limit} OFFSET {$offset}");
+        $query->execute($companyIds);
+        $rows = $query->fetchAll();
+        $hasNext = count($rows) > $perPage;
+        if ($hasNext) {
+            array_pop($rows);
+        }
+
+        return [
+            'rows' => $rows,
+            'page' => $page,
+            'perPage' => $perPage,
+            'hasNext' => $hasNext,
+        ];
+    }
+
+    public function createManual(array $input, int $operatorId): array
+    {
+        $companyId = (int) ($input['company_id'] ?? 0);
+        $accountId = (int) ($input['account_id'] ?? 0);
+        $movementType = trim((string) ($input['movement_type'] ?? ''));
+        if (!in_array($movementType, ['Deposito', 'Retiro'], true)) {
+            throw new RuntimeException('Selecciona si la captura es un depósito o un retiro.');
+        }
+        $amount = self::manualDecimal($input['amount'] ?? null, false, 'El monto');
+        $balance = self::manualDecimal($input['balance'] ?? null, true, 'El saldo bancario');
+        $bankDate = trim((string) ($input['bank_date'] ?? ''));
+        $parsedDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $bankDate);
+        if (!$parsedDate || $parsedDate->format('Y-m-d') !== $bankDate) {
+            throw new RuntimeException('La fecha bancaria no es válida.');
+        }
+        $detail = trim((string) ($input['detail'] ?? ''));
+        if ($detail === '') {
+            throw new RuntimeException('El detalle del movimiento es obligatorio.');
+        }
+        if (mb_strlen($detail) > 500) {
+            throw new RuntimeException('El detalle no puede superar 500 caracteres.');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $lock = $this->pdo->prepare("SELECT id FROM bancos
+                WHERE id = :account AND razon = :company AND status_banco = 'AC' FOR UPDATE");
+            $lock->execute(['account' => $accountId, 'company' => $companyId]);
+            if (!$lock->fetchColumn()) {
+                throw new RuntimeException('La cuenta bancaria no pertenece a la empresa seleccionada.');
+            }
+            $account = $this->companies->accountForAnalysis($companyId, $accountId, $operatorId);
+            $match = $this->companies->analyzeShortKeys($companyId, $accountId, [$detail], $operatorId)[0] ?? [];
+            $clientId = !empty($match['associated']) ? (int) ($match['client_id'] ?? 0) : 0;
+            $now = new \DateTimeImmutable();
+            $captureLabel = 'Captura Manual de ' . $now->format('Y-m-d H:i:s');
+
+            $captureInsert = $this->pdo->prepare('INSERT INTO captura
+                (razon, nombre_corto, captura, fecha, hora)
+                VALUES (:company, :account, :capture, :date, :time)');
+            $captureInsert->execute([
+                'company' => (string) $companyId,
+                'account' => (string) $accountId,
+                'capture' => $captureLabel,
+                'date' => $now->format('Y-m-d'),
+                'time' => $now->format('H:i:s'),
+            ]);
+            $captureId = (int) $this->pdo->lastInsertId();
+            $deposit = $movementType === 'Deposito' ? $amount : 0.0;
+            $withdrawal = $movementType === 'Retiro' ? $amount : 0.0;
+
+            $statementInsert = $this->pdo->prepare("INSERT INTO captura_edo_cta
+                (id_captura, fecha_operacion, fecha, referencia, descripcion, deposito, retiro,
+                 saldo, descrip_det, tipo_movimiento, fecha_sistema, asignado, cliente_asignado, cuenta)
+                VALUES
+                (:capture, :bank_date, :bank_date_copy, 'Captura Manual', :description, :deposit, :withdrawal,
+                 :balance, :detail, :movement_type, :system_date, :assigned, :client, :account)");
+            $statementInsert->execute([
+                'capture' => $captureId,
+                'bank_date' => $bankDate,
+                'bank_date_copy' => $bankDate,
+                'description' => $detail,
+                'deposit' => $deposit,
+                'withdrawal' => $withdrawal,
+                'balance' => $balance,
+                'detail' => $detail,
+                'movement_type' => $movementType,
+                'system_date' => $now->format('Y-m-d'),
+                'assigned' => $clientId > 0 ? 'si' : 'no',
+                'client' => $clientId > 0 ? (string) $clientId : null,
+                'account' => $accountId,
+            ]);
+            $statementId = (int) $this->pdo->lastInsertId();
+
+            $paymentInsert = $this->pdo->prepare("INSERT INTO pagos
+                (nombre, monto, factura, empresa, status, fecha_operacion, fecha_captura,
+                 tipo_movimiento, saldo_acreditable, banco, saldo, usuario_registra, id_factura,
+                 fecha_banco, detalle, nombre_corto, tipo_captura, descripcion,
+                 descripcion_detallada, id_captura, id_captura_edo_cta, usuario_asigna_fac)
+                VALUES
+                (NULL, :amount, :invoice_status, :company, 'sin asignar', :operation_date, :captured_at,
+                 :movement_type, 0, 'Manual', 0, :operator, 0,
+                 :bank_date, :detail, :short_name, 'Manual', :description,
+                 :detailed_description, :capture, :statement, 9999)");
+            $paymentInsert->execute([
+                'amount' => $amount,
+                'invoice_status' => $movementType === 'Retiro' ? 'NA' : 'Sin Facturar',
+                'company' => (string) $companyId,
+                'operation_date' => $bankDate,
+                'captured_at' => $now->format('Y-m-d'),
+                'movement_type' => $movementType,
+                'operator' => $operatorId,
+                'bank_date' => $bankDate,
+                'detail' => mb_strtoupper($detail),
+                'short_name' => (string) $account['nombre_corto'],
+                'description' => $detail,
+                'detailed_description' => $detail,
+                'capture' => $captureId,
+                'statement' => $statementId,
+            ]);
+            $paymentId = (int) $this->pdo->lastInsertId();
+
+            $assignment = null;
+            $automaticInvoiceId = null;
+            if ($clientId > 0) {
+                $assignment = $this->movements->assignWithinTransaction($paymentId, $clientId, $operatorId);
+                $automaticInvoiceId = $this->automaticInvoices->createForCapturedMovement(
+                    $paymentId,
+                    $captureId,
+                    $companyId,
+                    (int) ($match['key_id'] ?? 0),
+                    $amount,
+                    $movementType,
+                    $operatorId,
+                );
+            }
+
+            $log = $this->pdo->prepare("INSERT INTO bitacora
+                (usuario_registra, hora_registra, fecha_registra, accion, monto, empresa, cliente)
+                VALUES (:operator, :time, :date, 'Captura Manual', :amount, :company, :client)");
+            $log->execute([
+                'operator' => $operatorId,
+                'time' => $now->format('H:i:s'),
+                'date' => $now->format('Y-m-d'),
+                'amount' => $amount,
+                'company' => $companyId,
+                'client' => $clientId > 0 ? $clientId : null,
+            ]);
+
+            $this->pdo->commit();
+            return [
+                'captureId' => $captureId,
+                'statementId' => $statementId,
+                'paymentId' => $paymentId,
+                'assignedClientId' => $clientId,
+                'assignedClient' => $clientId > 0 ? (string) ($match['client'] ?? '') : '',
+                'commissions' => (int) ($assignment['commissions'] ?? 0),
+                'automaticInvoiceId' => $automaticInvoiceId,
+            ];
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    public function deleteManual(int $captureId, int $operatorId): void
+    {
+        if ($captureId <= 0) {
+            throw new RuntimeException('La captura manual seleccionada no es válida.');
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $captureQuery = $this->pdo->prepare("SELECT c.id, CAST(c.razon AS UNSIGNED) AS company_id,
+                CAST(c.nombre_corto AS UNSIGNED) AS account_id, c.captura
+                FROM captura c WHERE c.id = :id FOR UPDATE");
+            $captureQuery->execute(['id' => $captureId]);
+            $capture = $captureQuery->fetch();
+            if (!$capture) {
+                throw new RuntimeException('La captura manual ya no existe.');
+            }
+            $this->companies->accountForAnalysis(
+                (int) $capture['company_id'],
+                (int) $capture['account_id'],
+                $operatorId
+            );
+            $manualCheck = $this->pdo->prepare("SELECT COUNT(*) FROM pagos
+                WHERE id_captura = :capture AND tipo_captura = 'Manual'");
+            $manualCheck->execute(['capture' => $captureId]);
+            if (!str_starts_with((string) $capture['captura'], 'Captura Manual')
+                && (int) $manualCheck->fetchColumn() === 0) {
+                throw new RuntimeException('Solo se pueden eliminar capturas creadas manualmente desde este módulo.');
+            }
+
+            $payments = $this->pdo->prepare('SELECT id, id_factura, id_factura_res FROM pagos
+                WHERE id_captura = :capture FOR UPDATE');
+            $payments->execute(['capture' => $captureId]);
+            $paymentRows = $payments->fetchAll();
+            foreach ($paymentRows as $payment) {
+                $complementId = trim((string) ($payment['id_factura_res'] ?? ''));
+                if (preg_match('/^[1-9]\d*$/D', $complementId)) {
+                    throw new RuntimeException('La captura tiene un complemento relacionado y no puede eliminarse.');
+                }
+            }
+
+            $invoices = $this->pdo->prepare("SELECT DISTINCT f.id, f.uuid
+                FROM facturas f LEFT JOIN pagos p ON p.id_captura = :payment_capture
+                WHERE f.id_captura = :invoice_capture OR f.id_pago = p.id OR f.id = p.id_factura
+                FOR UPDATE");
+            $invoices->execute(['payment_capture' => $captureId, 'invoice_capture' => $captureId]);
+            $invoiceRows = $invoices->fetchAll();
+            foreach ($invoiceRows as $invoice) {
+                if (trim((string) ($invoice['uuid'] ?? '')) !== '') {
+                    throw new RuntimeException('La captura tiene una factura timbrada y no puede eliminarse.');
+                }
+                $related = $this->pdo->prepare('SELECT COUNT(*) FROM facturar_rel_complementos WHERE id_factura = :id');
+                $related->execute(['id' => $invoice['id']]);
+                if ((int) $related->fetchColumn() > 0) {
+                    throw new RuntimeException('La captura tiene una factura relacionada con un complemento y no puede eliminarse.');
+                }
+            }
+            foreach ($invoiceRows as $invoice) {
+                $invoiceId = (int) $invoice['id'];
+                $this->pdo->prepare('DELETE FROM detalle_factura WHERE id_factura = :id')->execute(['id' => $invoiceId]);
+                if ($this->tableExists('facturas_fav')) {
+                    $this->pdo->prepare('DELETE FROM facturas_fav WHERE id_factura = :id')->execute(['id' => $invoiceId]);
+                }
+                $this->pdo->prepare('DELETE FROM facturas WHERE id = :id')->execute(['id' => $invoiceId]);
+            }
+
+            $paymentIds = array_map(static fn (array $payment): int => (int) $payment['id'], $paymentRows);
+            if ($paymentIds !== []) {
+                $paymentPlaceholders = implode(',', array_fill(0, count($paymentIds), '?'));
+                if ($this->tableExists('relacion_factura_pago')) {
+                    $this->pdo->prepare("DELETE FROM relacion_factura_pago WHERE id_pago IN ({$paymentPlaceholders})")
+                        ->execute($paymentIds);
+                }
+                if ($this->tableExists('s14_movimiento_comision_links')) {
+                    $linkParams = array_merge($paymentIds, $paymentIds);
+                    $this->pdo->prepare("DELETE FROM s14_movimiento_comision_links
+                        WHERE pago_origen_id IN ({$paymentPlaceholders})
+                           OR pago_comision_id IN ({$paymentPlaceholders})")->execute($linkParams);
+                }
+            }
+            $this->pdo->prepare('DELETE FROM pagos WHERE id_captura = :capture')->execute(['capture' => $captureId]);
+            $this->pdo->prepare('DELETE FROM captura_edo_cta WHERE id_captura = :capture')->execute(['capture' => $captureId]);
+            $this->pdo->prepare('DELETE FROM captura WHERE id = :capture')->execute(['capture' => $captureId]);
+
+            $now = new \DateTimeImmutable();
+            $log = $this->pdo->prepare("INSERT INTO bitacora
+                (usuario_registra, hora_registra, fecha_registra, accion, monto, empresa)
+                VALUES (:operator, :time, :date, 'Eliminar Captura Manual', 0, :company)");
+            $log->execute([
+                'operator' => $operatorId,
+                'time' => $now->format('H:i:s'),
+                'date' => $now->format('Y-m-d'),
+                'company' => (int) $capture['company_id'],
+            ]);
+            $this->pdo->commit();
+        } catch (Throwable $exception) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    public static function manualDecimal(mixed $value, bool $allowNegative, string $label): float
+    {
+        $normalized = str_replace([',', '$', ' '], '', trim((string) $value));
+        if ($normalized === '' || !is_numeric($normalized)) {
+            throw new RuntimeException($label . ' debe ser un número válido.');
+        }
+        $number = (float) $normalized;
+        if (!is_finite($number) || (!$allowNegative && $number <= 0)) {
+            throw new RuntimeException($allowNegative
+                ? $label . ' debe ser un número válido.'
+                : $label . ' debe ser mayor que cero.');
+        }
+        if (abs($number) > 999999999999.99) {
+            throw new RuntimeException($label . ' supera el importe permitido.');
+        }
+        return round($number, 2);
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $query = $this->pdo->prepare('SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = :table');
+        $query->execute(['table' => $table]);
+        return (int) $query->fetchColumn() > 0;
+    }
+
     private function tableRows(DOMXPath $xpath, DOMElement $table): array
     {
         $rows = [];

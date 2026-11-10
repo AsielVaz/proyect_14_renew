@@ -18,6 +18,14 @@ Los buscadores de **Movimientos sin asignar** y **Movimientos asignados** incluy
 
 En **Movimientos asignados**, el filtro de empresas inicia con todas marcadas. La interfaz envía únicamente `company_exclude[]` para las empresas desmarcadas, de modo que la selección se conserva al buscar y paginar sin generar una URL con todas las empresas del catálogo.
 
+## Capturas manuales
+
+El módulo **Movimientos → Capturas manuales** replica el flujo operativo anterior con validaciones y transacciones del sistema actual. Solicita empresa, cuenta bancaria activa, tipo de movimiento, monto, fecha bancaria, saldo mostrado por el banco y detalle. La operación crea de forma atómica la cabecera en `captura`, el movimiento en `captura_edo_cta`, el registro en `pagos` y la entrada de `bitacora`.
+
+El detalle se analiza con el mismo catálogo de claves cortas que las capturas bancarias pegadas. Si se identifica una cartera, el movimiento se asigna, se calculan las comisiones y, cuando la clave tiene facturación automática habilitada, se genera la factura pendiente correspondiente. Si no se identifica una clave, queda en Movimientos sin asignar.
+
+La eliminación desde el historial retira únicamente capturas manuales y sus registros asociados dentro de una transacción. Se bloquea cuando existe una factura timbrada, un complemento o una relación fiscal que deba conservarse.
+
 ## Asociación manual de documentos
 
 Los depósitos asignados que todavía no tengan `id_factura` ni una referencia entera válida en `id_factura_res` ofrecen la acción **Asignar documento**. La vista busca facturas y complementos que:

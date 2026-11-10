@@ -62,6 +62,12 @@ final class Movements
                     'fecha' => 'Fecha', 'detalle' => 'Detalle',
                 ],
             ],
+            'capturas-manuales' => [
+                'label' => 'Capturas manuales',
+                'description' => 'Registra movimientos bancarios individuales y conserva su relación con la captura, cuenta y cartera.',
+                'action' => 'manual_capture',
+                'columns' => [],
+            ],
             'stp' => [
                 'label' => 'Movimientos STP',
                 'description' => 'Órdenes registradas en la plantilla de ejecución STP.',

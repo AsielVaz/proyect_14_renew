@@ -313,6 +313,45 @@ final class CompanyPanelRepository
         return $this->assertAccount($companyId, $accountId);
     }
 
+    public function manualCaptureCatalog(int $operatorId): array
+    {
+        $restricted = !in_array($operatorId, self::RESTRICTED_OPERATORS, true)
+            ? ' AND e.id <> ' . self::RESTRICTED_COMPANY
+            : '';
+        $query = $this->pdo->query("SELECT e.id AS company_id, e.razon AS company,
+            b.id AS account_id, b.banco, b.nombre_corto, COALESCE(NULLIF(b.moneda, ''), 'MXN') AS moneda,
+            COALESCE(bank_balance.saldo, 0) AS saldo
+            FROM empresas e
+            INNER JOIN bancos b ON b.razon = e.id AND b.status_banco = 'AC'
+            LEFT JOIN (
+                SELECT cuenta, SUM(COALESCE(deposito, 0)) - SUM(COALESCE(retiro, 0)) AS saldo
+                FROM captura_edo_cta GROUP BY cuenta
+            ) bank_balance ON bank_balance.cuenta = b.id
+            WHERE e.comodin = 0 AND e.id <> 99 {$restricted}
+            ORDER BY e.razon ASC, b.banco ASC, b.nombre_corto ASC");
+
+        $companies = [];
+        foreach ($query->fetchAll() as $row) {
+            $companyId = (int) $row['company_id'];
+            if (!isset($companies[$companyId])) {
+                $companies[$companyId] = [
+                    'id' => $companyId,
+                    'name' => (string) $row['company'],
+                    'accounts' => [],
+                ];
+            }
+            $companies[$companyId]['accounts'][] = [
+                'id' => (int) $row['account_id'],
+                'bank' => (string) $row['banco'],
+                'name' => (string) $row['nombre_corto'],
+                'currency' => (string) $row['moneda'],
+                'balance' => (float) $row['saldo'],
+            ];
+        }
+
+        return array_values($companies);
+    }
+
     private function assertAccess(int $companyId, int $operatorId): void
     {
         if ($companyId <= 0 || ($companyId === self::RESTRICTED_COMPANY
