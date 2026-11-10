@@ -1330,10 +1330,28 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             && array_key_exists($requestedMovementTypeFilter, $movementTypeFilterLabels)
                 ? $requestedMovementTypeFilter
                 : '';
+        $movementCompanies = $movementKey === 'asignados'
+            ? movement_repository()->companiesForFilter()
+            : [];
+        $validMovementCompanyIds = array_map(
+            static fn (array $company): int => (int) $company['id'],
+            $movementCompanies
+        );
+        $requestedExcludedCompanies = $_GET['company_exclude'] ?? [];
+        $requestedExcludedCompanies = is_array($requestedExcludedCompanies)
+            ? $requestedExcludedCompanies
+            : [$requestedExcludedCompanies];
+        $movementExcludedCompanies = $movementKey === 'asignados'
+            ? array_values(array_unique(array_intersect(
+                array_map('intval', $requestedExcludedCompanies),
+                $validMovementCompanyIds
+            )))
+            : [];
         $movementSupportsFullPagination = in_array($movementKey, ['sin-asignar', 'cartera', 'asignados'], true);
         $movementSupportsShowAll = in_array($movementKey, ['cartera', 'asignados'], true);
         $movementHasAppliedFilter = $movementSearch !== '' || $movementFrom !== '' || $movementTo !== ''
-            || $movementDocumentFilters !== [] || $movementTypeFilter !== '';
+            || $movementDocumentFilters !== [] || $movementTypeFilter !== ''
+            || $movementExcludedCompanies !== [];
         if ($movementSupportsFullPagination && in_array($requestedMovementPerPage, ['25', '50', '100'], true)) {
             $movementPerPageValue = $requestedMovementPerPage;
             $movementPerPage = (int) $requestedMovementPerPage;
@@ -1360,7 +1378,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $movementTypeFilter,
             $movementFrom,
             $movementTo,
-            $movementDateType
+            $movementDateType,
+            $movementExcludedCompanies
         );
         $movementPaginationQuery = [
             'movement' => $movementKey,
@@ -1368,6 +1387,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             'q' => $movementSearch ?: null,
             'doc_filter' => $movementDocumentFilters ?: null,
             'movement_type' => $movementTypeFilter ?: null,
+            'company_exclude' => $movementExcludedCompanies ?: null,
             'from' => $movementFrom ?: null,
             'to' => $movementTo ?: null,
             'date_type' => $movementKey === 'cartera' ? $movementDateType : null,
@@ -1395,7 +1415,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         ?>
         <section class="report-intro movement-intro">
             <p><?= e($movementClient ? 'Movimientos de la cartera ' . $movementClient['nombre'] . ' (#' . $movementClient['id'] . ').' : $movement['description']) ?></p>
-            <?php if ($movementClient): ?><a class="button" href="?<?= e(http_build_query(['movement'=>$movementKey,'q'=>$movementSearch ?: null,'doc_filter'=>$movementDocumentFilters ?: null,'movement_type'=>$movementTypeFilter ?: null,'from'=>$movementFrom ?: null,'to'=>$movementTo ?: null,'date_type'=>$movementDateType,'per_page'=>$movementSupportsFullPagination ? $movementPerPageValue : null])) ?>">Quitar filtro de cartera</a><?php endif; ?>
+            <?php if ($movementClient): ?><a class="button" href="?<?= e(http_build_query(['movement'=>$movementKey,'q'=>$movementSearch ?: null,'doc_filter'=>$movementDocumentFilters ?: null,'movement_type'=>$movementTypeFilter ?: null,'company_exclude'=>$movementExcludedCompanies ?: null,'from'=>$movementFrom ?: null,'to'=>$movementTo ?: null,'date_type'=>$movementDateType,'per_page'=>$movementSupportsFullPagination ? $movementPerPageValue : null])) ?>">Quitar filtro de cartera</a><?php endif; ?>
             <?php if (in_array($movementAction, ['assign', 'reassign', 'unassign', 'transfer'], true)): ?>
                 <span class="operation-badge">Operación transaccional y auditada</span>
             <?php endif; ?>
@@ -1466,6 +1486,25 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type"><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
+                    <?php if ($movementKey === 'asignados'): ?>
+                        <?php $selectedMovementCompanyCount = count($movementCompanies) - count($movementExcludedCompanies); ?>
+                        <details class="movement-company-filter" data-company-filter>
+                            <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V6h7v14M11 10h9v10M7 9h1m-1 4h1m-1 4h1m7-3h1m-1 3h1"/></svg><span>Empresas</span><b data-company-filter-count><?= $selectedMovementCompanyCount === count($movementCompanies) ? 'Todas' : e($selectedMovementCompanyCount . ' de ' . count($movementCompanies)) ?></b></summary>
+                            <div class="movement-company-filter-panel">
+                                <header><div><strong>Empresas visibles</strong><small>Desmarca las que no quieras mostrar.</small></div><span data-company-filter-live role="status" aria-live="polite"><?= e($selectedMovementCompanyCount . ' seleccionadas') ?></span></header>
+                                <label class="movement-company-filter-search"><span class="sr-only">Buscar empresa dentro del filtro</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg><input type="search" placeholder="Buscar empresa…" autocomplete="off" data-company-filter-search></label>
+                                <div class="movement-company-filter-actions"><button type="button" data-company-filter-all>Marcar todas</button><button type="button" data-company-filter-none>Desmarcar todas</button></div>
+                                <div class="movement-company-filter-options" data-company-filter-options>
+                                    <?php foreach ($movementCompanies as $company): ?>
+                                        <?php $companyExcluded = in_array((int) $company['id'], $movementExcludedCompanies, true); ?>
+                                        <label data-company-filter-option data-company-search="<?= e(mb_strtolower((string) $company['razon']) . ' ' . $company['id']) ?>"><input type="checkbox" value="<?= e($company['id']) ?>" data-company-filter-checkbox <?= $companyExcluded ? '' : 'checked' ?>><span><strong><?= e($company['razon']) ?></strong><small>#<?= e($company['id']) ?></small></span></label>
+                                    <?php endforeach; ?>
+                                    <p class="movement-company-filter-empty" data-company-filter-empty hidden>No hay empresas que coincidan.</p>
+                                </div>
+                                <footer><button class="button primary" type="submit">Aplicar empresas</button></footer>
+                            </div>
+                        </details>
+                    <?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes. Sin selección se muestran todos.</small></fieldset><?php endif; ?>
                     <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
                     <button class="button" type="submit">Buscar</button>
@@ -2522,6 +2561,70 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             visibleMovementSearch.classList.add('is-searching-history');
         });
     }
+
+    document.querySelectorAll('[data-company-filter]').forEach((filter) => {
+        const form = filter.closest('form');
+        const checkboxes = Array.from(filter.querySelectorAll('[data-company-filter-checkbox]'));
+        const options = Array.from(filter.querySelectorAll('[data-company-filter-option]'));
+        const count = filter.querySelector('[data-company-filter-count]');
+        const live = filter.querySelector('[data-company-filter-live]');
+        const search = filter.querySelector('[data-company-filter-search]');
+        const empty = filter.querySelector('[data-company-filter-empty]');
+        const normalize = (value) => String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase('es-MX')
+            .trim();
+        const updateCount = () => {
+            const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
+            count.textContent = selected === checkboxes.length ? 'Todas' : `${selected} de ${checkboxes.length}`;
+            live.textContent = `${selected} empresa${selected === 1 ? '' : 's'} seleccionada${selected === 1 ? '' : 's'}`;
+        };
+        const setAll = (checked) => {
+            checkboxes.forEach((checkbox) => { checkbox.checked = checked; });
+            updateCount();
+        };
+        filter.querySelector('[data-company-filter-all]')?.addEventListener('click', () => setAll(true));
+        filter.querySelector('[data-company-filter-none]')?.addEventListener('click', () => setAll(false));
+        checkboxes.forEach((checkbox) => checkbox.addEventListener('change', updateCount));
+        search?.addEventListener('input', () => {
+            const query = normalize(search.value);
+            let visible = 0;
+            options.forEach((option) => {
+                const matches = query === '' || normalize(option.textContent).includes(query);
+                option.hidden = !matches;
+                if (matches) visible++;
+            });
+            if (empty) empty.hidden = visible !== 0;
+        });
+        search?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') event.preventDefault();
+        });
+        form?.addEventListener('submit', () => {
+            form.querySelectorAll('[data-generated-company-exclusion]').forEach((input) => input.remove());
+            checkboxes.filter((checkbox) => !checkbox.checked).forEach((checkbox) => {
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = 'company_exclude[]';
+                hidden.value = checkbox.value;
+                hidden.dataset.generatedCompanyExclusion = 'true';
+                form.appendChild(hidden);
+            });
+        });
+        filter.addEventListener('toggle', () => {
+            if (filter.open) window.requestAnimationFrame(() => search?.focus());
+        });
+        document.addEventListener('pointerdown', (event) => {
+            if (filter.open && !filter.contains(event.target)) filter.open = false;
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && filter.open) {
+                filter.open = false;
+                filter.querySelector('summary')?.focus();
+            }
+        });
+        updateCount();
+    });
 
     const recalculateInvoice = () => {
         if (!invoiceLines) return;

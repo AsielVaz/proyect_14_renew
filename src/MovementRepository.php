@@ -26,7 +26,8 @@ final class MovementRepository
         string $movementTypeFilter = '',
         string $dateFrom = '',
         string $dateTo = '',
-        string $dateType = 'assigned'
+        string $dateType = 'assigned',
+        array $excludedCompanyIds = []
     ): array
     {
         $filterByClient = $clientId !== null && $clientId > 0 && in_array($view, ['asignados', 'reasignar', 'totales', 'cartera'], true);
@@ -48,6 +49,12 @@ final class MovementRepository
             && in_array($movementTypeFilter, ['deposit', 'withdrawal'], true)
                 ? $movementTypeFilter
                 : '';
+        $excludedCompanyIds = $view === 'asignados'
+            ? array_values(array_unique(array_filter(
+                array_map('intval', $excludedCompanyIds),
+                static fn (int $id): bool => $id > 0
+            )))
+            : [];
         $dateFrom = $view === 'cartera' ? self::dateFilterValue($dateFrom) : '';
         $dateTo = $view === 'cartera' ? self::dateFilterValue($dateTo) : '';
         $dateType = $view === 'cartera' && in_array($dateType, ['bank', 'assigned'], true)
@@ -62,7 +69,8 @@ final class MovementRepository
         $supportsFullPagination = in_array($view, ['sin-asignar', 'cartera', 'asignados'], true);
         $supportsShowAll = in_array($view, ['cartera', 'asignados'], true);
         $hasAppliedFilter = $filterByClient || $search !== '' || $documentFilters !== []
-            || $movementTypeFilter !== '' || $dateFrom !== '' || $dateTo !== '';
+            || $movementTypeFilter !== '' || $dateFrom !== '' || $dateTo !== ''
+            || $excludedCompanyIds !== [];
         [$source, $sort] = $this->source(
             $view,
             $view === 'asignados' || $hasAppliedFilter,
@@ -92,6 +100,15 @@ final class MovementRepository
         if ($filterByClient) {
             $conditions[] = 'client_id = :client_id';
             $params['client_id'] = $clientId;
+        }
+        if ($excludedCompanyIds !== []) {
+            $companyPlaceholders = [];
+            foreach ($excludedCompanyIds as $index => $companyId) {
+                $placeholder = 'excluded_company_' . $index;
+                $companyPlaceholders[] = ':' . $placeholder;
+                $params[$placeholder] = $companyId;
+            }
+            $conditions[] = 'company_id NOT IN (' . implode(', ', $companyPlaceholders) . ')';
         }
         if ($dateFrom !== '') {
             $conditions[] = 'DATE(' . $dateColumn . ') >= :date_from';
@@ -259,6 +276,14 @@ final class MovementRepository
             'invoices' => $invoices,
             'complements' => $complements,
         ];
+    }
+
+    public function companiesForFilter(): array
+    {
+        return $this->pdo->query("SELECT id, razon
+            FROM empresas
+            WHERE comodin = 0 AND id <> 99
+            ORDER BY razon ASC, id ASC")->fetchAll();
     }
 
     public function assignDocument(int $paymentId, string $documentType, int $documentId, int $operatorId): array

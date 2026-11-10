@@ -16,6 +16,8 @@ Cada operación de escritura valida CSRF y se ejecuta dentro de una transacción
 
 Los buscadores de **Movimientos sin asignar** y **Movimientos asignados** incluyen los campos originales `pagos.descripcion`, `pagos.detalle` y `pagos.descripcion_detallada`. Al escribir filtran inmediatamente los registros de la página visible; al presionar Enter ejecutan la consulta sobre todo el histórico y conservan los filtros activos.
 
+En **Movimientos asignados**, el filtro de empresas inicia con todas marcadas. La interfaz envía únicamente `company_exclude[]` para las empresas desmarcadas, de modo que la selección se conserva al buscar y paginar sin generar una URL con todas las empresas del catálogo.
+
 ## Asociación manual de documentos
 
 Los depósitos asignados que todavía no tengan `id_factura` ni una referencia entera válida en `id_factura_res` ofrecen la acción **Asignar documento**. La vista busca facturas y complementos que:

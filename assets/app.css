@@ -1256,6 +1256,195 @@ textarea:focus {
     min-height: 40px;
 }
 
+.movement-company-filter {
+    position: relative;
+    align-self: flex-end;
+}
+
+.movement-company-filter > summary {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 11px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 10px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 750;
+    list-style: none;
+    cursor: pointer;
+}
+
+.movement-company-filter > summary::-webkit-details-marker {
+    display: none;
+}
+
+.movement-company-filter > summary:hover,
+.movement-company-filter > summary:focus-visible,
+.movement-company-filter[open] > summary {
+    border-color: var(--color-primary-border);
+    outline: 0;
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+}
+
+.movement-company-filter > summary svg,
+.movement-company-filter-search svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.movement-company-filter > summary b {
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+    font-size: 10px;
+}
+
+.movement-company-filter-panel {
+    position: absolute;
+    z-index: 120;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(390px, calc(100vw - 36px));
+    padding: 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-surface);
+    box-shadow: 0 20px 55px rgb(45 31 23 / 0.2);
+}
+
+.movement-company-filter-panel > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 11px;
+}
+
+.movement-company-filter-panel header > div,
+.movement-company-filter-panel header strong,
+.movement-company-filter-panel header small {
+    display: block;
+}
+
+.movement-company-filter-panel header small,
+.movement-company-filter-panel header > span {
+    color: var(--color-muted);
+    font-size: 11px;
+}
+
+.movement-company-filter-search {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 10px;
+    color: var(--color-muted);
+}
+
+.movement-company-filter-search:focus-within {
+    border-color: var(--color-primary-border);
+    box-shadow: 0 0 0 3px var(--color-primary-focus);
+}
+
+.movement-company-filter-search input {
+    width: 100%;
+    min-height: 38px;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+}
+
+.movement-company-filter-actions {
+    display: flex;
+    gap: 7px;
+    margin: 9px 0;
+}
+
+.movement-company-filter-actions button {
+    padding: 5px 8px;
+    border: 0;
+    background: transparent;
+    color: var(--color-primary-dark);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.movement-company-filter-options {
+    display: grid;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+}
+
+.movement-company-filter-options > label {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: center;
+    gap: 9px;
+    min-height: 44px;
+    padding: 7px 10px;
+    cursor: pointer;
+}
+
+.movement-company-filter-options > label + label {
+    border-top: 1px solid var(--color-border);
+}
+
+.movement-company-filter-options input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--color-primary);
+}
+
+.movement-company-filter-options label > span,
+.movement-company-filter-options label strong,
+.movement-company-filter-options label small {
+    display: block;
+    min-width: 0;
+}
+
+.movement-company-filter-options label strong {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.movement-company-filter-options label small {
+    color: var(--color-muted);
+    font-size: 10px;
+}
+
+.movement-company-filter-empty {
+    margin: 0;
+    padding: 18px 12px;
+    color: var(--color-muted);
+    font-size: 12px;
+    text-align: center;
+}
+
+.movement-company-filter-panel > footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 11px;
+}
+
 .movement-document-filters > div {
     display: flex;
     flex-wrap: wrap;
@@ -5302,8 +5491,25 @@ body.has-invoice-email-modal {
     .movement-type-filter,
     .movement-type-filter select,
     .movement-page-size,
-    .movement-page-size select {
+    .movement-page-size select,
+    .movement-company-filter,
+    .movement-company-filter > summary {
         width: 100%;
+    }
+
+    .movement-company-filter > summary {
+        min-height: 44px;
+        justify-content: center;
+    }
+
+    .movement-company-filter-panel {
+        position: fixed;
+        top: 86px;
+        right: 14px;
+        left: 14px;
+        width: auto;
+        max-height: calc(100dvh - 104px);
+        overflow: auto;
     }
 
     .movement-type-filter select,
