@@ -575,6 +575,119 @@ textarea:focus {
     color: var(--color-muted);
 }
 
+.glass-modal.fondeadora-mailbox-modal {
+    width: min(1120px, 100%);
+}
+
+.fondeadora-mailbox-status {
+    padding: 11px 13px;
+    border: 1px solid var(--color-border);
+    border-radius: 11px;
+    background: var(--color-surface-subtle);
+    color: var(--color-text-secondary);
+    font-size: 13px;
+}
+
+.fondeadora-mailbox-status.is-loading {
+    border-color: var(--color-primary-border);
+    background: var(--color-primary-soft);
+}
+
+.fondeadora-mailbox-status.is-warning {
+    border-color: #e5b8a8;
+    background: #fff4ef;
+    color: #8a3829;
+}
+
+.fondeadora-mailbox-summary {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(105px, 1fr));
+    gap: 8px;
+}
+
+.fondeadora-mailbox-summary[hidden] {
+    display: none;
+}
+
+.fondeadora-mailbox-summary > div {
+    display: grid;
+    gap: 2px;
+    padding: 11px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 11px;
+    background: var(--color-surface);
+}
+
+.fondeadora-mailbox-summary strong {
+    color: var(--color-primary-dark);
+    font-size: 20px;
+}
+
+.fondeadora-mailbox-summary span,
+.fondeadora-mailbox-table td small {
+    color: var(--color-muted);
+    font-size: 10px;
+}
+
+.fondeadora-mailbox-table {
+    max-height: min(460px, 52vh);
+}
+
+.fondeadora-mailbox-table table {
+    min-width: 920px;
+}
+
+.fondeadora-mailbox-table thead th {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    background: var(--color-surface);
+}
+
+.fondeadora-mailbox-table td strong,
+.fondeadora-mailbox-table td small {
+    display: block;
+}
+
+.fondeadora-code {
+    color: var(--color-primary-dark);
+    font-size: 16px;
+    font-weight: 850;
+    letter-spacing: 0.09em;
+}
+
+.fondeadora-code.is-empty {
+    color: var(--color-muted);
+    font-size: 11px;
+    letter-spacing: normal;
+}
+
+.fondeadora-status-badge {
+    display: inline-flex;
+    width: max-content;
+    margin-bottom: 4px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.fondeadora-status-badge.is-ok {
+    background: #e8f6ee;
+    color: #227647;
+}
+
+.fondeadora-status-badge.is-error {
+    background: #fff0ed;
+    color: #a33c2d;
+}
+
+.fondeadora-empty {
+    padding: 24px !important;
+    color: var(--color-muted);
+    text-align: center !important;
+}
+
 .dashboard-calculator-modal {
     overflow-y: auto;
 }
@@ -589,6 +702,10 @@ textarea:focus {
 
 .glass-modal.calculator-modal-card.calculator-modal-wide {
     width: min(850px, 100%);
+}
+
+.glass-modal.calculator-modal-card.fondeadora-mailbox-modal {
+    width: min(1120px, 100%);
 }
 
 .calculator-modal-card > header {
@@ -624,6 +741,12 @@ textarea:focus {
 
 .has-calculator-modal {
     overflow: hidden;
+}
+
+@media (max-width: 700px) {
+    .fondeadora-mailbox-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 .wallet-panel .panel-heading {

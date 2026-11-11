@@ -18,6 +18,7 @@ use App\ManualEmailService;
 use App\PdfDocumentService;
 use App\InvoiceEmailService;
 use App\XlsxExportService;
+use App\FondeadoraMailboxService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -291,6 +292,18 @@ function manual_email_service(): ManualEmailService
 {
     static $service;
     return $service ??= new ManualEmailService(APP_ROOT . '/src/manual-email-templates.php');
+}
+
+function fondeadora_mailbox_service(): FondeadoraMailboxService
+{
+    static $service;
+    return $service ??= new FondeadoraMailboxService(
+        db(),
+        env_value('FONDEADORA_IMAP_SERVER', 'mail.10h.io'),
+        max(1, (int) env_value('FONDEADORA_IMAP_PORT', '993')),
+        env_value('FONDEADORA_IMAP_FLAGS', '/imap/ssl'),
+        env_value('FONDEADORA_IMAP_FOLDER', 'INBOX'),
+    );
 }
 
 function auth_service(): App\AuthService
