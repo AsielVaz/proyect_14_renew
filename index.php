@@ -1336,7 +1336,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <div class="form-grid invoice-header-grid">
                         <label class="field"><span>Empresa emisora *</span><select name="company_id" id="invoiceCompany" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['companies'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $invoiceInitialCompanyId ? 'selected' : '' ?>><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Cliente *</span><select name="client_id" id="invoiceClient" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $invoiceInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Razón social *</span><select name="receiver_id" id="invoiceReceiver" required disabled><option value="">Selecciona primero un cliente…</option></select></label>
+                        <label class="field"><span>Razón social / clave corta *</span><select name="receiver_id" id="invoiceReceiver" required disabled><option value="">Selecciona primero un cliente…</option></select></label>
+                        <label class="field"><span>Régimen fiscal del receptor</span><input type="text" id="invoiceReceiverRegime" value="Selecciona una clave corta" readonly aria-readonly="true"><small>Se obtiene automáticamente de la clave corta seleccionada.</small></label>
                         <label class="field"><span>Método de pago *</span><select name="method_id" required><?php foreach ($invoiceData['methods'] as $item): ?><option value="<?= e($item['id']) ?>"><?= e($item['clave']) ?> · <?= e($item['metodo_pago']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Forma de pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e($item['forma_pago']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Uso CFDI *</span><select name="use_id" required><option value="">Seleccionar…</option><?php foreach ($invoiceData['uses'] as $item): ?><option value="<?= e($item['id']) ?>" <?= strtoupper(trim((string) $item['cod_sat'])) === 'G03' ? 'selected' : '' ?>><?= e($item['cod_sat']) ?> · <?= e($item['uso_cfdi']) ?></option><?php endforeach; ?></select></label>
@@ -2661,6 +2662,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const invoiceCompany = document.getElementById('invoiceCompany');
     const invoiceClient = document.getElementById('invoiceClient');
     const invoiceReceiver = document.getElementById('invoiceReceiver');
+    const invoiceReceiverRegime = document.getElementById('invoiceReceiverRegime');
     const invoiceConcept = document.getElementById('invoiceConcept');
     const invoiceLines = document.getElementById('invoiceLines');
     const invoiceForm = document.getElementById('invoiceForm');
@@ -2838,6 +2840,41 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         updateCount();
     });
 
+    const fiscalRegimeNames = {
+        '601': 'General de Ley Personas Morales',
+        '603': 'Personas Morales con Fines no Lucrativos',
+        '605': 'Sueldos y Salarios e Ingresos Asimilados a Salarios',
+        '606': 'Arrendamiento',
+        '607': 'Régimen de Enajenación o Adquisición de Bienes',
+        '608': 'Demás ingresos',
+        '609': 'Consolidación',
+        '610': 'Residentes en el Extranjero sin Establecimiento Permanente en México',
+        '611': 'Ingresos por Dividendos (socios y accionistas)',
+        '612': 'Personas Físicas con Actividades Empresariales y Profesionales',
+        '614': 'Ingresos por intereses',
+        '615': 'Régimen de los ingresos por obtención de premios',
+        '616': 'Sin obligaciones fiscales',
+        '620': 'Sociedades Cooperativas de Producción que optan por diferir sus ingresos',
+        '621': 'Incorporación Fiscal',
+        '622': 'Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras',
+        '623': 'Opcional para Grupos de Sociedades',
+        '624': 'Coordinados',
+        '625': 'Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas',
+        '626': 'Régimen Simplificado de Confianza',
+        '628': 'Hidrocarburos',
+        '629': 'De los Regímenes Fiscales Preferentes y de las Empresas Multinacionales',
+        '630': 'Enajenación de acciones en bolsa de valores',
+    };
+
+    const updateInvoiceReceiverRegime = () => {
+        if (!invoiceReceiverRegime) return;
+        const option = invoiceReceiver?.options[invoiceReceiver.selectedIndex];
+        const regime = String(option?.dataset.regime || '').trim();
+        invoiceReceiverRegime.value = regime
+            ? `${regime} · ${fiscalRegimeNames[regime] || 'Régimen fiscal registrado'}`
+            : (option?.value ? 'Sin régimen fiscal registrado' : 'Selecciona una clave corta');
+    };
+
     const recalculateInvoice = () => {
         if (!invoiceLines) return;
         let subtotal = 0;
@@ -2869,8 +2906,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             if (importInvoiceCapture) importInvoiceCapture.disabled = true;
         }
         select.innerHTML = '<option value="">Cargando…</option>';
+        if (type === 'receivers') updateInvoiceReceiverRegime();
         if (!id) {
             select.innerHTML = `<option value="">Selecciona primero ${type === 'receivers' ? 'un cliente' : 'una empresa'}…</option>`;
+            if (type === 'receivers') updateInvoiceReceiverRegime();
             return;
         }
         try {
@@ -2884,6 +2923,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 option.value = item.id;
                 if (type === 'receivers') {
                     option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}`;
+                    option.dataset.regime = item.regimen_fiscal || '';
                 } else {
                     option.textContent = `${item.clave_sat} · ${item.concepto}`;
                     option.dataset.description = item.concepto;
@@ -2900,17 +2940,23 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 if (importInvoiceCapture) importInvoiceCapture.disabled = result.data.length === 0;
             }
             if (result.data.length === 0) select.options[0].textContent = 'No hay opciones disponibles';
+            if (type === 'receivers') updateInvoiceReceiverRegime();
         } catch (error) {
             select.innerHTML = '<option value="">Error al cargar</option>';
             if (type === 'concepts') {
                 if (addInvoiceConcept) addInvoiceConcept.disabled = true;
                 if (importInvoiceCapture) importInvoiceCapture.disabled = true;
             }
+            if (type === 'receivers') updateInvoiceReceiverRegime();
             showToast(error instanceof Error ? error.message : 'No fue posible cargar el catálogo.', 'error');
         }
     };
 
-    invoiceClient?.addEventListener('change', () => loadInvoiceCatalog('receivers', invoiceClient.value, invoiceReceiver));
+    invoiceClient?.addEventListener('change', () => {
+        updateInvoiceReceiverRegime();
+        loadInvoiceCatalog('receivers', invoiceClient.value, invoiceReceiver);
+    });
+    invoiceReceiver?.addEventListener('change', updateInvoiceReceiverRegime);
     invoiceCompany?.addEventListener('change', () => {
         if (invoiceConceptModal && !invoiceConceptModal.hidden) closeInvoiceConceptModal();
         if (invoiceImportModal && !invoiceImportModal.hidden) closeInvoiceImportModal();
