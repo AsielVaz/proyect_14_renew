@@ -268,6 +268,85 @@ final class CompanyPanelRepository
         return $result;
     }
 
+    public function exportAccountMovements(int $companyId, int $accountId, array $filters, int $operatorId): array
+    {
+        $this->assertAccess($companyId, $operatorId);
+        $account = $this->assertAccount($companyId, $accountId);
+        $search = mb_substr(trim((string) ($filters['q'] ?? '')), 0, 160);
+        $fromValue = trim((string) ($filters['from'] ?? ''));
+        $toValue = trim((string) ($filters['to'] ?? ''));
+        $defaultedToCurrentMonth = $fromValue === '' && $toValue === '';
+        if ($defaultedToCurrentMonth) {
+            $today = new \DateTimeImmutable('today');
+            $fromValue = $today->modify('first day of this month')->format('Y-m-d');
+            $toValue = $today->modify('last day of this month')->format('Y-m-d');
+        }
+
+        foreach (['from' => $fromValue, 'to' => $toValue] as $label => $value) {
+            if ($value === '') {
+                continue;
+            }
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+            if (!$date || $date->format('Y-m-d') !== $value) {
+                throw new RuntimeException('El rango de fechas del Excel no es válido.');
+            }
+        }
+        if ($fromValue !== '' && $toValue !== '' && $fromValue > $toValue) {
+            throw new RuntimeException('La fecha inicial no puede ser posterior a la fecha final.');
+        }
+
+        $where = ' WHERE ce.cuenta = :account';
+        $params = ['account' => $accountId];
+        if ($search !== '') {
+            $where .= ' AND (CAST(ce.id AS CHAR) LIKE :search OR CAST(ce.id_captura AS CHAR) LIKE :search
+                OR ce.referencia LIKE :search OR ce.referencia_interb LIKE :search
+                OR ce.descripcion LIKE :search OR ce.descrip_det LIKE :search)';
+            $params['search'] = '%' . $search . '%';
+        }
+        if ($fromValue !== '' && $toValue !== '') {
+            $where .= ' AND ((ce.fecha BETWEEN :date_from AND :date_to)
+                OR (ce.fecha_sistema BETWEEN :system_from AND :system_to))';
+            $params += ['date_from' => $fromValue, 'date_to' => $toValue,
+                'system_from' => $fromValue, 'system_to' => $toValue];
+        } elseif ($fromValue !== '') {
+            $where .= ' AND (ce.fecha >= :date_from OR ce.fecha_sistema >= :system_from)';
+            $params += ['date_from' => $fromValue, 'system_from' => $fromValue];
+        } elseif ($toValue !== '') {
+            $where .= ' AND (ce.fecha <= :date_to OR ce.fecha_sistema <= :system_to)';
+            $params += ['date_to' => $toValue, 'system_to' => $toValue];
+        }
+
+        $query = $this->pdo->prepare("SELECT ce.id,
+            p.id AS pago_id, ce.fecha, ce.fecha_operacion, ce.hora_operacion, ce.fecha_sistema,
+            ce.referencia, ce.referencia_interb, ce.descripcion, ce.descrip_det,
+            ce.deposito, ce.retiro, ce.saldo, ce.id_captura, ce.cod_transac, ce.sucursal,
+            ce.cheque, ce.movimiento, ce.tipo_movimiento, ce.asignado, ce.cliente_asignado,
+            COALESCE(cl.nombre, '') AS cliente, ce.facturado, ce.cuenta,
+            b.banco, b.nombre_corto, b.numero_cuenta, b.clabe_interbancaria, b.moneda,
+            p.factura AS pago_factura, p.status AS pago_status,
+            p.id_factura, p.id_factura_res
+            FROM captura_edo_cta ce
+            LEFT JOIN pagos p ON p.id = (SELECT MAX(linked.id) FROM pagos linked WHERE linked.id_captura_edo_cta = ce.id)
+            LEFT JOIN clientes cl ON cl.id = CAST(COALESCE(NULLIF(p.nombre, ''), NULLIF(ce.cliente_asignado, ''), '0') AS UNSIGNED)
+            LEFT JOIN bancos b ON b.id = ce.cuenta
+            {$where}
+            ORDER BY COALESCE(ce.fecha, ce.fecha_sistema) ASC, ce.id ASC
+            LIMIT 50001");
+        $query->execute($params);
+        $rows = $query->fetchAll();
+        if (count($rows) > 50000) {
+            throw new RuntimeException('El rango contiene más de 50,000 movimientos. Reduce las fechas para exportarlo.');
+        }
+
+        return [
+            'account' => $account,
+            'rows' => $rows,
+            'from' => $fromValue,
+            'to' => $toValue,
+            'defaulted' => $defaultedToCurrentMonth,
+        ];
+    }
+
     public function analyzeShortKeys(int $companyId, int $accountId, array $descriptions, int $operatorId): array
     {
         $this->assertAccess($companyId, $operatorId);

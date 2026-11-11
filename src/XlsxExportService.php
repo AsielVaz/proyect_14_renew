@@ -9,7 +9,7 @@ use ZipArchive;
 
 final class XlsxExportService
 {
-    public function create(string $sheetName, array $headers, array $rows): string
+    public function create(string $sheetName, array $headers, array $rows, array $options = []): string
     {
         if (!class_exists(ZipArchive::class)) {
             throw new RuntimeException('La extensión ZIP de PHP es necesaria para exportar a Excel.');
@@ -32,7 +32,7 @@ final class XlsxExportService
             $zip->addFromString('xl/workbook.xml', $this->workbook($sheetName));
             $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships());
             $zip->addFromString('xl/styles.xml', $this->styles());
-            $zip->addFromString('xl/worksheets/sheet1.xml', $this->worksheet($headers, $rows));
+            $zip->addFromString('xl/worksheets/sheet1.xml', $this->worksheet($headers, $rows, $options));
             if (!$zip->close()) {
                 throw new RuntimeException('No fue posible finalizar el archivo de Excel.');
             }
@@ -48,7 +48,7 @@ final class XlsxExportService
         }
     }
 
-    private function worksheet(array $headers, array $rows): string
+    private function worksheet(array $headers, array $rows, array $options): string
     {
         $columnCount = count($headers);
         $lastColumn = $this->columnName(max(1, $columnCount));
@@ -57,8 +57,11 @@ final class XlsxExportService
             . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
             . '<cols>';
+        $keys = array_keys($headers);
+        $configuredWidths = is_array($options['widths'] ?? null) ? $options['widths'] : [];
         for ($column = 1; $column <= $columnCount; $column++) {
-            $width = $column === 1 ? 12 : 22;
+            $key = (string) ($keys[$column - 1] ?? '');
+            $width = max(8, min(80, (float) ($configuredWidths[$key] ?? ($column === 1 ? 12 : 22))));
             $xml .= '<col min="' . $column . '" max="' . $column . '" width="' . $width . '" customWidth="1"/>';
         }
         $xml .= '</cols><sheetData>' . $this->rowXml(1, array_values($headers), true);
@@ -67,12 +70,12 @@ final class XlsxExportService
             foreach (array_keys($headers) as $key) {
                 $values[] = $row[$key] ?? '';
             }
-            $xml .= $this->rowXml($index + 2, $values, false);
+            $xml .= $this->rowXml($index + 2, $values, false, !empty($options['wrap_text']));
         }
         return $xml . '</sheetData><autoFilter ref="A1:' . $lastColumn . $lastRow . '"/></worksheet>';
     }
 
-    private function rowXml(int $rowNumber, array $values, bool $header): string
+    private function rowXml(int $rowNumber, array $values, bool $header, bool $wrapText = false): string
     {
         $xml = '<row r="' . $rowNumber . '">';
         foreach ($values as $index => $value) {
@@ -81,7 +84,7 @@ final class XlsxExportService
                 $xml .= '<c r="' . $reference . '"><v>' . $this->escape((string) $value) . '</v></c>';
                 continue;
             }
-            $style = $header ? ' s="1"' : '';
+            $style = $header ? ' s="1"' : ($wrapText ? ' s="2"' : '');
             $xml .= '<c r="' . $reference . '" t="inlineStr"' . $style . '><is><t xml:space="preserve">'
                 . $this->escape((string) $value) . '</t></is></c>';
         }
@@ -150,7 +153,7 @@ final class XlsxExportService
             . '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1D4ED8"/><bgColor indexed="64"/></patternFill></fill></fills>'
             . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
             . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            . '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>'
+            . '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs>'
             . '</styleSheet>';
     }
 }

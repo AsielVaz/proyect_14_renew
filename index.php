@@ -249,6 +249,122 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx' && $companyView === 'account') {
+    try {
+        $companyId = (int) ($id ?? 0);
+        $accountId = (int) ($_GET['account_id'] ?? 0);
+        $export = company_panel_repository()->exportAccountMovements(
+            $companyId,
+            $accountId,
+            $_GET,
+            current_operator_id()
+        );
+        $headers = [
+            'id' => 'ID',
+            'pago_id' => 'ID pago',
+            'fecha_banco' => 'Fecha de banco',
+            'fecha_operacion' => 'Fecha de operación',
+            'hora_operacion' => 'Hora de operación',
+            'fecha_sistema' => 'Fecha de sistema',
+            'referencia' => 'Referencia',
+            'referencia_interbancaria' => 'Referencia interbancaria',
+            'descripcion' => 'Descripción',
+            'descripcion_detallada' => 'Descripción detallada',
+            'deposito' => 'Depósito',
+            'retiro' => 'Retiro',
+            'saldo' => 'Saldo',
+            'captura_id' => 'ID de captura',
+            'codigo_transaccion' => 'Código de transacción',
+            'sucursal' => 'Sucursal',
+            'cheque' => 'Cheque',
+            'movimiento' => 'Movimiento',
+            'tipo_movimiento' => 'Tipo de movimiento',
+            'asignado' => 'Asignado',
+            'cliente_id' => 'ID cliente asignado',
+            'cliente' => 'Cliente asignado',
+            'facturado' => 'Facturado',
+            'cuenta_id' => 'ID cuenta',
+            'banco' => 'Banco',
+            'nombre_corto' => 'Nombre corto',
+            'numero_cuenta' => 'Número de cuenta',
+            'clabe' => 'CLABE interbancaria',
+            'moneda' => 'Moneda',
+            'pago_factura' => 'Estado de factura del pago',
+            'pago_status' => 'Estado del pago',
+            'id_factura' => 'ID factura',
+            'id_complemento' => 'ID complemento',
+        ];
+        $rows = array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'pago_id' => $row['pago_id'] !== null ? (int) $row['pago_id'] : '',
+            'fecha_banco' => (string) ($row['fecha'] ?? ''),
+            'fecha_operacion' => (string) ($row['fecha_operacion'] ?? ''),
+            'hora_operacion' => (string) ($row['hora_operacion'] ?? ''),
+            'fecha_sistema' => (string) ($row['fecha_sistema'] ?? ''),
+            'referencia' => (string) ($row['referencia'] ?? ''),
+            'referencia_interbancaria' => (string) ($row['referencia_interb'] ?? ''),
+            'descripcion' => (string) ($row['descripcion'] ?? ''),
+            'descripcion_detallada' => (string) ($row['descrip_det'] ?? ''),
+            'deposito' => (float) ($row['deposito'] ?? 0),
+            'retiro' => (float) ($row['retiro'] ?? 0),
+            'saldo' => (float) ($row['saldo'] ?? 0),
+            'captura_id' => $row['id_captura'] !== null ? (int) $row['id_captura'] : '',
+            'codigo_transaccion' => (string) ($row['cod_transac'] ?? ''),
+            'sucursal' => (string) ($row['sucursal'] ?? ''),
+            'cheque' => (string) ($row['cheque'] ?? ''),
+            'movimiento' => (string) ($row['movimiento'] ?? ''),
+            'tipo_movimiento' => (string) ($row['tipo_movimiento'] ?? ''),
+            'asignado' => (string) ($row['asignado'] ?? ''),
+            'cliente_id' => (string) ($row['cliente_asignado'] ?? ''),
+            'cliente' => (string) ($row['cliente'] ?? ''),
+            'facturado' => (string) ($row['facturado'] ?? ''),
+            'cuenta_id' => (int) ($row['cuenta'] ?? 0),
+            'banco' => (string) ($row['banco'] ?? ''),
+            'nombre_corto' => (string) ($row['nombre_corto'] ?? ''),
+            'numero_cuenta' => (string) ($row['numero_cuenta'] ?? ''),
+            'clabe' => (string) ($row['clabe_interbancaria'] ?? ''),
+            'moneda' => (string) ($row['moneda'] ?? ''),
+            'pago_factura' => (string) ($row['pago_factura'] ?? ''),
+            'pago_status' => (string) ($row['pago_status'] ?? ''),
+            'id_factura' => (string) ($row['id_factura'] ?? ''),
+            'id_complemento' => (string) ($row['id_factura_res'] ?? ''),
+        ], $export['rows']);
+        $bytes = xlsx_export_service()->create(
+            'Estado de cuenta ' . $accountId,
+            $headers,
+            $rows,
+            [
+                'wrap_text' => true,
+                'widths' => [
+                    'fecha_banco' => 16, 'fecha_operacion' => 18, 'fecha_sistema' => 17,
+                    'referencia' => 28, 'referencia_interbancaria' => 28,
+                    'descripcion' => 44, 'descripcion_detallada' => 48,
+                    'deposito' => 15, 'retiro' => 15, 'saldo' => 15,
+                    'tipo_movimiento' => 20, 'cliente' => 28, 'banco' => 20,
+                    'nombre_corto' => 22, 'numero_cuenta' => 22, 'clabe' => 24,
+                ],
+            ]
+        );
+        $period = ($export['from'] ?: 'inicio') . '-a-' . ($export['to'] ?: 'fin');
+        $fileName = "estado-cuenta-empresa-{$companyId}-cuenta-{$accountId}-{$period}.xlsx";
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . strlen($bytes));
+        header('Cache-Control: private, no-store, max-age=0');
+        echo $bytes;
+    } catch (RuntimeException $exception) {
+        http_response_code(422);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo $exception->getMessage();
+    } catch (Throwable $exception) {
+        error_log('Excel estado de cuenta: ' . $exception->getMessage());
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'No fue posible exportar el estado de cuenta.';
+    }
+    exit;
+}
+
 if ($movementKey === 'correos-manuales' && isset($_GET['mail_action']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=UTF-8');
     try {
@@ -1075,7 +1191,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <section class="report-intro"><p><a href="?companies=detail&amp;id=<?= e($companyData['id']) ?>"><?= e($companyData['razon']) ?></a> · <?= e($sectionLabel) ?></p><span class="operation-badge"><?= $isAccount ? e(($companyResult['account']['banco'] ?? '') . ' · ' . ($companyResult['account']['nombre_corto'] ?? '')) : 'Consulta histórica' ?></span></section>
             <section class="panel">
                 <div class="panel-heading list-tools"><div><p class="eyebrow">Tesorería</p><h2><?= e($sectionLabel) ?></h2><p class="panel-copy"><?= count($companyResult['rows'] ?? []) ?> registros en esta página</p></div><a class="button" href="?companies=detail&amp;id=<?= e($companyData['id']) ?>">Volver al panel</a></div>
-                <form method="get" class="report-filters company-filters"><input type="hidden" name="companies" value="<?= e($companyView) ?>"><input type="hidden" name="id" value="<?= e($companyData['id']) ?>"><?php if ($isAccount): ?><input type="hidden" name="account_id" value="<?= e($_GET['account_id'] ?? '') ?>"><?php endif; ?><input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="ID, referencia, descripción…"><label>Desde<input type="date" name="from" value="<?= e($_GET['from'] ?? '') ?>"></label><label>Hasta<input type="date" name="to" value="<?= e($_GET['to'] ?? '') ?>"></label><?php if (!$isAccount): ?><label>Cuenta<select name="account"><option value="">Todas</option><?php foreach ($companyData['accounts'] as $account): ?><option value="<?= e($account['id']) ?>" <?= (string) ($_GET['account'] ?? '') === (string) $account['id'] ? 'selected' : '' ?>><?= e($account['banco'] . ' · ' . $account['nombre_corto']) ?></option><?php endforeach; ?></select></label><?php endif; ?><button class="button">Filtrar</button></form>
+                <form method="get" class="report-filters company-filters"><input type="hidden" name="companies" value="<?= e($companyView) ?>"><input type="hidden" name="id" value="<?= e($companyData['id']) ?>"><?php if ($isAccount): ?><input type="hidden" name="account_id" value="<?= e($_GET['account_id'] ?? '') ?>"><?php endif; ?><input type="search" name="q" value="<?= e($_GET['q'] ?? '') ?>" placeholder="ID, referencia, descripción…"><label>Desde<input type="date" name="from" value="<?= e($_GET['from'] ?? '') ?>"></label><label>Hasta<input type="date" name="to" value="<?= e($_GET['to'] ?? '') ?>"></label><?php if (!$isAccount): ?><label>Cuenta<select name="account"><option value="">Todas</option><?php foreach ($companyData['accounts'] as $account): ?><option value="<?= e($account['id']) ?>" <?= (string) ($_GET['account'] ?? '') === (string) $account['id'] ? 'selected' : '' ?>><?= e($account['banco'] . ' · ' . $account['nombre_corto']) ?></option><?php endforeach; ?></select></label><?php endif; ?><button class="button">Filtrar</button><?php if ($isAccount): ?><button class="button primary" type="submit" name="export" value="xlsx"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>Exportar Excel</button><?php endif; ?></form>
                 <div class="table-wrap"><table class="movement-table"><thead><tr>
                     <?php if ($isCaptures): ?><th>Captura</th><th>Fecha</th><th>Cuenta</th><th>Movimientos</th><th>Depósitos</th><th>Retiros</th><th></th>
                     <?php elseif ($isAccount): ?><th>Movimiento</th><th>Fecha</th><th>Referencia / descripción</th><th>Depósito</th><th>Retiro</th><th>Saldo</th><th>Captura</th>
