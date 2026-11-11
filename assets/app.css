@@ -1107,6 +1107,52 @@ textarea:focus {
     color: #982b24;
 }
 
+.invoice-analysis-cell {
+    text-align: center;
+}
+
+.invoice-analysis-badge {
+    display: inline-grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: var(--color-surface-subtle);
+    color: var(--color-muted);
+    cursor: help;
+    transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.invoice-analysis-badge svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.5;
+}
+
+.invoice-analysis-badge.is-valid {
+    border-color: #9ad6b1;
+    background: #e8f7ee;
+    color: #168343;
+}
+
+.invoice-analysis-badge.is-invalid {
+    border-color: #efaaa3;
+    background: #fff0ee;
+    color: #c7382f;
+}
+
+.invoice-analysis-badge:hover,
+.invoice-analysis-badge:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 4px var(--color-primary-focus);
+    transform: translateY(-1px) scale(1.05);
+}
+
 .invoice-concept-form-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -189,6 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
                 'metodo_pago' => 'Método de pago', 'forma_pago' => 'Forma de pago',
                 'status_pago' => 'Estado del pago', 'total' => 'Total',
                 'saldo_pendiente' => 'Saldo pendiente', 'estado_fiscal' => 'Estado fiscal',
+                'analisis' => 'Resultado del análisis', 'detalle_analisis' => 'Detalle del análisis',
                 'usuario' => 'Usuario',
             ];
             $rows = array_map(static fn (array $row): array => [
@@ -203,6 +204,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
                 'total' => (float) ($row['total_iva'] ?? 0),
                 'saldo_pendiente' => (float) ($row['saldo_pendiente'] ?? 0),
                 'estado_fiscal' => (string) (($row['status'] ?? '') ?: (($row['uuid'] ?? '') !== '' ? 'Timbrada' : (($row['status_error'] ?? '') ?: 'Pendiente'))),
+                'analisis' => (string) (($row['analysis_result'] ?? '') ?: 'sin_analisis'),
+                'detalle_analisis' => (string) (($row['analysis_summary'] ?? '') ?: 'Sin análisis registrado.'),
                 'usuario' => (string) ($row['usuario'] ?? ''),
             ], $sourceRows);
             $sheet = 'Facturas';
@@ -1412,13 +1415,40 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); [$invoiceFrom, $invoiceTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? ''); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage, 25, $invoiceFrom, $invoiceTo); $invoiceFilters = ['invoice'=>'list','q'=>$invoiceSearch,'from'=>$invoiceFrom,'to'=>$invoiceTo]; ?>
             <section class="report-intro"><p>Facturas guardadas en la tabla original, con emisor, receptor, relación de pago y estado fiscal.</p></section>
             <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Facturas</h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="report-filters document-filters"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente…" aria-label="Buscar facturas"><label><span>Desde</span><input type="date" name="from" value="<?= e($invoiceFrom) ?>"></label><label><span>Hasta</span><input type="date" name="to" value="<?= e($invoiceTo) ?>"></label><button class="button">Filtrar</button><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['export'=>'xlsx'])) ?>">Exportar a Excel</a><?php if ($invoiceSearch !== '' || $invoiceFrom !== '' || $invoiceTo !== ''): ?><a class="button subtle" href="?invoice=list">Limpiar</a><?php endif; ?></form></div>
-                <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Fecha</th><th>Timbrar</th><th>Estado fiscal / acciones</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><?php $invoiceStamped = trim((string) ($row['uuid'] ?? '')) !== ''; ?><tr data-record-row data-record-kind="invoice" data-record-id="<?= e($row['id']) ?>">
+                <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Fecha</th><th>Análisis</th><th>Timbrar</th><th>Estado fiscal / acciones</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><?php
+                    $invoiceStamped = trim((string) ($row['uuid'] ?? '')) !== '';
+                    $analysisResult = trim((string) ($row['analysis_result'] ?? ''));
+                    $analysisOk = $analysisResult === 'sin_inconsistencias';
+                    $analysisFailed = $analysisResult === 'con_inconsistencias';
+                    $analysisDetails = [];
+                    $analysisSummary = trim((string) ($row['analysis_summary'] ?? ''));
+                    if ($analysisSummary !== '') { $analysisDetails[] = $analysisSummary; }
+                    if ($analysisFailed) {
+                        $analysisErrors = json_decode((string) ($row['analysis_errors'] ?? ''), true);
+                        if (is_array($analysisErrors)) {
+                            foreach ($analysisErrors as $errorItem) {
+                                if (!is_array($errorItem)) continue;
+                                $problem = trim((string) ($errorItem['problema'] ?? ''));
+                                $suggestion = trim((string) ($errorItem['sugerencia'] ?? ''));
+                                $concept = trim((string) ($errorItem['concepto'] ?? ''));
+                                $detail = ($concept !== '' ? $concept . ': ' : '') . $problem;
+                                if ($suggestion !== '') { $detail .= ($detail !== '' ? ' ' : '') . 'Sugerencia: ' . $suggestion; }
+                                if ($detail !== '') { $analysisDetails[] = $detail; }
+                            }
+                        }
+                    }
+                    $analysisTooltip = mb_substr(implode("\n\n", array_unique($analysisDetails)), 0, 2000);
+                    if ($analysisTooltip === '') {
+                        $analysisTooltip = $analysisOk ? 'El análisis no encontró inconsistencias.' : ($analysisFailed ? 'El análisis encontró inconsistencias sin detalle adicional.' : 'Esta factura todavía no tiene un análisis registrado.');
+                    }
+                ?><tr data-record-row data-record-kind="invoice" data-record-id="<?= e($row['id']) ?>">
                     <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? '') . ($row['folio'] ?? '')) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa']) ?></span><span class="movement-cell-secondary"><?= e($row['usuario']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['cliente']) ?></span><span class="movement-cell-secondary"><?= e($row['rfc']) ?> · <?= e($row['receptor']) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['metodo_pago']) ?></span><span class="movement-cell-secondary"><?= e($row['forma_pago']) ?> · <?= e($row['status_pago']) ?><?= $row['id_pago'] ? ' · Pago #' . e($row['id_pago']) : '' ?></span></td>
                     <td><?= e(report_value($row['total_iva'], 'money')) ?></td>
                     <td><time class="movement-cell-main" datetime="<?= e($row['fecha']) ?>"><?= e(display_date($row['fecha'], true)) ?></time></td>
+                    <td class="invoice-analysis-cell"><?php if ($analysisOk): ?><span class="invoice-analysis-badge is-valid" tabindex="0" title="<?= e($analysisTooltip) ?>" aria-label="Análisis sin inconsistencias. <?= e($analysisTooltip) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-9"/></svg><span class="sr-only">Sin inconsistencias</span></span><?php elseif ($analysisFailed): ?><span class="invoice-analysis-badge is-invalid" tabindex="0" title="<?= e($analysisTooltip) ?>" aria-label="Análisis con inconsistencias. <?= e($analysisTooltip) ?>"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg><span class="sr-only">Con inconsistencias</span></span><?php else: ?><span class="invoice-analysis-badge is-pending" tabindex="0" title="<?= e($analysisTooltip) ?>" aria-label="Sin análisis registrado">—<span class="sr-only">Sin análisis registrado</span></span><?php endif; ?></td>
                     <td class="document-stamp-cell"><?php if (!$invoiceStamped): ?><form method="post" class="direct-stamp-form" data-confirm="¿Timbrar fiscalmente la factura #<?= e($row['id']) ?>? Esta operación emitirá el CFDI." data-confirm-title="Timbrar factura"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" class="button primary compact" aria-label="Timbrar factura #<?= e($row['id']) ?>">Timbrar</button></form><?php else: ?><span aria-label="Factura ya timbrada">—</span><?php endif; ?></td>
                     <td><span class="movement-cell-main"><?= e($row['status'] ?: ($invoiceStamped ? 'Timbrada' : 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span>
                         <div class="record-action-controls">
@@ -1443,7 +1473,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             </div>
                         </div>
                     </td>
-                </tr><?php endforeach; ?><?php if ($invoiceResult['rows'] === []): ?><tr><td colspan="8" class="empty">No hay facturas para mostrar.</td></tr><?php endif; ?></tbody></table></div>
+                </tr><?php endforeach; ?><?php if ($invoiceResult['rows'] === []): ?><tr><td colspan="9" class="empty">No hay facturas para mostrar.</td></tr><?php endif; ?></tbody></table></div>
                 <div class="pagination"><span>Página <?= $invoiceResult['page'] ?><?= $invoiceResult['hasNext'] ? ' · Hay más resultados' : '' ?></span><div><?php if ($invoiceResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['page'=>$invoiceResult['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($invoiceResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['page'=>$invoiceResult['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
             </section>
         <?php endif; ?>

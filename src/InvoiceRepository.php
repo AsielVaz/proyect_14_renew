@@ -48,6 +48,17 @@ final class InvoiceRepository
                 GROUP BY id_factura
             ) pagos_factura ON pagos_factura.id_factura = f.id
             LEFT JOIN usuarios u ON u.id = f.usuario_crea ';
+        $joins .= ' LEFT JOIN (
+                SELECT analysis.id_factura, analysis.resultado_general, analysis.resumen,
+                    analysis.conceptos_error, analysis.id AS analysis_id
+                FROM facturas_analitica analysis
+                INNER JOIN (
+                    SELECT id_factura, MAX(id) AS latest_id
+                    FROM facturas_analitica
+                    WHERE id_factura IS NOT NULL
+                    GROUP BY id_factura
+                ) latest_analysis ON latest_analysis.latest_id = analysis.id
+            ) factura_analitica ON factura_analitica.id_factura = f.folio ';
         $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
         $fetchLimit = $perPage + 1;
@@ -57,7 +68,10 @@ final class InvoiceRepository
             GREATEST(0, f.total_iva - COALESCE(pagos_factura.total_pagado, 0)) AS saldo_pendiente,
             c.nombre AS cliente, c.correo AS cliente_correo,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
-            fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
+            fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario,
+            factura_analitica.analysis_id, factura_analitica.resultado_general AS analysis_result,
+            factura_analitica.resumen AS analysis_summary,
+            factura_analitica.conceptos_error AS analysis_errors' .
             $joins . $where . " ORDER BY f.id DESC LIMIT {$fetchLimit} OFFSET {$offset}");
         $query->execute($params);
         $rows = $query->fetchAll();
