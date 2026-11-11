@@ -2060,10 +2060,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         </section>
     <?php elseif (!$catalog): ?>
         <?php
-        $dashboardSearch = trim((string) ($_GET['q'] ?? ''));
-        $dashboardPage = max(1, (int) ($_GET['page'] ?? 1));
         $dashboardOverview = dashboard_overview(current_operator_id());
-        $dashboardWallets = dashboard_repository()->wallets($dashboardSearch, $dashboardPage, current_operator_id());
+        $dashboardWallets = dashboard_repository()->wallets('', 1, current_operator_id(), 0);
         $dashboardCalculators = dashboard_repository()->calculatorData(current_operator_id());
         $fondeadoraSnapshot = fondeadora_mailbox_service()->snapshot();
         $walletRows = $dashboardWallets['rows'];
@@ -2173,17 +2171,17 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <button type="button" class="wallet-filter" data-wallet-filter="movements" aria-pressed="false">Con movimientos <span><?= $walletCounts['movements'] ?></span></button>
                     <button type="button" class="wallet-filter" data-wallet-filter="balance" aria-pressed="false">Con saldo <span><?= $walletCounts['balance'] ?></span></button>
                 </div>
-                <form method="get" class="search wallet-search" role="search">
+                <div class="search wallet-search" role="search">
                     <label class="sr-only" for="wallet-search">Buscar cartera o clave</label>
                     <span class="search-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></span>
-                    <input id="wallet-search" type="search" name="q" value="<?= e($dashboardSearch) ?>" placeholder="Buscar cartera o clave…" autocomplete="off">
-                    <button class="button">Buscar</button>
-                </form>
+                    <input id="wallet-search" type="search" placeholder="Filtrar carteras al escribir…" autocomplete="off">
+                    <small data-wallet-search-result><?= number_format(count($walletRows)) ?> carteras visibles</small>
+                </div>
             </div>
             <div class="wallet-grid">
                 <?php foreach ($walletRows as $wallet): ?>
                     <?php $walletColor = preg_match('/^[0-9a-fA-F]{6}$/', ltrim((string) $wallet['color'], '#')) ? '#' . ltrim((string) $wallet['color'], '#') : 'var(--color-primary)'; ?>
-                    <article class="wallet-card <?= (float) $wallet['saldo'] < -0.005 ? 'is-negative' : '' ?>" style="--wallet-accent: <?= e($walletColor) ?>" data-wallet-card data-wallet-id="<?= e($wallet['id']) ?>" data-wallet-available="<?= (float) $wallet['saldo'] >= -0.005 ? 'true' : 'false' ?>" data-wallet-movements="<?= (int) $wallet['movimientos_pend'] > 0 ? 'true' : 'false' ?>" data-wallet-balance="<?= abs((float) $wallet['saldo']) > 0.005 ? 'true' : 'false' ?>">
+                    <article class="wallet-card <?= (float) $wallet['saldo'] < -0.005 ? 'is-negative' : '' ?>" style="--wallet-accent: <?= e($walletColor) ?>" data-wallet-card data-wallet-id="<?= e($wallet['id']) ?>" data-wallet-search="<?= e(implode(' ', [$wallet['id'], $wallet['nombre'], $wallet['clave_corta']])) ?>" data-wallet-available="<?= (float) $wallet['saldo'] >= -0.005 ? 'true' : 'false' ?>" data-wallet-movements="<?= (int) $wallet['movimientos_pend'] > 0 ? 'true' : 'false' ?>" data-wallet-balance="<?= abs((float) $wallet['saldo']) > 0.005 ? 'true' : 'false' ?>">
                         <button type="button" class="wallet-balance-refresh" data-wallet-balance-refresh aria-label="Actualizar saldo de <?= e($wallet['nombre']) ?>" title="Actualizar saldo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6.2 6.5L4 11m16 2-2.2 4.5A7 7 0 0 1 5.5 15"/></svg></button>
                         <span class="sr-only" data-wallet-balance-status role="status" aria-live="polite"></span>
                         <header><div class="wallet-identity"><span class="wallet-avatar"><?= e(mb_strtoupper(mb_substr((string) $wallet['nombre'], 0, 1))) ?></span><div><h3><?= e($wallet['nombre']) ?></h3><small><?= e($wallet['clave_corta'] ?: 'Sin clave corta') ?> · #<?= e($wallet['id']) ?></small></div></div><span class="wallet-state"><i aria-hidden="true"></i><span data-wallet-state-label><?= (float) $wallet['saldo'] < -0.005 ? 'Saldo negativo' : 'Disponible' ?></span></span></header>
@@ -2197,9 +2195,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     </article>
                 <?php endforeach; ?>
                 <?php if ($dashboardWallets['rows'] === []): ?><p class="empty wallet-empty">No se encontraron carteras.</p><?php endif; ?>
-                <p class="empty wallet-filter-empty" hidden>No hay carteras que coincidan con este filtro en la página actual.</p>
+                <p class="empty wallet-filter-empty" hidden>No hay carteras que coincidan con la búsqueda y el filtro seleccionados.</p>
             </div>
-            <div class="pagination"><span>Página <?= $dashboardWallets['page'] ?> de <?= $dashboardWallets['lastPage'] ?> · <?= number_format($dashboardWallets['total']) ?> carteras</span><div><?php if ($dashboardWallets['page'] > 1): ?><a class="button" href="?<?= e(http_build_query(['q'=>$dashboardSearch,'page'=>$dashboardWallets['page']-1])) ?>">← Anterior</a><?php endif; ?><?php if ($dashboardWallets['page'] < $dashboardWallets['lastPage']): ?><a class="button" href="?<?= e(http_build_query(['q'=>$dashboardSearch,'page'=>$dashboardWallets['page']+1])) ?>">Siguiente →</a><?php endif; ?></div></div>
         </section>
     <?php elseif ($action === 'form'): ?>
         <section class="panel form-panel">
@@ -4669,24 +4666,60 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const filterButtons = Array.from(document.querySelectorAll('[data-wallet-filter]'));
     const walletCards = Array.from(document.querySelectorAll('.wallet-card[data-wallet-available]'));
     const filterEmpty = document.querySelector('.wallet-filter-empty');
+    const walletSearch = document.getElementById('wallet-search');
+    const walletSearchResult = document.querySelector('[data-wallet-search-result]');
+    const walletHideTimers = new WeakMap();
     if (filterButtons.length && walletCards.length) {
+        let activeWalletFilter = 'all';
+        const normalizeWalletSearch = (value) => String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase('es-MX')
+            .trim();
+        const setWalletVisibility = (card, visible) => {
+            const previousTimer = walletHideTimers.get(card);
+            if (previousTimer) window.clearTimeout(previousTimer);
+            if (visible) {
+                card.hidden = false;
+                window.requestAnimationFrame(() => card.classList.remove('is-filtering-out'));
+                return;
+            }
+            if (card.hidden) return;
+            card.classList.add('is-filtering-out');
+            walletHideTimers.set(card, window.setTimeout(() => {
+                card.hidden = true;
+                walletHideTimers.delete(card);
+            }, 180));
+        };
+        const applyWalletFilters = () => {
+            const query = normalizeWalletSearch(walletSearch?.value);
+            let visibleCount = 0;
+            walletCards.forEach((card) => {
+                const categoryMatches = activeWalletFilter === 'all'
+                    || card.dataset[`wallet${activeWalletFilter[0].toUpperCase()}${activeWalletFilter.slice(1)}`] === 'true';
+                const textMatches = query === ''
+                    || normalizeWalletSearch(card.dataset.walletSearch).includes(query);
+                const visible = categoryMatches && textMatches;
+                setWalletVisibility(card, visible);
+                if (visible) visibleCount++;
+            });
+            if (filterEmpty) filterEmpty.hidden = visibleCount !== 0;
+            if (walletSearchResult) {
+                walletSearchResult.textContent = `${visibleCount.toLocaleString('es-MX')} de ${walletCards.length.toLocaleString('es-MX')} carteras visibles`;
+            }
+        };
         filterButtons.forEach((button) => {
             button.addEventListener('click', () => {
-                const filter = button.dataset.walletFilter;
-                let visibleCount = 0;
+                activeWalletFilter = button.dataset.walletFilter;
                 filterButtons.forEach((item) => {
                     const active = item === button;
                     item.classList.toggle('is-active', active);
                     item.setAttribute('aria-pressed', String(active));
                 });
-                walletCards.forEach((card) => {
-                    const visible = filter === 'all' || card.dataset[`wallet${filter[0].toUpperCase()}${filter.slice(1)}`] === 'true';
-                    card.hidden = !visible;
-                    if (visible) visibleCount += 1;
-                });
-                if (filterEmpty) filterEmpty.hidden = visibleCount !== 0;
+                applyWalletFilters();
             });
         });
+        walletSearch?.addEventListener('input', applyWalletFilters);
     }
 
     document.querySelectorAll('[data-document-switch]').forEach((input) => {

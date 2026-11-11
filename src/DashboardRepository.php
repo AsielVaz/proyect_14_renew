@@ -38,7 +38,9 @@ final class DashboardRepository
             ) cc ON cc.id_cliente = c.id ';
 
         $page = max(1, $page);
-        $offset = ($page - 1) * $perPage;
+        $perPage = max(0, $perPage);
+        $offset = $perPage > 0 ? ($page - 1) * $perPage : 0;
+        $limit = $perPage > 0 ? " LIMIT {$perPage} OFFSET {$offset}" : '';
 
         $query = $this->pdo->prepare('SELECT c.id, c.nombre, c.color, c.texto, c.imagen,
             COALESCE(NULLIF(c.clave_corta, ""), cc.clave_corta, "") AS clave_corta,
@@ -48,10 +50,10 @@ final class DashboardRepository
             COALESCE(s.cheques_pend, 0) AS cheques_pend,
             COALESCE(s.cheques_pend_dinero, 0) AS cheques_pend_dinero,
             COALESCE(s.facturas_sin_pago, 0) AS facturas_sin_pago,
-            s.ultima_act, COUNT(*) OVER() AS __total' . $joins . $where . " ORDER BY c.nombre ASC LIMIT {$perPage} OFFSET {$offset}");
+            s.ultima_act, COUNT(*) OVER() AS __total' . $joins . $where . ' ORDER BY c.nombre ASC' . $limit);
         $query->execute($params);
         $rows = $query->fetchAll();
-        if ($rows === [] && $page > 1) {
+        if ($rows === [] && $page > 1 && $perPage > 0) {
             return $this->wallets($search, 1, $operatorId, $perPage);
         }
         $total = (int) ($rows[0]['__total'] ?? 0);
@@ -59,7 +61,7 @@ final class DashboardRepository
             unset($row['__total']);
         }
         unset($row);
-        $lastPage = max(1, (int) ceil($total / $perPage));
+        $lastPage = $perPage > 0 ? max(1, (int) ceil($total / $perPage)) : 1;
 
         return ['rows' => $rows, 'total' => $total, 'page' => $page, 'lastPage' => $lastPage];
     }

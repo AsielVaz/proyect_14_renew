@@ -8750,13 +8750,20 @@ main::before {
 .wallet-search {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(190px, 290px) auto;
+    grid-template-columns: minmax(210px, 320px);
+    gap: 4px;
     flex: 0 1 auto;
 }
 
 .wallet-search input {
     min-height: 44px;
     padding-left: 42px;
+}
+
+.wallet-search small {
+    padding-left: 4px;
+    color: var(--color-muted);
+    font-size: 10px;
 }
 
 .search-icon {
@@ -8782,7 +8789,14 @@ main::before {
     border-color: rgba(119, 91, 75, 0.16);
     border-radius: 15px;
     box-shadow: 0 8px 24px rgba(58, 37, 24, 0.06);
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform 180ms ease, opacity 180ms ease;
+}
+
+.wallet-card.is-filtering-out {
+    animation: none !important;
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+    pointer-events: none;
 }
 
 .wallet-card[hidden] {
