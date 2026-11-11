@@ -4,6 +4,12 @@
     "license": "proprietary",
     "require": {
         "lbuchs/webauthn": "^2.2",
-        "setasign/fpdf": "^1.8.6"
+        "setasign/fpdf": "^1.8.6",
+        "webklex/php-imap": "^6.2"
+    },
+    "config": {
+        "platform": {
+            "php": "8.2.0"
+        }
     }
 }

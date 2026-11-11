@@ -128,7 +128,11 @@ if (isset($_GET['fondeadora_mail']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         verify_csrf();
         current_operator_id();
         @set_time_limit(0);
-        $data = fondeadora_mailbox_service()->refreshAll();
+        if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+        $companyId = filter_var($_POST['company_id'] ?? null, FILTER_VALIDATE_INT) ?: 0;
+        $data = $companyId > 0
+            ? fondeadora_mailbox_service()->refreshOne($companyId)
+            : fondeadora_mailbox_service()->refreshAll();
         echo json_encode(['ok' => true, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     } catch (RuntimeException $exception) {
         http_response_code(422);
@@ -2061,6 +2065,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         $dashboardOverview = dashboard_overview(current_operator_id());
         $dashboardWallets = dashboard_repository()->wallets($dashboardSearch, $dashboardPage, current_operator_id());
         $dashboardCalculators = dashboard_repository()->calculatorData(current_operator_id());
+        $fondeadoraSnapshot = fondeadora_mailbox_service()->snapshot();
         $walletRows = $dashboardWallets['rows'];
         $walletCounts = [
             'all' => count($walletRows),
@@ -2141,17 +2146,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
         <div class="glass-modal-backdrop dashboard-calculator-modal" data-calculator-modal="fondeadora" id="fondeadoraMailboxModal" hidden>
             <section class="glass-modal calculator-modal-card calculator-modal-wide fondeadora-mailbox-modal" role="dialog" aria-modal="true" aria-labelledby="fondeadoraMailboxTitle" aria-describedby="fondeadoraMailboxHelp">
-                <header><span class="calculator-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3V6Zm1 1 8 6 8-6"/></svg></span><div><p class="eyebrow">Códigos de acceso</p><h2 id="fondeadoraMailboxTitle">Correos de Fondeadora</h2><p id="fondeadoraMailboxHelp">Revisa todas las cuentas configuradas y muestra el último código recibido por empresa.</p></div></header>
+                <header><span class="calculator-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3V6Zm1 1 8 6 8-6"/></svg></span><div><p class="eyebrow">Códigos de acceso</p><h2 id="fondeadoraMailboxTitle">Correos de Fondeadora</h2><p id="fondeadoraMailboxHelp">Muestra el último código recibido y permite consultar cada cuenta por separado.</p></div></header>
                 <input type="hidden" value="<?= e(csrf_token()) ?>" data-fondeadora-csrf>
-                <div class="fondeadora-mailbox-status" data-fondeadora-status role="status" aria-live="polite">Presiona actualizar para revisar los buzones.</div>
+                <script type="application/json" data-fondeadora-initial><?= json_encode($fondeadoraSnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR) ?></script>
+                <div class="fondeadora-mailbox-status" data-fondeadora-status role="status" aria-live="polite">Presiona Consultar en la empresa que quieras actualizar.</div>
                 <div class="fondeadora-mailbox-summary" data-fondeadora-summary hidden></div>
                 <div class="calculator-table fondeadora-mailbox-table" data-fondeadora-table hidden>
                     <table>
-                        <thead><tr><th>Empresa</th><th>Correo</th><th>Último código</th><th>Tipo</th><th>Fecha del correo</th><th>Actualización</th></tr></thead>
+                        <thead><tr><th>Empresa</th><th>Correo</th><th>Último código</th><th>Tipo</th><th>Fecha del correo</th><th>Consulta</th></tr></thead>
                         <tbody data-fondeadora-rows></tbody>
                     </table>
                 </div>
-                <div class="glass-modal-actions"><button type="button" class="button" data-calculator-close>Cerrar</button><button type="button" class="button primary" data-fondeadora-refresh>Actualizar correos</button></div>
+                <div class="glass-modal-actions"><button type="button" class="button" data-calculator-close>Cerrar</button></div>
             </section>
         </div>
 
@@ -3913,12 +3919,23 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     });
 
     const fondeadoraModal = document.getElementById('fondeadoraMailboxModal');
-    const fondeadoraRefresh = fondeadoraModal?.querySelector('[data-fondeadora-refresh]');
     const fondeadoraStatus = fondeadoraModal?.querySelector('[data-fondeadora-status]');
     const fondeadoraSummary = fondeadoraModal?.querySelector('[data-fondeadora-summary]');
     const fondeadoraTable = fondeadoraModal?.querySelector('[data-fondeadora-table]');
     const fondeadoraRows = fondeadoraModal?.querySelector('[data-fondeadora-rows]');
-    let fondeadoraLoading = false;
+    const fondeadoraInitialNode = fondeadoraModal?.querySelector('[data-fondeadora-initial]');
+    const fondeadoraInitialData = (() => {
+        if (!fondeadoraInitialNode) return null;
+        try {
+            return JSON.parse(fondeadoraInitialNode.textContent || 'null');
+        } catch (_error) {
+            return null;
+        }
+    })();
+    let fondeadoraData = fondeadoraInitialData
+        ? JSON.parse(JSON.stringify(fondeadoraInitialData))
+        : null;
+    const fondeadoraLoading = new Set();
 
     const mailboxDate = (value) => {
         if (!value) return 'Sin correo registrado';
@@ -3968,11 +3985,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             appendCalculatorCell(row, mailboxDate(item.last_date));
             const status = document.createElement('td');
             const badge = document.createElement('span');
-            badge.className = `fondeadora-status-badge ${item.refresh_status === 'ok' ? 'is-ok' : 'is-error'}`;
-            badge.textContent = item.refresh_status === 'ok' ? 'Actualizado' : 'Error';
+            const refreshStatus = item.refresh_status || 'pending';
+            badge.className = `fondeadora-status-badge ${refreshStatus === 'ok' ? 'is-ok' : (refreshStatus === 'error' ? 'is-error' : 'is-pending')}`;
+            badge.textContent = refreshStatus === 'ok'
+                ? 'Actualizado'
+                : (refreshStatus === 'error' ? 'Error' : (refreshStatus === 'loading' ? 'Consultando' : 'Guardado'));
             const detail = document.createElement('small');
             detail.textContent = item.refresh_message || '';
-            status.append(badge, detail);
+            const refreshButton = document.createElement('button');
+            refreshButton.type = 'button';
+            refreshButton.className = 'button fondeadora-company-refresh';
+            refreshButton.dataset.fondeadoraCompanyRefresh = item.id;
+            refreshButton.disabled = refreshStatus === 'loading';
+            refreshButton.textContent = refreshStatus === 'loading' ? 'Consultando…' : 'Consultar';
+            status.append(badge, detail, refreshButton);
             row.prepend(company);
             row.append(status);
             fondeadoraRows.appendChild(row);
@@ -3987,43 +4013,90 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         fondeadoraTable.hidden = false;
     };
 
-    const refreshFondeadoraMailboxes = async () => {
-        if (!fondeadoraModal || fondeadoraLoading) return;
-        fondeadoraLoading = true;
-        fondeadoraRefresh.disabled = true;
-        fondeadoraRefresh.textContent = 'Actualizando…';
+    const updateFondeadoraSummary = () => {
+        const rows = fondeadoraData?.rows || [];
+        const summary = {
+            companies: rows.length,
+            connected: 0,
+            unread: 0,
+            inserted: 0,
+            duplicates: 0,
+            omitted: 0,
+            errors: 0,
+        };
+        rows.forEach((row) => {
+            const rowSummary = row.refresh_summary || {};
+            ['connected', 'unread', 'inserted', 'duplicates', 'omitted', 'errors'].forEach((key) => {
+                summary[key] += Number(rowSummary[key] || 0);
+            });
+            if (row.refresh_status === 'error' && !rowSummary.errors) summary.errors++;
+        });
+        fondeadoraData.summary = summary;
+    };
+
+    const refreshFondeadoraCompany = async (companyId) => {
+        const id = Number(companyId || 0);
+        const row = fondeadoraData?.rows?.find((item) => Number(item.id) === id);
+        if (!fondeadoraModal || !row || fondeadoraLoading.has(id)) return;
+        fondeadoraLoading.add(id);
+        row.refresh_status = 'loading';
+        row.refresh_message = 'Conectando con este buzón…';
+        renderFondeadoraMailboxes(fondeadoraData);
         fondeadoraStatus.classList.add('is-loading');
-        fondeadoraStatus.textContent = 'Conectando a todos los buzones configurados. Este proceso puede tardar unos segundos…';
+        fondeadoraStatus.classList.remove('is-warning');
+        fondeadoraStatus.textContent = `Consultando el buzón de ${row.razon || `empresa ${id}`}…`;
+        const body = new FormData();
+        body.set('csrf_token', fondeadoraModal.querySelector('[data-fondeadora-csrf]').value);
+        body.set('company_id', id);
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 20000);
         try {
-            const body = new FormData();
-            body.set('csrf_token', fondeadoraModal.querySelector('[data-fondeadora-csrf]').value);
             const response = await fetch('?fondeadora_mail=refresh', {
-                method: 'POST', body, headers: {'Accept': 'application/json'},
+                method: 'POST',
+                body,
+                headers: {'Accept': 'application/json'},
+                signal: controller.signal,
             });
             const result = await response.json();
-            if (!response.ok || !result.ok) throw new Error(result.message || 'No fue posible actualizar los correos.');
-            renderFondeadoraMailboxes(result.data);
-            const errors = Number(result.data.summary?.errors || 0);
-            fondeadoraStatus.textContent = errors > 0
-                ? `${result.data.message} ${errors} cuenta(s) no pudieron conectarse; consulta el detalle de cada fila.`
-                : result.data.message;
-            fondeadoraStatus.classList.toggle('is-warning', errors > 0);
+            if (!response.ok || !result.ok) throw new Error(result.message || 'No fue posible actualizar el buzón.');
+            const updated = result.data?.rows?.[0];
+            if (updated) Object.assign(row, updated);
+            row.refresh_summary = result.data?.summary || {};
         } catch (error) {
-            fondeadoraStatus.textContent = error instanceof Error ? error.message : 'No fue posible actualizar los correos.';
-            fondeadoraStatus.classList.add('is-warning');
-            showToast(fondeadoraStatus.textContent);
+            row.refresh_status = 'error';
+            row.refresh_message = error?.name === 'AbortError'
+                ? 'La conexión superó el límite de 20 segundos.'
+                : (error instanceof Error ? error.message : 'No fue posible actualizar el buzón.');
+            row.refresh_summary = {errors: 1};
         } finally {
-            fondeadoraLoading = false;
-            fondeadoraRefresh.disabled = false;
-            fondeadoraRefresh.textContent = 'Actualizar correos';
-            fondeadoraStatus.classList.remove('is-loading');
+            window.clearTimeout(timeout);
+            fondeadoraLoading.delete(id);
+            updateFondeadoraSummary();
+            renderFondeadoraMailboxes(fondeadoraData);
+            const stillLoading = fondeadoraLoading.size;
+            fondeadoraStatus.classList.toggle('is-loading', stillLoading > 0);
+            fondeadoraStatus.classList.toggle('is-warning', row.refresh_status === 'error');
+            fondeadoraStatus.textContent = stillLoading > 0
+                ? `${stillLoading} buzón(es) continúan consultándose…`
+                : (row.refresh_status === 'error'
+                    ? `No fue posible actualizar ${row.razon || `la empresa ${id}`}. Consulta el detalle de la fila.`
+                    : `El buzón de ${row.razon || `empresa ${id}`} fue actualizado.`);
         }
     };
 
     document.querySelectorAll('[data-fondeadora-open]').forEach((button) => {
-        button.addEventListener('click', () => window.setTimeout(refreshFondeadoraMailboxes, 0));
+        button.addEventListener('click', () => {
+            if (fondeadoraData) {
+                renderFondeadoraMailboxes(fondeadoraData);
+                fondeadoraStatus.textContent = fondeadoraData.message;
+                fondeadoraStatus.classList.remove('is-warning');
+            }
+        });
     });
-    fondeadoraRefresh?.addEventListener('click', refreshFondeadoraMailboxes);
+    fondeadoraRows?.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-fondeadora-company-refresh]');
+        if (button) refreshFondeadoraCompany(button.dataset.fondeadoraCompanyRefresh);
+    });
 
     document.querySelectorAll('[data-dashboard-calculator]').forEach((form) => {
         form.addEventListener('submit', async (event) => {

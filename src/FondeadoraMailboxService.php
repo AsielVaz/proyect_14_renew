@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace App;
 
+use DateTimeInterface;
 use PDO;
+use Throwable;
+use Webklex\PHPIMAP\ClientManager;
+use Webklex\PHPIMAP\Message;
 
 final class FondeadoraMailboxService
 {
@@ -35,25 +39,18 @@ final class FondeadoraMailboxService
             'errors' => 0,
         ];
 
-        if (!function_exists('imap_open')) {
+        if (!class_exists(ClientManager::class)) {
             foreach ($companies as $company) {
                 $results[(int) $company['id']] = [
                     'status' => 'error',
-                    'message' => 'La extensión IMAP de PHP no está instalada o habilitada.',
+                    'message' => 'La biblioteca Webklex PHP-IMAP no está instalada.',
                     'unread' => 0,
                     'inserted' => 0,
                     'duplicates' => 0,
                 ];
                 $totals['errors']++;
             }
-            return $this->response($results, $totals, 'No fue posible revisar los buzones porque PHP no tiene habilitada la extensión IMAP.');
-        }
-
-        if (function_exists('imap_timeout')) {
-            @imap_timeout(IMAP_OPENTIMEOUT, 8);
-            @imap_timeout(IMAP_READTIMEOUT, 12);
-            @imap_timeout(IMAP_WRITETIMEOUT, 12);
-            @imap_timeout(IMAP_CLOSETIMEOUT, 5);
+            return $this->response($results, $totals, 'No fue posible revisar los buzones porque falta Webklex PHP-IMAP.');
         }
 
         foreach ($companies as $company) {
@@ -75,9 +72,9 @@ final class FondeadoraMailboxService
         return $this->response($results, $totals, $message);
     }
 
-    public function latestByCompany(): array
+    public function latestByCompany(?int $companyId = null): array
     {
-        $query = $this->pdo->query(
+        $sql =
             "SELECT e.id, e.razon, e.rfc, e.correo_contacto,
                     latest.codigo AS last_code, latest.tipo_correo AS last_type,
                     latest.fecha_correo AS last_date, latest.fecha_ingresa AS stored_at
@@ -93,9 +90,67 @@ final class FondeadoraMailboxService
                AND TRIM(e.correo_contacto) <> ''
                AND e.contra_contacto IS NOT NULL
                AND TRIM(e.contra_contacto) <> ''
-             ORDER BY e.razon ASC, e.id ASC"
-        );
+               AND (:company_id IS NULL OR e.id = :company_filter)
+             ORDER BY e.razon ASC, e.id ASC";
+        $query = $this->pdo->prepare($sql);
+        $query->execute([
+            'company_id' => $companyId,
+            'company_filter' => $companyId,
+        ]);
         return $query->fetchAll();
+    }
+
+    public function refreshOne(int $companyId): array
+    {
+        $company = $this->configuredCompany($companyId);
+        if ($company === null) {
+            throw new \RuntimeException('La empresa no tiene un buzón de Fondeadora configurado.');
+        }
+        $result = !class_exists(ClientManager::class)
+            ? [
+                'status' => 'error',
+                'message' => 'La biblioteca Webklex PHP-IMAP no está instalada.',
+                'unread' => 0,
+                'inserted' => 0,
+                'duplicates' => 0,
+                'omitted' => 0,
+            ]
+            : $this->refreshCompany($company);
+        $totals = [
+            'companies' => 1,
+            'connected' => $result['status'] === 'ok' ? 1 : 0,
+            'unread' => (int) ($result['unread'] ?? 0),
+            'inserted' => (int) ($result['inserted'] ?? 0),
+            'duplicates' => (int) ($result['duplicates'] ?? 0),
+            'omitted' => (int) ($result['omitted'] ?? 0),
+            'errors' => $result['status'] === 'ok' ? 0 : 1,
+        ];
+        return $this->response(
+            [$companyId => $result],
+            $totals,
+            (string) $result['message'],
+            $this->latestByCompany($companyId)
+        );
+    }
+
+    public function snapshot(): array
+    {
+        $rows = $this->latestByCompany();
+        $totals = [
+            'companies' => count($rows),
+            'connected' => 0,
+            'unread' => 0,
+            'inserted' => 0,
+            'duplicates' => 0,
+            'omitted' => 0,
+            'errors' => 0,
+        ];
+        return $this->response(
+            [],
+            $totals,
+            'Mostrando los últimos códigos guardados. Usa Consultar en la empresa que quieras actualizar.',
+            $rows
+        );
     }
 
     public static function classifySubject(string $subject): ?string
@@ -136,6 +191,21 @@ final class FondeadoraMailboxService
         )->fetchAll();
     }
 
+    private function configuredCompany(int $companyId): ?array
+    {
+        $query = $this->pdo->prepare(
+            "SELECT id, razon, rfc, LOWER(TRIM(correo_contacto)) AS correo_contacto, contra_contacto
+             FROM empresas
+             WHERE id = :id
+               AND correo_contacto IS NOT NULL AND TRIM(correo_contacto) <> ''
+               AND contra_contacto IS NOT NULL AND TRIM(contra_contacto) <> ''
+             LIMIT 1"
+        );
+        $query->execute(['id' => $companyId]);
+        $company = $query->fetch();
+        return is_array($company) ? $company : null;
+    }
+
     private function refreshCompany(array $company): array
     {
         $email = (string) $company['correo_contacto'];
@@ -144,57 +214,92 @@ final class FondeadoraMailboxService
             return array_merge($result, ['status' => 'error', 'message' => 'El correo de contacto no tiene un formato válido.']);
         }
 
-        $mailbox = sprintf('{%s:%d%s}%s', $this->server, $this->port, $this->flags, $this->folder);
-        imap_errors();
-        $imap = @imap_open($mailbox, $email, (string) $company['contra_contacto'], 0, 1);
-        if ($imap === false) {
-            $error = $this->cleanImapError((string) (imap_last_error() ?: 'La cuenta rechazó la conexión.'));
-            imap_errors();
-            return array_merge($result, ['status' => 'error', 'message' => 'No se pudo abrir el buzón: ' . $error]);
-        }
-
+        $client = null;
         try {
-            $uids = @imap_search($imap, 'UNSEEN', SE_UID);
-            $uids = is_array($uids) ? $uids : [];
-            $result['unread'] = count($uids);
-            foreach ($uids as $uid) {
-                if (!$this->processMessage($imap, (int) $uid, $email, $result)) {
+            $manager = new ClientManager($this->webklexConfig($email, (string) $company['contra_contacto']));
+            $client = $manager->account('fondeadora');
+            $client->connect();
+            $folder = $client->getFolder($this->folder);
+            if ($folder === null) {
+                throw new \RuntimeException('No se encontró la carpeta IMAP configurada.');
+            }
+            $messages = $folder->messages()->whereUnseen()->get();
+            $result['unread'] = $messages->count();
+            foreach ($messages as $message) {
+                if (!$message instanceof Message || !$this->processMessage($message, $email, $result)) {
                     $result['omitted']++;
                 }
             }
             $result['message'] = $result['inserted'] > 0
                 ? $result['inserted'] . ' código(s) nuevo(s) guardado(s).'
                 : 'Buzón revisado sin códigos nuevos.';
+        } catch (Throwable $exception) {
+            $result['status'] = 'error';
+            $result['message'] = 'No se pudo revisar el buzón: ' . $this->cleanImapError($exception->getMessage());
         } finally {
-            @imap_close($imap);
-            imap_errors();
+            if ($client !== null) {
+                try {
+                    $client->disconnect();
+                } catch (Throwable) {
+                    // La lectura ya terminó; un error al cerrar no debe ocultar el resultado.
+                }
+            }
         }
 
         return $result;
     }
 
-    private function processMessage(mixed $imap, int $uid, string $email, array &$result): bool
+    private function webklexConfig(string $email, string $password): array
     {
-        $overviews = @imap_fetch_overview($imap, (string) $uid, FT_UID);
-        if (!is_array($overviews) || !isset($overviews[0])) {
-            return false;
-        }
-        $overview = $overviews[0];
-        $subject = $this->decodeHeader((string) ($overview->subject ?? ''));
+        $flags = strtolower($this->flags);
+        $encryption = str_contains($flags, '/ssl')
+            ? 'ssl'
+            : (str_contains($flags, '/tls') ? 'tls' : false);
+        return [
+            'default' => 'fondeadora',
+            'accounts' => [
+                'fondeadora' => [
+                    'host' => $this->server,
+                    'port' => $this->port,
+                    'protocol' => 'imap',
+                    'encryption' => $encryption,
+                    'validate_cert' => !str_contains($flags, '/novalidate-cert'),
+                    'username' => $email,
+                    'password' => $password,
+                    'authentication' => null,
+                    'timeout' => 12,
+                ],
+            ],
+            'options' => [
+                'fetch' => \Webklex\PHPIMAP\IMAP::FT_PEEK,
+                'sequence' => \Webklex\PHPIMAP\IMAP::ST_UID,
+                'fetch_body' => true,
+                'fetch_flags' => true,
+                'soft_fail' => false,
+                'message_key' => 'uid',
+                'fetch_order' => 'asc',
+            ],
+        ];
+    }
+
+    private function processMessage(Message $message, string $email, array &$result): bool
+    {
+        $subject = trim((string) $message->getSubject());
         $type = self::classifySubject($subject);
-        if ($type === null || !$this->isExpectedSender($imap, $uid, $overview)) {
+        if ($type === null || !$this->isExpectedSender($message)) {
             return false;
         }
 
-        [$html, $text] = $this->messageBodies($imap, $uid);
+        $html = $message->getHTMLBody();
+        $text = $message->getTextBody();
         $code = self::extractOtpCode($html, $text);
         if ($code === null) {
             return false;
         }
-        $date = $this->emailDate((string) ($overview->date ?? ''));
+        $date = $this->emailDate($message);
         if ($this->codeExists($code, $date, $email)) {
             $result['duplicates']++;
-            @imap_setflag_full($imap, (string) $uid, '\\Seen', ST_UID);
+            $message->setFlag('Seen');
             return true;
         }
 
@@ -210,7 +315,7 @@ final class FondeadoraMailboxService
             'type' => $type,
         ]);
         $result['inserted']++;
-        @imap_setflag_full($imap, (string) $uid, '\\Seen', ST_UID);
+        $message->setFlag('Seen');
         return true;
     }
 
@@ -224,17 +329,16 @@ final class FondeadoraMailboxService
         return $query->fetchColumn() !== false;
     }
 
-    private function isExpectedSender(mixed $imap, int $uid, object $overview): bool
+    private function isExpectedSender(Message $message): bool
     {
-        $from = strtolower($this->decodeHeader((string) ($overview->from ?? '')));
-        if (preg_match_all('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $from, $matches)
-            && in_array(self::EXPECTED_SENDER, array_map('strtolower', $matches[0]), true)) {
-            return true;
+        $from = $message->getFrom();
+        if (!is_object($from) || !method_exists($from, 'toArray')) {
+            return false;
         }
-        $messageNumber = @imap_msgno($imap, $uid);
-        $header = $messageNumber ? @imap_headerinfo($imap, $messageNumber) : false;
-        foreach ((array) ($header->from ?? []) as $address) {
-            $sender = strtolower((string) ($address->mailbox ?? '') . '@' . (string) ($address->host ?? ''));
+        foreach ($from->toArray() as $address) {
+            $sender = is_object($address) && isset($address->mail)
+                ? strtolower(trim((string) $address->mail))
+                : strtolower(trim((string) $address));
             if ($sender === self::EXPECTED_SENDER) {
                 return true;
             }
@@ -242,88 +346,14 @@ final class FondeadoraMailboxService
         return false;
     }
 
-    private function messageBodies(mixed $imap, int $uid): array
+    private function emailDate(Message $message): string
     {
-        $html = [];
-        $text = [];
-        $structure = @imap_fetchstructure($imap, $uid, FT_UID);
-        if ($structure !== false) {
-            $this->collectBodies($imap, $uid, $structure, '', $html, $text);
+        $date = $message->getDate();
+        $value = is_object($date) && method_exists($date, 'first') ? $date->first() : $date;
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
         }
-        if ($html === [] && $text === []) {
-            $body = @imap_body($imap, $uid, FT_UID | FT_PEEK);
-            if (is_string($body)) {
-                $text[] = $body;
-            }
-        }
-        return [implode("\n", $html), implode("\n", $text)];
-    }
-
-    private function collectBodies(mixed $imap, int $uid, object $part, string $number, array &$html, array &$text): void
-    {
-        if (strcasecmp((string) ($part->disposition ?? ''), 'ATTACHMENT') === 0) {
-            return;
-        }
-        if (!empty($part->parts) && is_array($part->parts)) {
-            foreach ($part->parts as $index => $child) {
-                $childNumber = $number === '' ? (string) ($index + 1) : $number . '.' . ($index + 1);
-                $this->collectBodies($imap, $uid, $child, $childNumber, $html, $text);
-            }
-            return;
-        }
-        $body = @imap_fetchbody($imap, $uid, $number === '' ? '1' : $number, FT_UID | FT_PEEK);
-        if (!is_string($body)) {
-            return;
-        }
-        $body = match ((int) ($part->encoding ?? 0)) {
-            3 => base64_decode($body, true) ?: $body,
-            4 => quoted_printable_decode($body),
-            default => $body,
-        };
-        $charset = '';
-        foreach (array_merge((array) ($part->parameters ?? []), (array) ($part->dparameters ?? [])) as $parameter) {
-            if (strcasecmp((string) ($parameter->attribute ?? ''), 'CHARSET') === 0) {
-                $charset = (string) ($parameter->value ?? '');
-                break;
-            }
-        }
-        $body = $this->toUtf8($body, $charset);
-        $subtype = strtoupper((string) ($part->subtype ?? ''));
-        if ((int) ($part->type ?? -1) === 0 && $subtype === 'HTML') {
-            $html[] = $body;
-        } elseif ((int) ($part->type ?? -1) === 0 && $subtype === 'PLAIN') {
-            $text[] = $body;
-        }
-    }
-
-    private function decodeHeader(string $value): string
-    {
-        if ($value === '' || !function_exists('imap_mime_header_decode')) {
-            return $value;
-        }
-        $decoded = @imap_mime_header_decode($value);
-        if (!is_array($decoded)) {
-            return $value;
-        }
-        $result = '';
-        foreach ($decoded as $part) {
-            $result .= $this->toUtf8((string) ($part->text ?? ''), (string) ($part->charset ?? ''));
-        }
-        return $result;
-    }
-
-    private function toUtf8(string $value, string $charset): string
-    {
-        if ($value === '' || $charset === '' || in_array(strtoupper($charset), ['DEFAULT', 'UTF-8', 'US-ASCII'], true)) {
-            return $value;
-        }
-        $converted = function_exists('mb_convert_encoding') ? @mb_convert_encoding($value, 'UTF-8', $charset) : false;
-        return is_string($converted) ? $converted : $value;
-    }
-
-    private function emailDate(string $value): string
-    {
-        $timestamp = strtotime($value);
+        $timestamp = strtotime((string) $value);
         return date('Y-m-d H:i:s', $timestamp === false ? time() : $timestamp);
     }
 
@@ -333,13 +363,13 @@ final class FondeadoraMailboxService
         return mb_substr(trim(preg_replace('/\s+/', ' ', $clean) ?? $clean), 0, 300);
     }
 
-    private function response(array $results, array $totals, string $message): array
+    private function response(array $results, array $totals, string $message, ?array $rows = null): array
     {
-        $rows = $this->latestByCompany();
+        $rows ??= $this->latestByCompany();
         foreach ($rows as &$row) {
             $status = $results[(int) $row['id']] ?? null;
             $row['refresh_status'] = $status['status'] ?? 'pending';
-            $row['refresh_message'] = $status['message'] ?? 'Sin actualización en esta solicitud.';
+            $row['refresh_message'] = $status['message'] ?? 'Código guardado. Presiona Consultar para actualizarlo.';
             $row['unread'] = (int) ($status['unread'] ?? 0);
             $row['inserted'] = (int) ($status['inserted'] ?? 0);
             $row['duplicates'] = (int) ($status['duplicates'] ?? 0);

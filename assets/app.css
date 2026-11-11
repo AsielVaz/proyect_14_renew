@@ -682,6 +682,17 @@ textarea:focus {
     color: #a33c2d;
 }
 
+.fondeadora-status-badge.is-pending {
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+}
+
+.fondeadora-company-refresh {
+    margin-top: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+}
+
 .fondeadora-empty {
     padding: 24px !important;
     color: var(--color-muted);
