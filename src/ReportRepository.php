@@ -79,23 +79,70 @@ final class ReportRepository
                 [], '`id` DESC',
             ],
             'conta' => [
-                "SELECT p.id, e.razon AS empresa, cl.nombre AS cliente, p.monto, p.saldo_acreditable,
-                        COALESCE(b.nombre_corto, p.banco) AS banco, p.fecha_banco, p.fecha_asignacion,
-                        CONCAT_WS(' ', p.detalle, CONCAT(COALESCE(p.descripcion, ''), '{', COALESCE(MAX(ce.referencia), ''), '}'), p.descripcion_detallada) AS detalles,
-                        f.uuid, CONCAT_WS(' / ', f.serie, f.folio) AS serie_folio
+                "SELECT p.id AS pago_id,
+                        CASE
+                            WHEN COALESCE(p.id_factura, 0) > 0
+                                AND TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                                AND CAST(p.id_factura_res AS UNSIGNED) > 0 THEN 'Factura y complemento'
+                            WHEN COALESCE(p.id_factura, 0) > 0 THEN 'Factura'
+                            ELSE 'Complemento'
+                        END AS documentos,
+                        COALESCE(e.razon, 'Empresa no identificada') AS empresa,
+                        COALESCE(cl.nombre, 'Sin asignar') AS cliente,
+                        COALESCE(b.nombre_corto, p.banco, p.nombre_corto, 'Sin cuenta') AS cuenta,
+                        p.tipo_movimiento, p.monto,
+                        COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura) AS fecha_pago,
+                        p.fecha_asignacion,
+                        CONCAT_WS(' · ', NULLIF(p.detalle, ''), NULLIF(p.descripcion, ''), NULLIF(p.descripcion_detallada, '')) AS detalle_pago,
+                        CASE WHEN COALESCE(p.id_factura, 0) > 0 THEN p.id_factura ELSE NULL END AS factura_id,
+                        CASE WHEN f.id IS NOT NULL THEN CONCAT_WS(' / ', f.serie, f.folio) ELSE '' END AS factura_folio,
+                        COALESCE(f.uuid, '') AS factura_uuid,
+                        f.total_iva AS factura_total,
+                        CASE
+                            WHEN p.id_factura = 2 THEN 'Bandera documental; sin factura asociada'
+                            WHEN COALESCE(p.id_factura, 0) <= 0 THEN 'No aplica'
+                            WHEN f.id IS NULL THEN 'Registro de factura no encontrado'
+                            ELSE COALESCE(NULLIF(f.status, ''), NULLIF(f.status_error, ''), IF(NULLIF(f.uuid, '') IS NOT NULL, 'Timbrada', 'Pendiente'))
+                        END AS factura_estado,
+                        CASE
+                            WHEN TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                                AND CAST(p.id_factura_res AS UNSIGNED) > 0
+                            THEN CAST(p.id_factura_res AS UNSIGNED) ELSE NULL
+                        END AS complemento_id,
+                        CASE
+                            WHEN fc.id IS NOT NULL THEN CONCAT_WS(' / ', fc.serie, fc.folio)
+                            WHEN legacy_response.id IS NOT NULL THEN CONCAT_WS(' / ', legacy_response.serie, legacy_response.folio)
+                            ELSE ''
+                        END AS complemento_folio,
+                        COALESCE(fc.uuid, legacy_response.uuid, '') AS complemento_uuid,
+                        COALESCE(fc.total_factura, legacy_response.total_iva) AS complemento_total,
+                        COALESCE(fc.fecha_pago, legacy_response.fecha) AS complemento_fecha,
+                        CASE
+                            WHEN NOT (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                                AND CAST(p.id_factura_res AS UNSIGNED) > 0) THEN 'No aplica'
+                            WHEN fc.id IS NOT NULL THEN CONCAT('Complemento actual · ',
+                                COALESCE(NULLIF(fc.status, ''), NULLIF(fc.status_error, ''), IF(NULLIF(fc.uuid, '') IS NOT NULL, 'Timbrado', 'Pendiente')))
+                            WHEN legacy_response.id IS NOT NULL THEN CONCAT('Registro histórico · ',
+                                COALESCE(NULLIF(legacy_response.status, ''), NULLIF(legacy_response.status_error, ''), IF(NULLIF(legacy_response.uuid, '') IS NOT NULL, 'Timbrado', 'Pendiente')))
+                            ELSE 'Registro de complemento no encontrado'
+                        END AS complemento_estado
                  FROM pagos p
-                 LEFT JOIN clientes cl ON cl.id = p.nombre
+                 LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
                  LEFT JOIN captura c ON c.id = p.id_captura
-                 LEFT JOIN bancos b ON b.id = c.nombre_corto
-                 LEFT JOIN captura_edo_cta ce ON ce.id_captura = p.id_captura
-                    AND (p.monto = ce.deposito OR p.monto = ce.retiro) AND p.saldo = ce.saldo
-                 LEFT JOIN empresas e ON e.id = c.razon
-                 INNER JOIN facturas f ON f.id_pago = p.id
-                 WHERE p.saldo_acreditable <> 0 AND p.fecha_asignacion BETWEEN :date_from AND :date_to
-                 GROUP BY p.id, e.razon, cl.nombre, p.monto, p.saldo_acreditable, b.nombre_corto,
-                          p.banco, p.fecha_banco, p.fecha_asignacion, p.detalle, p.descripcion,
-                          p.descripcion_detallada, f.uuid, f.serie, f.folio",
-                ['date_from' => $from, 'date_to' => $to], '`fecha_asignacion` DESC, `id` DESC',
+                 LEFT JOIN bancos b ON b.id = CAST(COALESCE(c.nombre_corto, p.nombre_corto) AS UNSIGNED)
+                 LEFT JOIN empresas e ON e.id = CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED)
+                 LEFT JOIN facturas f ON f.id = p.id_factura AND p.id_factura <> 2
+                 LEFT JOIN facturas_complementos fc ON fc.id = CASE
+                    WHEN TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                    THEN CAST(p.id_factura_res AS UNSIGNED) ELSE NULL END
+                    AND fc.id_pago = p.id
+                 LEFT JOIN facturas legacy_response ON legacy_response.id = CASE
+                    WHEN TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                    THEN CAST(p.id_factura_res AS UNSIGNED) ELSE NULL END
+                 WHERE COALESCE(p.id_factura, 0) > 0
+                    OR (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
+                        AND CAST(p.id_factura_res AS UNSIGNED) > 0)",
+                [], '`pago_id` DESC',
             ],
             'conta-interno' => [
                 "SELECT f.id AS factura_id, f.fecha AS fecha_factura, f.uuid,
