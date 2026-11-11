@@ -445,7 +445,26 @@ function csrf_token(): string
 function verify_csrf(): void
 {
     $sent = (string) ($_POST['csrf_token'] ?? '');
-    if (!hash_equals(csrf_token(), $sent)) {
+    $expectedWasPresent = isset($_SESSION['csrf_token']);
+    $expected = csrf_token();
+    if (!hash_equals($expected, $sent)) {
+        if (function_exists('auth_log_event')) {
+            auth_log_event(
+                'csrf_invalid',
+                'Sesión vencida',
+                'El formulario fue rechazado porque el token de seguridad no coincide con la sesión actual.',
+                [
+                    'expected_token_was_present' => $expectedWasPresent,
+                    'submitted_token_was_present' => $sent !== '',
+                    'submitted_token_length' => strlen($sent),
+                    'form_action' => mb_substr((string) ($_POST['action'] ?? ''), 0, 100),
+                    'authenticated_user_was_present' => is_array($_SESSION['auth_user'] ?? null),
+                ],
+                null,
+                (string) ($_POST['email'] ?? ''),
+                'csrf'
+            );
+        }
         throw new RuntimeException('La sesión del formulario venció. Recarga la página e inténtalo otra vez.');
     }
 }

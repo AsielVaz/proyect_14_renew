@@ -11,10 +11,11 @@ final class Reports
         return [
             'accesos' => [
                 'label' => 'Acceso al sistema',
-                'description' => 'Sesiones registradas, dispositivo, dirección IP y tiempo de conexión.',
+                'description' => 'Inicios correctos, errores, bloqueos y vencimientos con su explicación técnica.',
                 'columns' => [
-                    'usuario' => 'Usuario', 'dispositivo' => 'Dispositivo', 'ip' => 'Dirección IP',
-                    'fecha' => 'Fecha', 'hora_i' => 'Hora de inicio', 'tiempo_conexion' => 'Tiempo de conexión',
+                    'usuario' => 'Usuario', 'resultado' => 'Resultado', 'evento' => 'Evento',
+                    'metodo' => 'Método', 'dispositivo' => 'Dispositivo', 'ip' => 'Dirección IP',
+                    'fecha' => 'Fecha', 'hora_i' => 'Hora', 'detalle' => 'Explicación detallada',
                     'activa' => 'Sesión activa',
                 ],
             ],

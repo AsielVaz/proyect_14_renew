@@ -39,10 +39,56 @@ function webauthn_verify_csrf_payload(array $payload): void
     }
 }
 
+function webauthn_client_data_context(array $payload): array
+{
+    $encoded = (string) ($payload['response']['clientDataJSON'] ?? '');
+    $clientData = [];
+    if ($encoded !== '') {
+        $normalized = strtr($encoded, '-_', '+/');
+        $normalized .= str_repeat('=', (4 - strlen($normalized) % 4) % 4);
+        $decoded = base64_decode($normalized, true);
+        $parsed = is_string($decoded) ? json_decode($decoded, true) : null;
+        $clientData = is_array($parsed) ? $parsed : [];
+    }
+
+    $config = webauthn_config();
+    return [
+        'expected_origin' => (string) ($config['origin'] ?? ''),
+        'received_origin' => mb_substr((string) ($clientData['origin'] ?? ''), 0, 1000),
+        'client_operation_type' => mb_substr((string) ($clientData['type'] ?? ''), 0, 100),
+        'rp_id' => (string) ($config['rp_id'] ?? ''),
+        'client_data_was_decoded' => $clientData !== [],
+        'passkey_response_was_present' => isset($payload['response']) && is_array($payload['response']),
+    ];
+}
+
+function webauthn_log_failure(string $action, array $payload, Throwable $exception, string $result = 'Error'): void
+{
+    $identity = mb_substr(trim((string) ($payload['identity'] ?? '')), 0, 254);
+    $context = array_merge(webauthn_client_data_context($payload), [
+        'webauthn_action' => $action,
+        'exception_class' => get_class($exception),
+        'exception_code' => (string) $exception->getCode(),
+    ]);
+    auth_log_event(
+        'webauthn_' . $action . '_failed',
+        $result,
+        $exception->getMessage(),
+        $context,
+        null,
+        $identity,
+        'passkey'
+    );
+}
+
 function handle_webauthn_endpoint(string $action): never
 {
-    webauthn_require_post();
     $payload = webauthn_payload();
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        $exception = new RuntimeException('Método no permitido para la operación WebAuthn.');
+        webauthn_log_failure($action, $payload, $exception);
+        webauthn_json_response(['ok' => false, 'message' => 'Método no permitido.'], 405);
+    }
     $ip = auth_client_ip();
     $loginLimiterIdentity = 'webauthn-login';
 
@@ -138,12 +184,14 @@ function handle_webauthn_endpoint(string $action): never
                 webauthn_json_response(['ok' => false, 'message' => 'Operación WebAuthn no disponible.'], 404);
         }
     } catch (PDOException $exception) {
+        webauthn_log_failure($action, $payload, $exception);
         error_log('WebAuthn database [' . $action . ']: ' . $exception->getMessage());
         webauthn_json_response([
             'ok' => false,
             'message' => 'No fue posible consultar las llaves de acceso en este momento.',
         ], 500);
     } catch (WebAuthnException $exception) {
+        webauthn_log_failure($action, $payload, $exception);
         error_log('WebAuthn validation [' . $action . ']: ' . $exception->getMessage());
         auth_failure_delay();
         webauthn_json_response([
@@ -151,8 +199,14 @@ function handle_webauthn_endpoint(string $action): never
             'message' => 'No fue posible verificar la llave de acceso. Solicita una nueva comprobación e inténtalo otra vez.',
         ], 422);
     } catch (RuntimeException $exception) {
+        $message = mb_strtolower($exception->getMessage());
+        $result = str_contains($message, 'sesión') || str_contains($message, 'formulario venció')
+            ? 'Sesión vencida'
+            : (str_contains($message, 'demasiad') || str_contains($message, 'bloquead') ? 'Bloqueado' : 'Error');
+        webauthn_log_failure($action, $payload, $exception, $result);
         webauthn_json_response(['ok' => false, 'message' => $exception->getMessage()], 422);
     } catch (Throwable $exception) {
+        webauthn_log_failure($action, $payload, $exception);
         error_log('WebAuthn [' . $action . ']: ' . $exception->getMessage());
         webauthn_json_response([
             'ok' => false,

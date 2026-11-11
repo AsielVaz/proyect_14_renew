@@ -57,7 +57,9 @@ final class ReportRepository
 
         return match ($key) {
             'accesos' => [
-                'SELECT id, usuario, agent AS dispositivo, ip, fecha, hora_i, tiempo_conexion, activa FROM logsesiones',
+                'SELECT id, usuario, tipo AS resultado, tipo AS evento, tiempo_conexion AS metodo,
+                        agent AS dispositivo, ip, fecha, hora_i, agent AS detalle, activa
+                 FROM logsesiones',
                 [], '`id` DESC',
             ],
             'bitacora' => [
@@ -237,6 +239,22 @@ final class ReportRepository
 
     private function transform(string $key, array $rows): array
     {
+        if ($key === 'accesos') {
+            foreach ($rows as &$row) {
+                $payload = json_decode((string) ($row['dispositivo'] ?? ''), true);
+                if (is_array($payload) && (int) ($payload['schema'] ?? 0) === 1) {
+                    $row['dispositivo'] = (string) ($payload['user_agent'] ?? 'No disponible');
+                    $row['evento'] = (string) ($payload['event'] ?? 'auth_event');
+                    $row['metodo'] = (string) ($payload['method'] ?? $row['metodo'] ?? '');
+                    $row['detalle'] = (string) ($payload['detail'] ?? $payload['message'] ?? '');
+                } else {
+                    $row['evento'] = (string) (($row['resultado'] ?? '') === 'Correcto' ? 'login_success' : 'legacy_event');
+                    $row['detalle'] = 'Registro histórico; no contiene contexto técnico adicional.';
+                }
+            }
+            unset($row);
+        }
+
         if ($key === 'correos-contexto') {
             foreach ($rows as &$row) {
                 [$message, $response] = array_pad(explode('RESPUESTA', (string) $row['mensaje'], 2), 2, '');
