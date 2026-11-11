@@ -1106,6 +1106,12 @@ final class MovementRepository
         string $movementTypeFilter = ''
     ): array
     {
+        $accountStatementReference = $view === 'sin-asignar'
+            ? 'cec.referencia AS referencia,'
+            : '';
+        $accountStatementJoin = $view === 'sin-asignar'
+            ? ' LEFT JOIN captura_edo_cta cec ON cec.id = p.id_captura_edo_cta'
+            : '';
         $documentConditions = [];
         foreach ($documentFilters as $documentFilter) {
             $documentConditions[] = match ($documentFilter) {
@@ -1132,6 +1138,7 @@ final class MovementRepository
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.banco, p.monto,
                         COALESCE(p.saldo_acreditable, 0) AS saldo_acreditable, p.tipo_movimiento,
+                        {$accountStatementReference}
                         p.detalle AS __detalle, p.descripcion AS __descripcion,
                         p.descripcion_detallada AS __descripcion_detallada,
                         CONCAT_WS(' ', p.detalle, p.descripcion, p.descripcion_detallada) AS detalles,
@@ -1142,7 +1149,7 @@ final class MovementRepository
                  LEFT JOIN bancos b ON b.id = c.nombre_corto
                  LEFT JOIN empresas e ON e.id = COALESCE(c.razon, p.empresa)
                  LEFT JOIN clientes cl ON cl.id = p.nombre
-                 LEFT JOIN usuarios u ON u.id = p.usuario_asigna_fac";
+                 LEFT JOIN usuarios u ON u.id = p.usuario_asigna_fac{$accountStatementJoin}";
 
         return match ($view) {
             'sin-asignar' => [

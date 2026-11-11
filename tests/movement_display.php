@@ -66,4 +66,15 @@ foreach ([$withDocumentSource, $unassignedSource] as $movementSource) {
     }
 }
 
-echo (count($cases) + 4 + count($invoiceReferences)) . " comprobaciones de presentación de movimientos superadas.\n";
+if (!str_contains($unassignedSource, 'LEFT JOIN captura_edo_cta cec ON cec.id = p.id_captura_edo_cta')
+    || !str_contains($unassignedSource, 'cec.referencia AS referencia')) {
+    throw new RuntimeException('Movimientos sin asignar debe recuperar la referencia mediante LEFT JOIN al estado de cuenta.');
+}
+if (!array_key_exists('referencia', App\Movements::get('sin-asignar')['columns'] ?? [])) {
+    throw new RuntimeException('Movimientos sin asignar debe mostrar la referencia bancaria.');
+}
+if (array_key_exists('referencia', App\Movements::get('asignados')['columns'] ?? [])) {
+    throw new RuntimeException('La nueva columna de referencia debe limitarse a movimientos sin asignar.');
+}
+
+echo (count($cases) + 7 + count($invoiceReferences)) . " comprobaciones de presentación de movimientos superadas.\n";

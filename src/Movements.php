@@ -13,7 +13,7 @@ final class Movements
                 'label' => 'Movimientos sin asignar',
                 'description' => 'Asigna depósitos o retiros a una cartera y calcula sus comisiones.',
                 'action' => 'assign',
-                'columns' => self::baseColumns(false),
+                'columns' => self::baseColumns(false, true, true),
             ],
             'asignados' => [
                 'label' => 'Movimientos asignados',
@@ -129,7 +129,11 @@ final class Movements
         return $id > 0 && $id !== 2 ? $id : 0;
     }
 
-    private static function baseColumns(bool $assigned, bool $showCreditable = true): array
+    private static function baseColumns(
+        bool $assigned,
+        bool $showCreditable = true,
+        bool $showReference = false
+    ): array
     {
         $columns = ['id' => 'ID'];
         if ($assigned) {
@@ -141,10 +145,13 @@ final class Movements
                 ? ['label' => 'Importe', 'format' => 'money', 'secondary' => ['saldo_acreditable' => 'Acreditable'], 'secondaryFormat' => ['saldo_acreditable' => 'money']]
                 : ['label' => $assigned ? 'Importe' : 'Monto', 'format' => 'money'],
             'tipo_movimiento' => ['label' => 'Movimiento', 'secondary' => ['detalles' => 'Detalle']],
-            'fecha_banco' => $assigned
-                ? ['label' => 'Fechas', 'secondary' => ['fecha_asignacion' => 'Asignado']]
-                : 'Fecha',
         ];
+        if ($showReference) {
+            $columns['referencia'] = 'Referencia';
+        }
+        $columns['fecha_banco'] = $assigned
+            ? ['label' => 'Fechas', 'secondary' => ['fecha_asignacion' => 'Asignado']]
+            : 'Fecha';
         return $columns;
     }
 }
