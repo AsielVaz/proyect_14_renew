@@ -48,17 +48,6 @@ final class InvoiceRepository
                 GROUP BY id_factura
             ) pagos_factura ON pagos_factura.id_factura = f.id
             LEFT JOIN usuarios u ON u.id = f.usuario_crea ';
-        $joins .= ' LEFT JOIN (
-                SELECT analysis.id_factura, analysis.resultado_general, analysis.resumen,
-                    analysis.conceptos_error, analysis.id AS analysis_id
-                FROM facturas_analitica analysis
-                INNER JOIN (
-                    SELECT id_factura, MAX(id) AS latest_id
-                    FROM facturas_analitica
-                    WHERE id_factura IS NOT NULL
-                    GROUP BY id_factura
-                ) latest_analysis ON latest_analysis.latest_id = analysis.id
-            ) factura_analitica ON factura_analitica.id_factura = f.folio ';
         $page = max(1, $page);
         $offset = ($page - 1) * $perPage;
         $fetchLimit = $perPage + 1;
@@ -68,10 +57,7 @@ final class InvoiceRepository
             GREATEST(0, f.total_iva - COALESCE(pagos_factura.total_pagado, 0)) AS saldo_pendiente,
             c.nombre AS cliente, c.correo AS cliente_correo,
             e.razon AS empresa, cc.razon_social AS receptor, cc.rfc,
-            fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario,
-            factura_analitica.analysis_id, factura_analitica.resultado_general AS analysis_result,
-            factura_analitica.resumen AS analysis_summary,
-            factura_analitica.conceptos_error AS analysis_errors' .
+            fp.forma_pago, mp.metodo_pago, COALESCE(u.nombre, "AUTO") AS usuario' .
             $joins . $where . " ORDER BY f.id DESC LIMIT {$fetchLimit} OFFSET {$offset}");
         $query->execute($params);
         $rows = $query->fetchAll();
@@ -79,6 +65,7 @@ final class InvoiceRepository
         if ($hasNext) {
             array_pop($rows);
         }
+        $rows = $this->attachAnalytics($rows);
         return [
             'rows' => $rows, 'total' => count($rows), 'page' => $page,
             'lastPage' => $page + ($hasNext ? 1 : 0), 'hasNext' => $hasNext, 'totalExact' => false,
@@ -94,6 +81,47 @@ final class InvoiceRepository
         }
 
         return $this->page($search, 1, 10000, $dateFrom, $dateTo)['rows'];
+    }
+
+    private function attachAnalytics(array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
+        $folios = array_values(array_unique(array_filter(array_map(
+            static fn (array $row): int => (int) ($row['folio'] ?? 0),
+            $rows
+        ))));
+        $analyticsByFolio = [];
+        foreach (array_chunk($folios, 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $query = $this->pdo->prepare("SELECT analysis.id AS analysis_id, analysis.id_factura,
+                    analysis.resultado_general AS analysis_result,
+                    analysis.resumen AS analysis_summary,
+                    analysis.conceptos_error AS analysis_errors
+                FROM facturas_analitica analysis
+                INNER JOIN (
+                    SELECT id_factura, MAX(id) AS latest_id
+                    FROM facturas_analitica
+                    WHERE id_factura IN ({$placeholders})
+                    GROUP BY id_factura
+                ) latest_analysis ON latest_analysis.latest_id = analysis.id");
+            $query->execute($chunk);
+            foreach ($query->fetchAll() as $analysis) {
+                $analyticsByFolio[(int) $analysis['id_factura']] = $analysis;
+            }
+        }
+
+        foreach ($rows as &$row) {
+            $analysis = $analyticsByFolio[(int) ($row['folio'] ?? 0)] ?? [];
+            $row['analysis_id'] = $analysis['analysis_id'] ?? null;
+            $row['analysis_result'] = $analysis['analysis_result'] ?? null;
+            $row['analysis_summary'] = $analysis['analysis_summary'] ?? null;
+            $row['analysis_errors'] = $analysis['analysis_errors'] ?? null;
+        }
+        unset($row);
+        return $rows;
     }
 
     public function formData(): array
