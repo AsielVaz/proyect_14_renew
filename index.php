@@ -2320,10 +2320,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     </section>
 </div>
 
-<div class="third-party-loader" id="thirdPartyLoader" role="status" aria-live="polite" aria-busy="true" hidden>
-    <div class="third-party-loader-card">
-        <span class="third-party-loader-spinner" aria-hidden="true"></span>
-        <div><strong id="thirdPartyLoaderTitle">Procesando solicitud</strong><p id="thirdPartyLoaderMessage">Conectando con el servicio externo…</p></div>
+<div class="system-loader" id="systemLoader" role="status" aria-live="polite" aria-busy="true" hidden>
+    <div class="system-loader-card">
+        <span class="system-loader-emblem" aria-hidden="true"><img src="assets/logo-s14.png" alt=""></span>
+        <div class="system-loader-copy"><strong id="systemLoaderTitle">Cargando módulo</strong><p id="systemLoaderMessage">Preparando la información solicitada…</p></div>
+        <span class="system-loader-progress" aria-hidden="true"></span>
     </div>
 </div>
 
@@ -2368,36 +2369,47 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
 <script nonce="<?= e(csp_nonce()) ?>">
 (() => {
-    const thirdPartyLoader = document.getElementById('thirdPartyLoader');
-    const thirdPartyLoaderTitle = document.getElementById('thirdPartyLoaderTitle');
-    const thirdPartyLoaderMessage = document.getElementById('thirdPartyLoaderMessage');
-    let thirdPartyLoaderTimer = null;
-    const hideThirdPartyLoader = () => {
-        window.clearTimeout(thirdPartyLoaderTimer);
-        thirdPartyLoader.classList.remove('is-visible');
-        document.body.classList.remove('has-third-party-loader');
+    const systemLoader = document.getElementById('systemLoader');
+    const systemLoaderTitle = document.getElementById('systemLoaderTitle');
+    const systemLoaderMessage = document.getElementById('systemLoaderMessage');
+    let systemLoaderRevealTimer = null;
+    let systemLoaderHideTimer = null;
+    const hideSystemLoader = () => {
+        window.clearTimeout(systemLoaderRevealTimer);
+        window.clearTimeout(systemLoaderHideTimer);
+        systemLoader.classList.remove('is-visible');
+        document.body.classList.remove('has-system-loader');
         window.setTimeout(() => {
-            if (!thirdPartyLoader.classList.contains('is-visible')) thirdPartyLoader.hidden = true;
+            if (!systemLoader.classList.contains('is-visible')) systemLoader.hidden = true;
         }, 220);
     };
-    const showThirdPartyLoader = (title, message, autoHide = 0) => {
-        window.clearTimeout(thirdPartyLoaderTimer);
-        thirdPartyLoaderTitle.textContent = title;
-        thirdPartyLoaderMessage.textContent = message;
-        thirdPartyLoader.hidden = false;
-        document.body.classList.add('has-third-party-loader');
-        window.requestAnimationFrame(() => thirdPartyLoader.classList.add('is-visible'));
-        if (autoHide > 0) {
-            thirdPartyLoaderTimer = window.setTimeout(() => {
-                thirdPartyLoader.classList.remove('is-visible');
-                document.body.classList.remove('has-third-party-loader');
-                window.setTimeout(() => { thirdPartyLoader.hidden = true; }, 220);
-            }, autoHide);
-        }
+    const showSystemLoader = (title, message, options = {}) => {
+        const {delay = 0, autoHide = 0} = options;
+        window.clearTimeout(systemLoaderRevealTimer);
+        window.clearTimeout(systemLoaderHideTimer);
+        const reveal = () => {
+            systemLoaderTitle.textContent = title;
+            systemLoaderMessage.textContent = message;
+            systemLoader.hidden = false;
+            document.body.classList.add('has-system-loader');
+            window.requestAnimationFrame(() => systemLoader.classList.add('is-visible'));
+            if (autoHide > 0) systemLoaderHideTimer = window.setTimeout(hideSystemLoader, autoHide);
+        };
+        systemLoaderRevealTimer = window.setTimeout(reveal, delay);
     };
-    window.addEventListener('pageshow', (event) => {
-        if (event.persisted) hideThirdPartyLoader();
-    });
+    window.addEventListener('pageshow', hideSystemLoader);
+
+    const moduleLoaderCopy = (url) => {
+        const params = url.searchParams;
+        if (params.has('invoice')) return ['Cargando facturación', 'Consultando facturas, receptores y estado fiscal…'];
+        if (params.has('complement')) return ['Cargando complementos', 'Consultando documentos de pago y sus relaciones…'];
+        if (params.has('movement')) return ['Cargando movimientos', 'Preparando movimientos, filtros y relaciones bancarias…'];
+        if (params.has('companies')) return ['Cargando empresas', 'Consultando cuentas, capturas y movimientos bancarios…'];
+        if (params.has('report')) return ['Generando reporte', 'Procesando la información y los filtros seleccionados…'];
+        if (params.has('statistics')) return ['Calculando estadísticas', 'Analizando la información del periodo seleccionado…'];
+        if (params.has('catalog')) return ['Cargando catálogo', 'Preparando los registros disponibles…'];
+        return ['Cargando Sistema 14', 'Actualizando la información del panel…'];
+    };
 
     const thirdPartyOperations = {
         invoice_stamp: ['Timbrando factura', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
@@ -2412,12 +2424,37 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (!(form instanceof HTMLFormElement)) return;
         const action = form.querySelector('[name="action"]')?.value || '';
         const operation = thirdPartyOperations[action];
-        if (operation) showThirdPartyLoader(operation[0], operation[1]);
+        if (operation) {
+            showSystemLoader(operation[0], operation[1], {delay: 80});
+            return;
+        }
+        const submitter = event.submitter;
+        if (form.target === '_blank' || submitter?.formTarget === '_blank'
+            || submitter?.name === 'export' || submitter?.value === 'xlsx') return;
+        const target = new URL(form.getAttribute('action') || window.location.href, window.location.href);
+        const copy = moduleLoaderCopy(target);
+        showSystemLoader(
+            form.method.toLowerCase() === 'post' ? 'Procesando operación' : copy[0],
+            form.method.toLowerCase() === 'post' ? 'Validando y guardando la información de forma segura…' : copy[1],
+            {delay: 180}
+        );
+    });
+
+    document.addEventListener('click', (event) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const link = event.target.closest('a[href]');
+        if (!link || link.hasAttribute('download') || link.target === '_blank') return;
+        const rawHref = link.getAttribute('href') || '';
+        if (rawHref.startsWith('#') || rawHref.startsWith('javascript:') || rawHref.startsWith('mailto:') || rawHref.startsWith('tel:')) return;
+        const target = new URL(link.href, window.location.href);
+        if (target.origin !== window.location.origin || target.searchParams.has('export') || target.searchParams.has('document')) return;
+        const copy = moduleLoaderCopy(target);
+        showSystemLoader(copy[0], copy[1], {delay: 180});
     });
 
     document.querySelectorAll('a[href*="ultra.sistema14.com"], a[href*="old.sistema14.com"]').forEach((link) => {
         link.addEventListener('click', () => {
-            showThirdPartyLoader('Abriendo documento', 'Solicitando el archivo a Sistema 14…', 1200);
+            showSystemLoader('Abriendo documento', 'Solicitando el archivo a Sistema 14…', {autoHide: 1200});
         });
     });
 
