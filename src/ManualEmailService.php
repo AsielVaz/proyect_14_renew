@@ -9,7 +9,7 @@ use Throwable;
 
 final class ManualEmailService
 {
-    public const ALLOWED_OPERATORS = [1, 32, 82];
+    public const ALLOWED_USER_TYPES = ['administrador', 'administrador_b'];
 
     private const MAX_HTML = 512000;
     private const MAX_FILE = 10485760;
@@ -40,9 +40,9 @@ final class ManualEmailService
         $this->loadTemplates();
     }
 
-    public static function isAllowed(int $operatorId): bool
+    public static function isAllowed(string $userType): bool
     {
-        return in_array($operatorId, self::ALLOWED_OPERATORS, true);
+        return in_array(mb_strtolower(trim($userType), 'UTF-8'), self::ALLOWED_USER_TYPES, true);
     }
 
     public function companies(): array

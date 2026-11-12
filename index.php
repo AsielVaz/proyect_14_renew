@@ -146,7 +146,7 @@ if (isset($_GET['fondeadora_mail']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $catalogs = Catalogs::all();
-$movements = Movements::allowedFor(current_operator_id());
+$movements = Movements::allowedFor((string) (current_user()['type'] ?? ''));
 $reports = Reports::all();
 $statistics = Statistics::all();
 $key = (string) ($_GET['catalog'] ?? '');
@@ -373,7 +373,7 @@ if ($movementKey === 'correos-manuales' && isset($_GET['mail_action']) && $_SERV
     header('Content-Type: application/json; charset=UTF-8');
     try {
         verify_csrf();
-        if (!ManualEmailService::isAllowed(current_operator_id())) {
+        if (!ManualEmailService::isAllowed((string) (current_user()['type'] ?? ''))) {
             throw new RuntimeException('No tienes permiso para utilizar este módulo.');
         }
         $result = match ((string) $_GET['mail_action']) {

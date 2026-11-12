@@ -85,17 +85,18 @@ final class Movements
                 'label' => 'Cotizador por correo',
                 'description' => 'Prepara cotizaciones con plantilla, revisa el HTML final y envía por correo.',
                 'action' => 'manual_email',
-                'restrictedTo' => [1, 32, 82],
+                'restrictedTypes' => ManualEmailService::ALLOWED_USER_TYPES,
                 'columns' => [],
             ],
         ];
     }
 
-    public static function allowedFor(int $operatorId): array
+    public static function allowedFor(string $userType): array
     {
-        return array_filter(self::all(), static function (array $movement) use ($operatorId): bool {
-            $restricted = $movement['restrictedTo'] ?? null;
-            return !is_array($restricted) || in_array($operatorId, $restricted, true);
+        $normalizedType = mb_strtolower(trim($userType), 'UTF-8');
+        return array_filter(self::all(), static function (array $movement) use ($normalizedType): bool {
+            $restricted = $movement['restrictedTypes'] ?? null;
+            return !is_array($restricted) || in_array($normalizedType, $restricted, true);
         });
     }
 
