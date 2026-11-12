@@ -84,16 +84,211 @@ final class PdfDocumentService
         return ['bytes' => $pdf->Output('S'), 'filename' => $name];
     }
 
-    private function document(): FiscalPdf
+    public function quotation(array $data): array
+    {
+        $concepts = is_array($data['concepts'] ?? null) ? $data['concepts'] : [];
+        if ($concepts === []) {
+            throw new RuntimeException('Agrega al menos un concepto para generar el PDF de cotización.');
+        }
+        $company = $this->quotationCompany(
+            (string) ($data['from_email'] ?? ''),
+            (string) ($data['from_name'] ?? 'Empresa emisora')
+        );
+        $reference = 'COT-' . strtoupper(substr(hash('sha256', json_encode([
+            $data['from_email'] ?? '',
+            $data['recipients'] ?? [],
+            $data['subject'] ?? '',
+            $concepts,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)), 0, 10));
+        $pdf = $this->document('Cotización comercial - Sistema 14');
+        $pdf->setFooterLabel('Cotización comercial · Documento informativo no fiscal');
+        $this->quotationHeader($pdf, $company, $reference);
+        $this->quotationParties($pdf, $company, $data);
+        $this->quotationMetaBar($pdf, $data);
+        $this->quotationTable($pdf, $concepts);
+        $this->quotationTotals($pdf, $data);
+        $this->quotationNotes($pdf, (string) ($data['notes'] ?? ''));
+        return [
+            'bytes' => $pdf->Output('S'),
+            'filename' => $this->filename(strtolower($reference) . '.pdf'),
+            'reference' => $reference,
+        ];
+    }
+
+    private function document(string $title = 'Documento fiscal - Sistema 14'): FiscalPdf
     {
         $pdf = new FiscalPdf('P', 'mm', 'Letter');
         $pdf->SetMargins(self::LEFT, 12, self::LEFT);
         $pdf->SetAutoPageBreak(true, 16);
         $pdf->AliasNbPages();
-        $pdf->SetTitle($pdf->encode('Documento fiscal - Sistema 14'));
+        $pdf->SetTitle($pdf->encode($title));
         $pdf->SetAuthor($pdf->encode('Sistema 14'));
         $pdf->AddPage();
         return $pdf;
+    }
+
+    private function quotationHeader(FiscalPdf $pdf, array $company, string $reference): void
+    {
+        $logo = $this->logoPath($company['logo'] ?? null);
+        if ($logo !== null) {
+            try {
+                [$width, $height] = getimagesize($logo['path']) ?: [0, 0];
+                if ($width > 0 && $height > 0) {
+                    $ratio = min(68.0 / $width, 38.0 / $height);
+                    $pdf->Image($logo['path'], 10, 3, $width * $ratio, $height * $ratio);
+                }
+            } finally {
+                if ($logo['temporary']) @unlink($logo['path']);
+            }
+        } else {
+            $pdf->SetFont('Arial', 'B', 14);
+            $pdf->SetTextColor(...FiscalPdf::NAVY);
+            $pdf->SetXY(15, 13);
+            $pdf->Cell(55, 10, 'SISTEMA 14', 0, 0, 'L');
+        }
+        $pdf->SetTextColor(...FiscalPdf::NAVY);
+        $companyName = (string) ($company['empresa'] ?? 'EMPRESA EMISORA');
+        $pdf->SetFont('Arial', 'B', mb_strlen($companyName) > 28 ? 11 : 14);
+        $pdf->SetXY(78, 7);
+        $pdf->Cell(124, 7, $pdf->encode($companyName), 0, 0, 'R');
+        $pdf->SetFont('Arial', '', 8);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
+        $pdf->SetXY(78, 15);
+        $pdf->Cell(124, 4, $pdf->encode('RFC ' . (($company['empresa_rfc'] ?? '') ?: 'No especificado')), 0, 0, 'R');
+        $pdf->SetFont('Arial', '', 6.5);
+        $pdf->SetXY(78, 20);
+        $pdf->Cell(124, 4, $pdf->encode($this->truncate($pdf, (string) (($company['empresa_regimen'] ?? '') ?: 'Datos fiscales no requeridos'), 124)), 0, 0, 'R');
+
+        $pdf->SetFillColor(...FiscalPdf::NAVY);
+        $pdf->Rect(132, 28, 70, 15, 'F');
+        $pdf->SetFont('Arial', 'B', 11);
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->SetXY(135, 30);
+        $pdf->Cell(64, 5, $pdf->encode('COTIZACIÓN'), 0, 0, 'C');
+        $pdf->SetFont('Arial', '', 7);
+        $pdf->SetTextColor(205, 213, 226);
+        $pdf->SetXY(135, 36);
+        $pdf->Cell(64, 4, $reference, 0, 0, 'C');
+
+        $pdf->SetFillColor(...FiscalPdf::ORANGE);
+        $pdf->Rect(0, 48, self::PAGE_WIDTH, 7, 'F');
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->SetFont('Arial', 'B', 6.5);
+        $pdf->SetXY(self::LEFT, 49.5);
+        $pdf->Cell(self::CONTENT, 4, $pdf->encode('PROPUESTA COMERCIAL · DOCUMENTO NO FISCAL'), 0, 0, 'L');
+        $pdf->SetY(59);
+    }
+
+    private function quotationParties(FiscalPdf $pdf, array $company, array $data): void
+    {
+        $gap = 6.0;
+        $width = (self::CONTENT - $gap) / 2;
+        $this->partyCard($pdf, self::LEFT, 59, $width, 'EMISOR', [
+            (string) ($company['empresa'] ?? 'Empresa emisora'),
+            (string) ($data['from_email'] ?? ''),
+            'RFC  ' . (($company['empresa_rfc'] ?? '') ?: 'No especificado'),
+        ]);
+        $recipients = is_array($data['recipients'] ?? null) ? $data['recipients'] : [];
+        $this->partyCard($pdf, self::LEFT + $width + $gap, 59, $width, 'DESTINATARIO', [
+            $recipients !== [] ? implode(', ', array_map('strval', $recipients)) : 'No especificado',
+            (string) (($data['subject'] ?? '') ?: 'Cotización comercial'),
+            'Datos fiscales pendientes de confirmación',
+        ]);
+        $pdf->SetY(94);
+    }
+
+    private function quotationMetaBar(FiscalPdf $pdf, array $data): void
+    {
+        $items = [
+            ['FECHA', date('d/m/Y')],
+            ['MONEDA', (string) (($data['currency'] ?? '') ?: 'MXN')],
+            ['DOCUMENTO', 'Cotización'],
+            ['VALIDEZ', 'No especificada'],
+        ];
+        $widths = [44, 38, 48, 58];
+        $x = self::LEFT;
+        foreach ($items as $index => [$label, $value]) {
+            $pdf->SetFont('Arial', 'B', 5.5);
+            $pdf->SetTextColor(...FiscalPdf::MUTED);
+            $pdf->SetXY($x + 1, 96);
+            $pdf->Cell($widths[$index] - 2, 3, $pdf->encode($label), 0, 0, 'L');
+            $pdf->SetFont('Arial', 'B', 7);
+            $pdf->SetTextColor(...FiscalPdf::INK);
+            $pdf->SetXY($x + 1, 100);
+            $pdf->Cell($widths[$index] - 2, 4, $pdf->encode($value), 0, 0, 'L');
+            $x += $widths[$index];
+        }
+        $pdf->SetY(108);
+    }
+
+    private function quotationTable(FiscalPdf $pdf, array $concepts): void
+    {
+        $widths = [18, 82, 30, 26, 32];
+        $headers = ['Cant.', 'Descripción', 'P. unitario', 'IVA', 'Total'];
+        $this->tableHeader($pdf, $headers, $widths);
+        foreach ($concepts as $concept) {
+            $description = $this->singleLine((string) ($concept['description'] ?? 'Concepto'));
+            $lines = max(1, (int) ceil($pdf->GetStringWidth($pdf->encode($description)) / ($widths[1] - 5)));
+            $height = max(9.0, min(15.0, $lines * 3.0 + 3));
+            if ($pdf->GetY() + $height > 205) {
+                $pdf->AddPage();
+                $this->continuationHeader($pdf, 'COTIZACIÓN', 'Conceptos - continuación');
+                $this->tableHeader($pdf, $headers, $widths);
+            }
+            $this->tableRow($pdf, [
+                (string) ($concept['quantity'] ?? '1'),
+                $description,
+                $this->money((float) ($concept['unit_price'] ?? 0)),
+                $this->money((float) ($concept['tax_amount'] ?? 0)),
+                $this->money((float) ($concept['total'] ?? 0)),
+            ], $widths, $height, 2.7);
+        }
+    }
+
+    private function quotationTotals(FiscalPdf $pdf, array $data): void
+    {
+        if ($pdf->GetY() > 215) {
+            $pdf->AddPage();
+            $this->continuationHeader($pdf, 'COTIZACIÓN', 'Resumen');
+        }
+        $subtotal = (float) ($data['subtotal'] ?? 0);
+        $tax = (float) ($data['tax'] ?? 0);
+        $total = (float) ($data['total'] ?? 0);
+        $y = $pdf->GetY() + 5;
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
+        $pdf->Line(self::LEFT, $y, 202, $y);
+        $pdf->SetFont('Arial', '', 6.5);
+        $pdf->SetTextColor(...FiscalPdf::MUTED);
+        $pdf->SetXY(self::LEFT + 1, $y + 5);
+        $pdf->Cell(92, 4, 'TOTAL ESTIMADO CON LETRA', 0, 0, 'L');
+        $pdf->SetFont('Arial', 'BI', 7.5);
+        $pdf->SetTextColor(...FiscalPdf::INK);
+        $pdf->SetXY(self::LEFT + 1, $y + 10);
+        $pdf->MultiCell(92, 4, $pdf->encode($this->amountWords($total, (string) ($data['currency'] ?? 'MXN'))), 0, 'L');
+        $this->totalsCard($pdf, 126, $y + 4, 76, [
+            ['Subtotal', $subtotal],
+            ['IVA', $tax],
+            ['TOTAL', $total],
+        ]);
+        $pdf->SetY($y + 44);
+    }
+
+    private function quotationNotes(FiscalPdf $pdf, string $notes): void
+    {
+        $notes = trim(preg_replace('/\s+/u', ' ', $notes) ?? '');
+        if ($notes === '') return;
+        if ($pdf->GetY() > 235) {
+            $pdf->AddPage();
+            $this->continuationHeader($pdf, 'COTIZACIÓN', 'Notas');
+        }
+        $this->sectionLabel($pdf, 'Notas de la cotización');
+        $pdf->SetFillColor(...FiscalPdf::SOFT);
+        $pdf->SetDrawColor(...FiscalPdf::BORDER);
+        $pdf->roundRect(self::LEFT, $pdf->GetY(), self::CONTENT, 24, 2.5, 'FD');
+        $pdf->SetXY(self::LEFT + 4, $pdf->GetY() + 4);
+        $pdf->SetFont('Arial', '', 7);
+        $pdf->SetTextColor(...FiscalPdf::INK);
+        $pdf->MultiCell(self::CONTENT - 8, 3.5, $pdf->encode($this->limit($notes, 1000)), 0, 'L');
     }
 
     private function coverHeader(FiscalPdf $pdf, string $type, array $row): void
@@ -572,7 +767,7 @@ final class PdfDocumentService
             $pdf->SetXY($x + 2, $y + 2);
             $pdf->SetTextColor(...FiscalPdf::INK);
             $pdf->SetFont('Arial', $index === count($values) - 1 ? 'B' : '', 6.7);
-            if ($index === 3 && count($values) === 6 && $width >= 70) {
+            if ($index > 0 && $index < count($values) - 2 && $width >= 70) {
                 $pdf->MultiCell($width - 4, $lineHeight, $pdf->encode((string) $value), 0, 'L');
             } else {
                 $align = $index >= count($values) - 2 ? 'R' : 'L';
@@ -659,6 +854,32 @@ final class PdfDocumentService
         $maximum = $height >= 33 ? 900 : 660;
         $pdf->MultiCell(self::CONTENT - 8, 3.1, $pdf->encode($this->limit($text, $maximum)), 0, 'L');
         $pdf->SetY($y + $height + 5);
+    }
+
+    private function quotationCompany(string $email, string $fallbackName): array
+    {
+        $query = $this->pdo->prepare("SELECT razon AS empresa, rfc AS empresa_rfc,
+                regimen AS empresa_regimen, logo
+            FROM empresas
+            WHERE LOWER(TRIM(correo_conta)) = LOWER(TRIM(:accounting))
+               OR LOWER(TRIM(correo_pv)) = LOWER(TRIM(:service))
+               OR LOWER(TRIM(correo_ventas)) = LOWER(TRIM(:sales))
+               OR LOWER(TRIM(correo_contacto)) = LOWER(TRIM(:contact))
+            ORDER BY id
+            LIMIT 1");
+        $query->execute([
+            'accounting' => $email,
+            'service' => $email,
+            'sales' => $email,
+            'contact' => $email,
+        ]);
+        $company = $query->fetch();
+        return is_array($company) ? $company : [
+            'empresa' => $fallbackName !== '' ? $fallbackName : 'Empresa emisora',
+            'empresa_rfc' => '',
+            'empresa_regimen' => '',
+            'logo' => null,
+        ];
     }
 
     private function invoiceData(int $id): array

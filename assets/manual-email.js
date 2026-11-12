@@ -119,6 +119,11 @@
             setStatus('Completa la descripción de todos los conceptos.', 'error');
             return false;
         }
+        if (root.querySelector('[data-include-quote-pdf]')?.checked && conceptRows().length === 0) {
+            setStatus('Agrega al menos un concepto para incluir el PDF de cotización.', 'error');
+            root.querySelector('[data-add-concept]')?.focus();
+            return false;
+        }
         if (includeHtml && !htmlField.value.trim()) {
             setStatus('Genera o escribe el HTML del correo.', 'error');
             htmlField.focus();

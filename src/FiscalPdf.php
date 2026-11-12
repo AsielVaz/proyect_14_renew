@@ -13,6 +13,13 @@ final class FiscalPdf extends \FPDF
     public const BORDER = [222, 227, 235];
     public const SOFT = [247, 248, 251];
 
+    private string $footerLabel = 'Representación impresa de un CFDI';
+
+    public function setFooterLabel(string $label): void
+    {
+        $this->footerLabel = $label;
+    }
+
     public function Footer(): void
     {
         $this->SetY(-12);
@@ -21,7 +28,7 @@ final class FiscalPdf extends \FPDF
         $this->SetY(-9);
         $this->SetFont('Arial', '', 7);
         $this->SetTextColor(...self::MUTED);
-        $this->Cell(120, 4, $this->encode('Representación impresa de un CFDI'), 0, 0, 'L');
+        $this->Cell(120, 4, $this->encode($this->footerLabel), 0, 0, 'L');
         $this->Cell(68, 4, $this->encode('Página ' . $this->PageNo() . '/{nb}'), 0, 0, 'R');
     }
 

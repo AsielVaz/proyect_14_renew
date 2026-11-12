@@ -35,7 +35,10 @@ final class ManualEmailService
         'caudal' => ['name' => 'Caudal Legal', 'email' => 'presupuestos@caudallegal.com', 'template' => 'generaCorreoCaudal'],
     ];
 
-    public function __construct(private readonly string $templateFile)
+    public function __construct(
+        private readonly string $templateFile,
+        private readonly ?PdfDocumentService $pdfService = null,
+    )
     {
         $this->loadTemplates();
     }
@@ -172,6 +175,42 @@ final class ManualEmailService
                 $recipients[] = ['email' => $address, 'type' => $type];
             }
         }
+        $attachments = $this->attachments($files);
+        if (filter_var($input['include_quote_pdf'] ?? false, FILTER_VALIDATE_BOOL)) {
+            if ($this->pdfService === null) {
+                throw new RuntimeException('El generador de PDF de cotización no está disponible.');
+            }
+            [, $summary] = $this->conceptTable((string) ($input['concepts'] ?? '[]'), '');
+            if ($summary['conceptos'] === []) {
+                throw new RuntimeException('Agrega al menos un concepto para incluir el PDF de cotización.');
+            }
+            $quoteData = [
+                'from_email' => $company['email'],
+                'from_name' => $company['name'],
+                'recipients' => $to,
+                'subject' => $subject,
+                'notes' => trim((string) ($input['message'] ?? '') . ' ' . (string) ($input['additional'] ?? '')),
+                'currency' => 'MXN',
+                'concepts' => array_map(static fn (array $concept): array => [
+                    'description' => (string) $concept['concepto'],
+                    'quantity' => (string) $concept['cantidad'],
+                    'unit_price' => (float) $concept['precio_unitario_valor'],
+                    'tax_amount' => (float) $concept['iva_valor'],
+                    'total' => (float) $concept['total_valor'],
+                ], $summary['conceptos']),
+                'subtotal' => (float) $summary['subtotal_valor'],
+                'tax' => (float) $summary['iva_valor'],
+                'total' => (float) $summary['total_valor'],
+            ];
+            $quotation = $this->pdfService->quotation($quoteData);
+            $attachments[] = [
+                'type' => 'application/pdf',
+                'name' => (string) $quotation['filename'],
+                'content' => base64_encode((string) $quotation['bytes']),
+                'generated' => 'quotation',
+                'source_hash' => hash('sha256', json_encode($quoteData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)),
+            ];
+        }
         return [
             'from_email' => $company['email'],
             'from_name' => $company['name'],
@@ -179,7 +218,7 @@ final class ManualEmailService
             'subject' => $subject,
             'html' => $html,
             'text' => $this->htmlToText($html),
-            'attachments' => $this->attachments($files),
+            'attachments' => $attachments,
         ];
     }
 
@@ -245,7 +284,12 @@ final class ManualEmailService
         $key = trim(env_value('MANDRILL_API_KEY', ''));
         if ($key === '') throw new RuntimeException('Configura MANDRILL_API_KEY antes de enviar.');
         if (!function_exists('curl_init')) throw new RuntimeException('El envío requiere la extensión PHP cURL.');
-        $payload = json_encode(['key' => $key, 'message' => $message], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $deliveryMessage = $message;
+        foreach ($deliveryMessage['attachments'] as &$attachment) {
+            unset($attachment['generated'], $attachment['source_hash']);
+        }
+        unset($attachment);
+        $payload = json_encode(['key' => $key, 'message' => $deliveryMessage], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $ch = curl_init('https://mandrillapp.com/api/1.0/messages/send.json');
         curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload,
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_RETURNTRANSFER => true,
@@ -328,7 +372,16 @@ final class ManualEmailService
     {
         $rows = json_decode($json === '' ? '[]' : $json, true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($rows) || count($rows) > 100) throw new RuntimeException('La lista de conceptos no es válida.');
-        $summary = ['conceptos' => [], 'subtotal' => '$ 0.00', 'iva' => '$ 0.00', 'total' => '$ 0.00', 'moneda' => 'MXN'];
+        $summary = [
+            'conceptos' => [],
+            'subtotal' => '$ 0.00',
+            'iva' => '$ 0.00',
+            'total' => '$ 0.00',
+            'subtotal_valor' => 0.0,
+            'iva_valor' => 0.0,
+            'total_valor' => 0.0,
+            'moneda' => 'MXN',
+        ];
         if ($rows === []) return ['', $summary];
         $htmlRows = '';
         $subtotal = 0.0;
@@ -351,7 +404,11 @@ final class ManualEmailService
             $quantityText = rtrim(rtrim(number_format($quantity / 10000, 4, '.', ''), '0'), '.');
             $summary['conceptos'][] = ['concepto' => $description, 'cantidad' => $quantityText,
                 'precio_unitario_sin_iva' => $this->money($price), 'importe_sin_iva' => $this->money($base),
-                'aplica_iva_16' => $row['tax'], 'iva' => $this->money($tax), 'total' => $this->money($base + $tax)];
+                'aplica_iva_16' => $row['tax'], 'iva' => $this->money($tax), 'total' => $this->money($base + $tax),
+                'precio_unitario_valor' => $price / 100,
+                'importe_valor' => $base / 100,
+                'iva_valor' => $tax / 100,
+                'total_valor' => ($base + $tax) / 100];
             $right = $cell . 'text-align:right;';
             $htmlRows .= '<tr><td style="' . $cell . '">' . nl2br($this->escape($description)) . '</td>'
                 . '<td style="' . $right . '">' . $quantityText . '</td><td style="' . $right . '">' . $this->money($price) . '</td>'
@@ -361,6 +418,9 @@ final class ManualEmailService
         $summary['subtotal'] = $this->money($subtotal);
         $summary['iva'] = $this->money($taxTotal);
         $summary['total'] = $this->money($subtotal + $taxTotal);
+        $summary['subtotal_valor'] = $subtotal / 100;
+        $summary['iva_valor'] = $taxTotal / 100;
+        $summary['total_valor'] = ($subtotal + $taxTotal) / 100;
         $headers = '';
         foreach (['Concepto', 'Cantidad', 'Precio unitario', 'Importe', 'IVA', 'Total'] as $title) $headers .= '<th style="' . $cell . 'background:#edf3f8;text-align:left;">' . $title . '</th>';
         $totals = '';
@@ -426,6 +486,14 @@ final class ManualEmailService
 
     private function draftHash(array $message): string
     {
+        if (isset($message['attachments']) && is_array($message['attachments'])) {
+            foreach ($message['attachments'] as &$attachment) {
+                if (($attachment['generated'] ?? '') === 'quotation') {
+                    $attachment['content'] = (string) ($attachment['source_hash'] ?? '');
+                }
+            }
+            unset($attachment);
+        }
         return hash('sha256', json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
     }
 

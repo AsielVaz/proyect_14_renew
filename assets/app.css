@@ -5226,6 +5226,11 @@ body.has-invoice-email-modal {
 .manual-concepts-table tfoot td { font-weight: 750; text-align: right; background: #f8f9fb; }
 .manual-concepts-empty { padding: 18px; }
 .manual-tax-toggle { display: inline-flex; align-items: center; gap: 7px; }
+.manual-quote-option { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: #fff8f2; border: 1px solid #ffd2b3; border-radius: 12px; cursor: pointer; }
+.manual-quote-option input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--color-primary); }
+.manual-quote-option span { display: grid; gap: 3px; }
+.manual-quote-option strong { color: var(--color-text); font-size: 14px; }
+.manual-quote-option small { color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; }
 .manual-remove-concept, .manual-modal-close { width: 40px; height: 40px; color: #a52a23; font-size: 24px; line-height: 1; background: transparent; border: 1px solid #e6c4c1; border-radius: 10px; cursor: pointer; }
 .manual-file-drop { display: grid; gap: 7px; padding: 18px; background: #fff; border: 1px dashed #c5cad3; border-radius: 12px; cursor: pointer; }
 .manual-file-drop > span { font-weight: 700; }

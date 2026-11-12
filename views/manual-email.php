@@ -103,6 +103,10 @@ declare(strict_types=1);
 
         <fieldset class="manual-email-section">
             <legend>Archivos adjuntos</legend>
+            <label class="manual-quote-option">
+                <input type="checkbox" name="include_quote_pdf" value="1" data-include-quote-pdf>
+                <span><strong>Incluir PDF de cotización</strong><small>Genera una prefactura informativa con la empresa, destinatarios, conceptos, IVA y totales capturados. No crea ni timbra una factura fiscal.</small></span>
+            </label>
             <label class="manual-file-drop">
                 <span>Adjuntar PDF</span>
                 <input type="file" name="attachments[]" accept="application/pdf,.pdf" multiple data-mail-files>

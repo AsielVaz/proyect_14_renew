@@ -291,7 +291,10 @@ function global_search_repository(): GlobalSearchRepository
 function manual_email_service(): ManualEmailService
 {
     static $service;
-    return $service ??= new ManualEmailService(APP_ROOT . '/src/manual-email-templates.php');
+    return $service ??= new ManualEmailService(
+        APP_ROOT . '/src/manual-email-templates.php',
+        pdf_document_service()
+    );
 }
 
 function fondeadora_mailbox_service(): FondeadoraMailboxService
