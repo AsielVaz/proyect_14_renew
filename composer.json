@@ -5,7 +5,8 @@
     "require": {
         "lbuchs/webauthn": "^2.2",
         "setasign/fpdf": "^1.8.6",
-        "webklex/php-imap": "^6.2"
+        "webklex/php-imap": "^6.2",
+        "bacon/bacon-qr-code": "~3.1.0"
     },
     "config": {
         "platform": {
