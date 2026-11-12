@@ -890,7 +890,7 @@ final class PdfDocumentService
             cc.regimen_fiscal AS receptor_regimen, fp.clave AS forma_clave,
             fp.forma_pago, mp.clave AS metodo_clave, mp.metodo_pago,
             cm.clave_moneda AS moneda_clave, uc.cod_sat AS uso_clave, uc.uso_cfdi,
-            COALESCE((SELECT ff.folio FROM facturas_folios ff WHERE ff.id_factura = f.id ORDER BY ff.id DESC LIMIT 1), f.folio) AS folio_interno
+            f.folio AS folio_interno
             FROM facturas f
             LEFT JOIN empresas e ON e.id = f.razon
             LEFT JOIN claves_cortas cc ON cc.id = CAST(f.id_clave_corta AS UNSIGNED)
