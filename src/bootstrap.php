@@ -20,6 +20,7 @@ use App\InvoiceEmailService;
 use App\XlsxExportService;
 use App\FondeadoraMailboxService;
 use App\GroupRepository;
+use App\BankingEditorService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -314,6 +315,12 @@ function fondeadora_mailbox_service(): FondeadoraMailboxService
         env_value('FONDEADORA_IMAP_FLAGS', '/imap/ssl'),
         env_value('FONDEADORA_IMAP_FOLDER', 'INBOX'),
     );
+}
+
+function banking_editor_service(): BankingEditorService
+{
+    static $service;
+    return $service ??= new BankingEditorService(db());
 }
 
 function auth_service(): App\AuthService

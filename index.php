@@ -18,6 +18,7 @@ use App\ManualEmailService;
 use App\Movements;
 use App\Reports;
 use App\Statistics;
+use App\BankingEditorService;
 
 if (isset($_GET['global_search']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
     header('Content-Type: application/json; charset=UTF-8');
@@ -174,12 +175,94 @@ $statistic = $statisticsKey !== '' ? Statistics::get($statisticsKey) : null;
 $statisticsModule = $statistic !== null;
 $securityView = (string) ($_GET['security'] ?? '');
 $securityModule = $securityView === 'passkeys';
-$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule;
+$bankingView = (string) ($_GET['banking'] ?? '');
+$bankingModule = $bankingView === 'editor';
+if ($bankingModule && !BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))) {
+    flash('error', 'Solo un administrador puede abrir el editor del banking.');
+    redirect('./');
+}
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule && !$bankingModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $captureSection = in_array((string) ($_GET['view'] ?? 'manual'), ['all', 'manual', 'deleted'], true)
     ? (string) ($_GET['view'] ?? 'manual')
     : 'manual';
 $id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+
+if ($bankingModule && isset($_GET['data'])) {
+    header('Content-Type: application/json; charset=UTF-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        current_operator_id();
+        $dataAction = (string) $_GET['data'];
+        if ($_SERVER['REQUEST_METHOD'] === 'GET' && $dataAction === 'list') {
+            echo json_encode(['ok' => true, 'data' => banking_editor_service()->data()],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            exit;
+        }
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $dataAction === 'save') {
+            verify_csrf();
+            $providers = json_decode((string) ($_POST['providers'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($providers)) {
+                throw new RuntimeException('La lista de proveedores no tiene un formato válido.');
+            }
+            $saved = banking_editor_service()->save((int) ($_POST['company_id'] ?? 0), $providers);
+            echo json_encode([
+                'ok' => true,
+                'data' => $saved,
+                'message' => 'La distribución de "' . $saved['empresa'] . '" se guardó correctamente.',
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            exit;
+        }
+        throw new RuntimeException('La operación solicitada no está disponible.');
+    } catch (JsonException $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'La lista de proveedores no contiene JSON válido.'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (RuntimeException $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (Throwable $exception) {
+        error_log('Banking editor: ' . $exception->getMessage());
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No fue posible completar la operación del banking.'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
+
+if ($bankingModule && $_SERVER['REQUEST_METHOD'] === 'GET' && in_array((string) ($_GET['export'] ?? ''), ['xlsx', 'pdf'], true)) {
+    try {
+        current_operator_id();
+        $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 160);
+        $exportType = (string) $_GET['export'];
+        if ($exportType === 'pdf') {
+            $bytes = banking_editor_service()->pdf($search);
+            $contentType = 'application/pdf';
+            $fileName = 'editor-banking-' . date('Y-m-d') . '.pdf';
+        } else {
+            $rows = banking_editor_service()->exportRows($search);
+            $headers = [
+                'empresa_id' => 'ID empresa', 'clave_corta' => 'Clave corta', 'empresa' => 'Razón social',
+                'rfc_empresa' => 'RFC empresa', 'proveedor_id' => 'ID proveedor', 'proveedor' => 'Proveedor',
+                'rfc_proveedor' => 'RFC proveedor', 'porcentaje' => 'Porcentaje sugerido',
+            ];
+            $bytes = xlsx_export_service()->create('Editor del banking', $headers, $rows, [
+                'widths' => ['clave_corta' => 22, 'empresa' => 42, 'rfc_empresa' => 20, 'proveedor' => 42, 'rfc_proveedor' => 20, 'porcentaje' => 22],
+            ]);
+            $contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            $fileName = 'editor-banking-' . date('Y-m-d') . '.xlsx';
+        }
+        header('Content-Type: ' . $contentType);
+        header('Content-Disposition: attachment; filename="' . $fileName . '"');
+        header('Content-Length: ' . strlen($bytes));
+        header('Cache-Control: private, no-store, max-age=0');
+        echo $bytes;
+    } catch (Throwable $exception) {
+        error_log('Banking editor export: ' . $exception->getMessage());
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'No fue posible exportar la distribución del banking.';
+    }
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
     && (($invoiceModule && $invoiceView === 'list') || ($complementModule && $complementView === 'list'))) {
@@ -907,7 +990,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <a class="<?= $complementModule ? 'active' : '' ?>" href="?complement=list"><span></span>Complementos de pago</a>
             </div>
         </details>
-        <details class="catalog-menu report-menu" <?= ($report && !in_array($reportKey, ['correos-factura', 'correos-contexto'], true)) || in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
+        <details class="catalog-menu report-menu" <?= ($report && !in_array($reportKey, ['correos-factura', 'correos-contexto'], true)) || in_array($movementKey, ['totales', 'stp'], true) || $bankingModule ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6V3Zm3 5h6m-6 4h6m-6 4h4"/></svg></span> Reportes</span>
                 <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
@@ -915,6 +998,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <div class="catalog-links">
                 <a class="<?= $movementKey === 'totales' ? 'active' : '' ?>" href="?movement=totales"><span></span>Log de movimientos</a>
                 <a class="<?= $movementKey === 'stp' ? 'active' : '' ?>" href="?movement=stp"><span></span>Movimientos STP</a>
+                <?php if (BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))): ?><a class="<?= $bankingModule ? 'active' : '' ?>" href="?banking=editor"><span></span>Editor del banking</a><?php endif; ?>
                 <?php foreach ($reports as $navKey => $item): ?>
                     <?php if (in_array($navKey, ['disparador', 'facturas-canceladas', 'correos-factura', 'correos-contexto'], true)) continue; ?>
                     <a class="<?= $reportKey === $navKey ? 'active' : '' ?>" href="?report=<?= e($navKey) ?>">
@@ -2094,6 +2178,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </section>
             <?php endif; ?>
         <?php endif; ?>
+    <?php elseif ($bankingModule): ?>
+        <?php require __DIR__ . '/views/banking-editor.php'; ?>
     <?php elseif ($report): ?>
         <?php
         $reportPage = max(1, (int) ($_GET['page'] ?? 1));
@@ -2106,7 +2192,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         ?>
         <section class="report-intro">
             <p><?= e($report['description']) ?></p>
-            <a class="button" href="?<?= e(http_build_query($queryValues + ['export' => 'csv'])) ?>">Exportar CSV</a>
+            <div>
+                <?php if ($reportKey === 'banking' && BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))): ?><a class="button primary" href="?banking=editor">Editar porcentajes</a><?php endif; ?>
+                <a class="button" href="?<?= e(http_build_query($queryValues + ['export' => 'csv'])) ?>">Exportar CSV</a>
+            </div>
         </section>
         <section class="panel report-panel">
             <div class="panel-heading list-tools">
@@ -4831,6 +4920,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <script src="assets/transfer.js"></script>
 <script src="assets/apexcharts.js"></script>
 <script src="assets/statistics.js"></script>
+<?php if ($bankingModule): ?><script src="assets/banking-editor.js"></script><?php endif; ?>
 <?php if ($securityModule): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>
 </html>
