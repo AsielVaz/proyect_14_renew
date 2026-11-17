@@ -1944,19 +1944,26 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <span class="operation-badge">Datos al <?= e(display_date(date('Y-m-d'))) ?></span>
         </section>
         <section class="panel statistics-filter-panel">
-            <form method="get" class="statistics-filters">
-                <input type="hidden" name="statistics" value="<?= e($statisticsKey) ?>">
-                <label><span>Desde</span><input type="date" name="from" value="<?= e($statFrom) ?>" required></label>
-                <label><span>Hasta</span><input type="date" name="to" value="<?= e($statTo) ?>" required></label>
-                <?php if ($statistic['clientFilter'] ?? false): ?>
-                    <label class="statistics-client-filter"><span>Cliente</span><select name="client" required>
-                        <?php foreach ($statisticsClients as $client): ?>
-                            <option value="<?= e($client['id']) ?>" <?= $selectedStatClient === (int) $client['id'] ? 'selected' : '' ?>><?= e($client['nombre']) ?></option>
-                        <?php endforeach; ?>
-                    </select></label>
-                <?php endif; ?>
-                <button class="button primary" type="submit">Actualizar estadísticas</button>
-            </form>
+            <?php if ($statistic['dateFilter'] ?? true): ?>
+                <form method="get" class="statistics-filters">
+                    <input type="hidden" name="statistics" value="<?= e($statisticsKey) ?>">
+                    <label><span>Desde</span><input type="date" name="from" value="<?= e($statFrom) ?>" required></label>
+                    <label><span>Hasta</span><input type="date" name="to" value="<?= e($statTo) ?>" required></label>
+                    <?php if ($statistic['clientFilter'] ?? false): ?>
+                        <label class="statistics-client-filter"><span>Cliente</span><select name="client" required>
+                            <?php foreach ($statisticsClients as $client): ?>
+                                <option value="<?= e($client['id']) ?>" <?= $selectedStatClient === (int) $client['id'] ? 'selected' : '' ?>><?= e($client['nombre']) ?></option>
+                            <?php endforeach; ?>
+                        </select></label>
+                    <?php endif; ?>
+                    <button class="button primary" type="submit">Actualizar estadísticas</button>
+                </form>
+            <?php else: ?>
+                <div class="statistics-filters">
+                    <p class="panel-copy">El saldo se calcula con todos los movimientos asociados a cada cuenta bancaria activa.</p>
+                    <a class="button primary" href="?statistics=<?= e($statisticsKey) ?>">Actualizar saldos</a>
+                </div>
+            <?php endif; ?>
         </section>
 
         <?php if ($statisticsError !== null): ?>
@@ -2002,7 +2009,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </section>
             <?php else: ?>
                 <section class="panel statistics-chart-panel statistics-chart-main">
-                    <div class="panel-heading"><div><p class="eyebrow">Periodo <?= e(display_date($statFrom)) ?> a <?= e(display_date($statTo)) ?></p><h2><?= e($statistic['label']) ?></h2></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow"><?= ($statistic['dateFilter'] ?? true) ? 'Periodo ' . e(display_date($statFrom)) . ' a ' . e(display_date($statTo)) : 'Saldo acumulado al ' . e(display_date($statTo)) ?></p><h2><?= e($statistic['label']) ?></h2></div></div>
                     <?php $renderStatisticChart($statisticsResult, 'statisticsChartMain'); ?>
                 </section>
             <?php endif; ?>

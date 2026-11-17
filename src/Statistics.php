@@ -9,6 +9,7 @@ final class Statistics
     public static function all(): array
     {
         return [
+            'datos-al-dia' => ['label' => 'Datos al día', 'description' => 'Saldo actual acumulado de todas las cuentas bancarias activas.', 'dateFilter' => false],
             'ganancias-cliente' => ['label' => 'Ganancias por cliente', 'description' => 'Comisiones generadas por un cliente, agrupadas por mes.', 'clientFilter' => true],
             'estadisticas-clientes' => ['label' => 'Estadísticas para clientes', 'description' => 'Depósitos recibidos por cliente, agrupados por mes.', 'clientFilter' => true],
             'ganancias-generales' => ['label' => 'Ganancias generales', 'description' => 'Aportación acumulada de cada cliente en el periodo seleccionado.'],

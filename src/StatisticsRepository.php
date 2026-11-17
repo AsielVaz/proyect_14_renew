@@ -21,6 +21,11 @@ final class StatisticsRepository
 
     public function run(string $key, array $filters): array
     {
+        if ($key === 'datos-al-dia') {
+            $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+            return $this->currentBankBalances() + ['from' => $today, 'to' => $today];
+        }
+
         [$from, $to] = $this->dateRange($filters);
         $clientId = max(0, (int) ($filters['client'] ?? 0));
 
@@ -35,6 +40,63 @@ final class StatisticsRepository
             'facturas-cliente' => $this->monthlyInvoices($from, $to, $clientId),
             default => throw new RuntimeException('Estadística desconocida.'),
         } + ['from' => $from, 'to' => $to];
+    }
+
+    private function currentBankBalances(): array
+    {
+        $rows = $this->fetch(
+            "SELECT COALESCE(NULLIF(TRIM(b.banco), ''), 'Banco sin nombre') label,
+                    COALESCE(NULLIF(TRIM(b.moneda), ''), 'Sin moneda') moneda,
+                    COUNT(*) cuentas,
+                    SUM(COALESCE(saldos.saldo, 0)) value
+             FROM bancos b
+             LEFT JOIN (
+                 SELECT cuenta, SUM(COALESCE(deposito, 0) - COALESCE(retiro, 0)) saldo
+                 FROM captura_edo_cta
+                 GROUP BY cuenta
+             ) saldos ON saldos.cuenta = b.id
+             WHERE b.status_banco = 'AC'
+             GROUP BY label, moneda
+             ORDER BY value DESC, label",
+            []
+        );
+
+        $labels = [];
+        $values = [];
+        $accountCount = 0;
+        $currencyTotals = [];
+        foreach ($rows as $row) {
+            $currency = (string) $row['moneda'];
+            $labels[] = (string) $row['label'] . ' · ' . $currency;
+            $values[] = (float) $row['value'];
+            $accountCount += (int) $row['cuentas'];
+            $currencyTotals[$currency] = ($currencyTotals[$currency] ?? 0.0) + (float) $row['value'];
+        }
+
+        $summary = [[
+            'label' => 'Saldo total sin conversión',
+            'value' => array_sum($values),
+            'format' => 'money',
+        ]];
+        foreach ($currencyTotals as $currency => $total) {
+            $summary[] = [
+                'label' => 'Total en ' . $currency,
+                'value' => $total,
+                'format' => 'money',
+            ];
+        }
+        $summary[] = ['label' => 'Cuentas activas', 'value' => $accountCount, 'format' => 'number'];
+
+        return [
+            'type' => 'chart',
+            'format' => 'money',
+            'labels' => $labels,
+            'series' => [[
+                'name' => 'Saldo actual',
+                'data' => $values,
+            ]],
+            'summary' => $summary,
+        ];
     }
 
     private function dateRange(array $filters): array
