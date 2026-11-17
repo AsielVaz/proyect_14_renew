@@ -2580,6 +2580,18 @@ tbody tr:hover {
     }
 }
 
+@media (max-width: 1050px) {
+    .movement-panel-cartera .table-wrap {
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        scrollbar-gutter: stable;
+    }
+
+    .movement-table-cartera {
+        min-width: 980px;
+    }
+}
+
 .empty {
     padding: 35px;
     color: var(--color-muted);

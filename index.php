@@ -1749,7 +1749,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php elseif ($isDocumentAssignment): ?>
             <?php require __DIR__ . '/views/movement-document-assignment.php'; ?>
         <?php else: ?>
-        <section class="panel movement-panel">
+        <section class="panel movement-panel<?= $movementKey === 'cartera' ? ' movement-panel-cartera' : '' ?>">
             <?php if ($movementAction === 'assign'): ?>
                 <form method="post" id="assignmentBatchForm" data-assignment-batch>
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -1803,7 +1803,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <template id="movementClientOptions"><?php foreach ($movementClients as $client): ?><option value="<?= e($client['id']) ?>"><?= e($client['nombre']) ?></option><?php endforeach; ?></template>
             <?php endif; ?>
             <div class="table-wrap">
-                <table class="movement-table<?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>"<?= $movementHasVisibleSearch ? ' data-visible-movement-table' : '' ?>>
+                <table class="movement-table<?= $movementKey === 'cartera' ? ' movement-table-cartera' : '' ?><?= $movementAction || $hasMovementContextActions ? ' has-actions' : '' ?>"<?= $movementHasVisibleSearch ? ' data-visible-movement-table' : '' ?>>
                     <thead><tr><?php foreach ($movement['columns'] as $column): ?><th><?= e(is_array($column) ? $column['label'] : $column) ?></th><?php endforeach; ?><?php if ($movementAction || $hasMovementContextActions): ?><th><?= $movementAction === 'assign' ? 'Cartera destino' : 'Acción' ?></th><?php endif; ?></tr></thead>
                     <tbody<?= $movementHasVisibleSearch ? ' data-visible-movement-body' : '' ?>>
                     <?php foreach ($movementResult['rows'] as $row): ?>

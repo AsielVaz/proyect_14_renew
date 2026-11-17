@@ -28,6 +28,15 @@ if (!isset($reassignmentAmount['secondary']['saldo_acreditable'])) {
     throw new RuntimeException('Reasignación debe conservar el saldo acreditable.');
 }
 
+$walletColumns = App\Movements::get('cartera')['columns'] ?? [];
+$walletAmount = $walletColumns['saldo_acreditable'] ?? null;
+if (!is_array($walletAmount) || ($walletAmount['format'] ?? '') !== 'money') {
+    throw new RuntimeException('Movimientos por cartera debe mostrar el importe acreditado como cantidad principal.');
+}
+if (($walletAmount['secondary']['monto'] ?? '') !== 'Cantidad original') {
+    throw new RuntimeException('Movimientos por cartera debe identificar el monto del pago como Cantidad original.');
+}
+
 $invoiceReferences = [
     [null, 0],
     [0, 0],
