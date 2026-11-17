@@ -167,12 +167,14 @@ $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
 $companyView = (string) ($_GET['companies'] ?? '');
 $companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture', 'movements', 'account', 'analyze'], true);
+$groupView = (string) ($_GET['groups'] ?? '');
+$groupModule = in_array($groupView, ['list', 'detail'], true);
 $statisticsKey = (string) ($_GET['statistics'] ?? '');
 $statistic = $statisticsKey !== '' ? Statistics::get($statisticsKey) : null;
 $statisticsModule = $statistic !== null;
 $securityView = (string) ($_GET['security'] ?? '');
 $securityModule = $securityView === 'passkeys';
-$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$statisticsModule && !$securityModule;
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $captureSection = in_array((string) ($_GET['view'] ?? 'manual'), ['all', 'manual', 'deleted'], true)
     ? (string) ($_GET['view'] ?? 'manual')
@@ -810,6 +812,20 @@ if ($companyModule) {
         $companyError = $exception->getMessage();
     }
 }
+$groupError = null;
+$groupData = null;
+$groupRows = [];
+if ($groupModule) {
+    try {
+        if ($groupView === 'detail') {
+            $groupData = group_repository()->group((int) ($id ?? 0), current_operator_id());
+        } else {
+            $groupRows = group_repository()->groups(current_operator_id());
+        }
+    } catch (Throwable $exception) {
+        $groupError = $exception->getMessage();
+    }
+}
 $statisticsError = null;
 $statisticsResult = null;
 $statisticsClients = [];
@@ -829,7 +845,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <base href="<?= e(app_url('/')) ?>">
-    <title><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))))) ?> · Sistema 14</title>
+    <title><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos') : ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14'))))))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
@@ -851,6 +867,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <a class="dashboard-link <?= $companyModule ? 'active' : '' ?>" href="?companies=list">
             <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4h14v17M3 21h18M8 8h2m4 0h2m-8 4h2m4 0h2m-8 4h2m4 0h2"/></svg></span>
             Panel de empresas
+        </a>
+        <a class="dashboard-link <?= $groupModule ? 'active' : '' ?>" href="?groups=list">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8-1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 20a5 5 0 0 1 10 0m0-7a4 4 0 0 1 8 4v3"/></svg></span>
+            Grupos de carteras
         </a>
         <details class="catalog-menu" <?= $catalog ? 'open' : '' ?>>
             <summary>
@@ -949,8 +969,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <main id="main-content">
     <header class="topbar">
         <div class="topbar-copy">
-            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))))) ?></p>
-            <h1><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))))) ?></h1>
+            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($groupModule ? 'Carteras agrupadas' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración')))))) ?></p>
+            <h1><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos de carteras') : ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal'))))))))) ?></h1>
             <?php if ($dashboardModule): ?><p class="topbar-description">Visión general de saldos, movimientos y carteras de clientes del sistema.</p><?php endif; ?>
             <?php if ($securityModule): ?><p class="topbar-description">Administra los dispositivos que pueden autenticar tu cuenta sin contraseña.</p><?php endif; ?>
         </div>
@@ -1010,6 +1030,66 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     <?php if ($securityModule): ?>
         <?php require APP_ROOT . '/views/passkeys.php'; ?>
+    <?php elseif ($groupModule): ?>
+        <?php if ($groupError): ?>
+            <section class="panel"><div class="empty"><strong>No se pudo abrir el módulo de grupos.</strong><br><?= e($groupError) ?><br><a href="?groups=list">Volver a grupos</a></div></section>
+        <?php elseif ($groupView === 'list'): ?>
+            <?php
+            $groupsBalance = array_sum(array_map(static fn (array $group): float => (float) $group['saldo'], $groupRows));
+            $groupsWallets = array_sum(array_map(static fn (array $group): int => (int) $group['carteras'], $groupRows));
+            ?>
+            <section class="group-directory" aria-labelledby="group-directory-title">
+                <header class="group-directory-hero">
+                    <div><span class="group-hero-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8-1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 20a5 5 0 0 1 10 0m0-7a4 4 0 0 1 8 4v3"/></svg></span><div><h2 id="group-directory-title">Saldos por grupo</h2><p>Carteras consolidadas por el grupo asignado en su configuración.</p></div></div>
+                    <div class="group-total"><span>Saldo agrupado</span><strong><?= e(report_value($groupsBalance, 'money')) ?></strong><small><?= number_format($groupsWallets) ?> carteras en <?= number_format(count($groupRows)) ?> grupos</small></div>
+                </header>
+
+                <div class="group-grid">
+                    <?php foreach ($groupRows as $group): ?>
+                        <article class="group-card" style="--group-accent: <?= e($group['color']) ?>">
+                            <header><span class="group-card-id">#<?= e($group['id']) ?></span><span class="group-output-account"><?= e($group['cuenta_salida_nombre']) ?></span></header>
+                            <h3><?= e($group['nombre']) ?></h3>
+                            <div class="group-card-balance"><span>Saldo acreditable</span><strong><?= e(report_value($group['saldo'], 'money')) ?></strong></div>
+                            <div class="group-card-meta"><span><?= number_format((int) $group['carteras']) ?> cartera<?= (int) $group['carteras'] === 1 ? '' : 's' ?></span><?php if (trim((string) ($group['cliente_padre_nombre'] ?? '')) !== ''): ?><span>Líder: <?= e($group['cliente_padre_nombre']) ?></span><?php endif; ?></div>
+                            <div class="group-member-stack" aria-label="Carteras del grupo">
+                                <?php foreach (array_slice($group['integrantes'], 0, 5) as $member): ?><span title="<?= e($member) ?>"><?= e(mb_strtoupper(mb_substr((string) $member, 0, 1))) ?></span><?php endforeach; ?>
+                                <?php if (count($group['integrantes']) > 5): ?><span class="group-member-more">+<?= count($group['integrantes']) - 5 ?></span><?php endif; ?>
+                                <?php if ($group['integrantes'] === []): ?><small>Sin carteras activas</small><?php endif; ?>
+                            </div>
+                            <footer><a href="?groups=detail&amp;id=<?= e($group['id']) ?>">Ver carteras <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg></a></footer>
+                        </article>
+                    <?php endforeach; ?>
+                    <?php if ($groupRows === []): ?><p class="empty">No hay grupos configurados.</p><?php endif; ?>
+                </div>
+            </section>
+        <?php else: ?>
+            <?php $groupAccent = (string) $groupData['color']; ?>
+            <section class="group-detail" style="--group-accent: <?= e($groupAccent) ?>">
+                <a class="group-back" href="?groups=list">← Volver a grupos</a>
+                <header class="group-detail-hero">
+                    <div class="group-detail-identity"><span>#<?= e($groupData['id']) ?></span><div><h2><?= e($groupData['nombre']) ?></h2><p><?= number_format((int) $groupData['carteras']) ?> carteras asociadas · Salida <?= e($groupData['cuenta_salida_nombre']) ?></p></div></div>
+                    <div class="group-detail-balance"><span>Saldo total del grupo</span><strong><?= e(report_value($groupData['saldo'], 'money')) ?></strong></div>
+                </header>
+                <div class="group-detail-summary">
+                    <article><span>Carteras activas</span><strong><?= number_format((int) $groupData['carteras']) ?></strong></article>
+                    <article><span>Movimientos pendientes</span><strong><?= number_format((int) $groupData['movimientos_pend']) ?></strong></article>
+                    <article><span>Monto pendiente</span><strong><?= e(report_value($groupData['dinero_sin_fact'], 'money')) ?></strong></article>
+                    <article><span>Cartera líder</span><strong><?= e($groupData['cliente_padre_nombre'] ?: 'Sin configurar') ?></strong></article>
+                </div>
+                <div class="group-wallet-grid">
+                    <?php foreach ($groupData['wallets'] as $wallet): ?>
+                        <?php $memberColor = preg_match('/^[0-9a-fA-F]{6}$/', ltrim((string) $wallet['color'], '#')) ? '#' . ltrim((string) $wallet['color'], '#') : $groupAccent; ?>
+                        <article class="group-wallet-card" style="--wallet-accent: <?= e($memberColor) ?>">
+                            <header><span class="group-wallet-avatar"><?= e(mb_strtoupper(mb_substr((string) $wallet['nombre'], 0, 1))) ?></span><div><h3><?= e($wallet['nombre']) ?></h3><small><?= e($wallet['clave_corta'] ?: 'Sin clave corta') ?> · #<?= e($wallet['id']) ?></small></div><?php if ((int) $wallet['lidera'] === 1): ?><span class="group-leader-badge">Líder</span><?php endif; ?></header>
+                            <div class="group-wallet-balance"><span>Saldo acreditable</span><strong><?= e(report_value($wallet['saldo'], 'money')) ?></strong></div>
+                            <dl><div><dt>Mov. pendientes</dt><dd><?= number_format((int) $wallet['movimientos_pend']) ?> · <?= e(report_value($wallet['dinero_sin_fact'], 'money')) ?></dd></div><div><dt>Cheques pendientes</dt><dd><?= number_format((int) $wallet['cheques_pend']) ?> · <?= e(report_value($wallet['cheques_pend_dinero'], 'money')) ?></dd></div><div><dt>Facturas sin pago</dt><dd><?= number_format((int) $wallet['facturas_sin_pago']) ?></dd></div></dl>
+                            <footer><small><?= $wallet['ultima_act'] ? 'Actualizado ' . e(display_date($wallet['ultima_act'], true)) : 'Sin fecha de actualización' ?></small><a href="?movement=cartera&amp;client=<?= e($wallet['id']) ?>">Ver movimientos</a></footer>
+                        </article>
+                    <?php endforeach; ?>
+                    <?php if ($groupData['wallets'] === []): ?><p class="empty">Este grupo no tiene carteras activas disponibles.</p><?php endif; ?>
+                </div>
+            </section>
+        <?php endif; ?>
     <?php elseif ($companyModule): ?>
         <?php if ($companyError): ?>
             <section class="panel"><div class="empty"><strong>No se pudo abrir el panel.</strong><br><?= e($companyError) ?><br><a href="?companies=list">Volver a empresas</a></div></section>

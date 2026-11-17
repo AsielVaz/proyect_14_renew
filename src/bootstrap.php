@@ -19,6 +19,7 @@ use App\PdfDocumentService;
 use App\InvoiceEmailService;
 use App\XlsxExportService;
 use App\FondeadoraMailboxService;
+use App\GroupRepository;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -274,6 +275,12 @@ function dashboard_repository(): DashboardRepository
 {
     static $repository;
     return $repository ??= new DashboardRepository(db());
+}
+
+function group_repository(): GroupRepository
+{
+    static $repository;
+    return $repository ??= new GroupRepository(db());
 }
 
 function statistics_repository(): StatisticsRepository

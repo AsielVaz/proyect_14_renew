@@ -5897,8 +5897,21 @@ body.has-invoice-email-modal {
     }
 
     .dashboard-summary,
-    .wallet-grid {
+    .wallet-grid,
+    .group-grid,
+    .group-wallet-grid {
         grid-template-columns: 1fr;
+    }
+
+    .group-directory-hero,
+    .group-detail-hero {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .group-total,
+    .group-detail-balance {
+        justify-items: start;
     }
 
     .complement-detail-grid {
@@ -9022,7 +9035,389 @@ main::before {
     grid-column: 1 / -1;
 }
 
+.group-directory,
+.group-detail {
+    display: grid;
+    gap: 22px;
+}
+
+.group-directory-hero,
+.group-detail-hero {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    padding: 26px 30px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.group-directory-hero::after,
+.group-detail-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 6px;
+    background: var(--color-primary);
+}
+
+.group-detail-hero::after {
+    background: var(--group-accent);
+}
+
+.group-directory-hero > div:first-child,
+.group-detail-identity {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+}
+
+.group-hero-mark {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    flex: 0 0 auto;
+    border-radius: 15px;
+    color: var(--color-primary);
+    background: var(--color-primary-soft);
+}
+
+.group-hero-mark svg,
+.group-card footer svg {
+    width: 23px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.group-directory-hero h2,
+.group-detail-hero h2 {
+    margin: 0;
+    font-size: clamp(24px, 3vw, 34px);
+    letter-spacing: -0.035em;
+}
+
+.group-directory-hero p,
+.group-detail-hero p {
+    max-width: 620px;
+    margin: 5px 0 0;
+    color: var(--color-muted);
+}
+
+.group-total,
+.group-detail-balance {
+    display: grid;
+    justify-items: end;
+    flex: 0 0 auto;
+}
+
+.group-total span,
+.group-detail-balance span,
+.group-card-balance span,
+.group-wallet-balance span,
+.group-detail-summary span {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.group-total strong,
+.group-detail-balance strong {
+    color: var(--color-heading);
+    font-size: clamp(26px, 3.3vw, 40px);
+    line-height: 1.15;
+    letter-spacing: -0.045em;
+}
+
+.group-total small {
+    margin-top: 4px;
+    color: var(--color-muted);
+}
+
+.group-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.group-card {
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    min-height: 280px;
+    padding: 21px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.group-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 6px;
+    background: var(--group-accent);
+}
+
+.group-card > header,
+.group-card > footer,
+.group-wallet-card > header,
+.group-wallet-card > footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.group-card-id,
+.group-output-account,
+.group-leader-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 27px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    color: var(--color-muted);
+    background: var(--color-soft);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.group-output-account {
+    border: 1px solid color-mix(in srgb, var(--group-accent) 28%, var(--color-border));
+    color: color-mix(in srgb, var(--group-accent) 68%, var(--color-heading));
+    background: color-mix(in srgb, var(--group-accent) 8%, var(--color-surface));
+}
+
+.group-card h3 {
+    margin: 17px 0 7px;
+    font-size: 22px;
+    letter-spacing: -0.025em;
+}
+
+.group-card-balance,
+.group-wallet-balance {
+    display: grid;
+    gap: 3px;
+}
+
+.group-card-balance strong,
+.group-wallet-balance strong {
+    color: var(--color-heading);
+    font-size: 25px;
+    letter-spacing: -0.035em;
+}
+
+.group-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px 14px;
+    margin-top: 14px;
+    color: var(--color-muted);
+    font-size: 12px;
+}
+
+.group-member-stack {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+    margin: 16px 0;
+}
+
+.group-member-stack > span {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    margin-left: -7px;
+    border: 2px solid var(--color-surface);
+    border-radius: 50%;
+    color: var(--color-heading);
+    background: color-mix(in srgb, var(--group-accent) 18%, var(--color-surface));
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.group-member-stack > span:first-child {
+    margin-left: 0;
+}
+
+.group-member-stack small {
+    color: var(--color-muted);
+}
+
+.group-card > footer {
+    align-self: end;
+    padding-top: 15px;
+    border-top: 1px solid var(--color-border);
+}
+
+.group-card > footer a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--color-primary);
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.group-card footer svg {
+    width: 18px;
+}
+
+.group-back {
+    width: fit-content;
+    color: var(--color-muted);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.group-detail-identity > span {
+    display: grid;
+    place-items: center;
+    width: 50px;
+    height: 50px;
+    flex: 0 0 auto;
+    border-radius: 16px;
+    color: white;
+    background: var(--group-accent);
+    font-weight: 800;
+}
+
+.group-detail-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.group-detail-summary article {
+    display: grid;
+    gap: 4px;
+    padding: 17px 19px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+}
+
+.group-detail-summary strong {
+    overflow: hidden;
+    font-size: 19px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-wallet-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.group-wallet-card {
+    position: relative;
+    overflow: hidden;
+    padding: 20px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.group-wallet-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 5px;
+    background: var(--wallet-accent);
+}
+
+.group-wallet-card > header {
+    justify-content: flex-start;
+}
+
+.group-wallet-avatar {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    border-radius: 13px;
+    color: white;
+    background: var(--wallet-accent);
+    font-weight: 800;
+}
+
+.group-wallet-card h3 {
+    margin: 0;
+    font-size: 17px;
+}
+
+.group-wallet-card header small {
+    color: var(--color-muted);
+}
+
+.group-leader-badge {
+    margin-left: auto;
+    color: var(--color-primary);
+    background: var(--color-primary-soft);
+}
+
+.group-wallet-balance {
+    margin: 19px 0 14px;
+}
+
+.group-wallet-card dl {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+}
+
+.group-wallet-card dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    color: var(--color-muted);
+    font-size: 12px;
+}
+
+.group-wallet-card dd {
+    margin: 0;
+    color: var(--color-heading);
+    font-weight: 700;
+    text-align: right;
+}
+
+.group-wallet-card > footer {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-muted);
+    font-size: 11px;
+}
+
+.group-wallet-card footer a {
+    color: var(--color-primary);
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: none;
+}
+
 @media (max-width: 1280px) {
+    .group-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .group-detail-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     :root {
         --sidebar-width: 260px;
     }
@@ -9189,6 +9584,25 @@ main::before {
 
     .topbar-description {
         font-size: 14px;
+    }
+
+    .group-directory-hero,
+    .group-detail-hero {
+        padding: 21px 19px;
+    }
+
+    .group-detail-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .group-wallet-card dl > div,
+    .group-wallet-card > footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .group-wallet-card dd {
+        text-align: left;
     }
 
     .dashboard-calculator-shortcuts {
