@@ -1,5 +1,6 @@
 Options -Indexes
 DirectoryIndex index.php
+ErrorDocument 404 "Recurso no encontrado."
 
 <FilesMatch "^(\.env(?:\..*)?|composer\.(?:json|lock)|.*\.(?:md|sql|log|ini)|database\.php)$">
     Require all denied

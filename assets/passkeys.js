@@ -97,6 +97,17 @@
         element.classList.toggle('is-error', error);
     };
 
+    const sameOriginRedirect = (value) => {
+        if (typeof value !== 'string' || value.trim() === '') {
+            throw new Error('El servidor no indicó un destino de acceso válido.');
+        }
+        const target = new URL(value, window.location.href);
+        if (!['http:', 'https:'].includes(target.protocol) || target.origin !== window.location.origin) {
+            throw new Error('El destino de acceso no pertenece a este sistema.');
+        }
+        return `${target.pathname}${target.search}${target.hash}`;
+    };
+
     const supported = 'PublicKeyCredential' in window && !!navigator.credentials;
     const loginButton = document.querySelector('[data-passkey-login]');
     if (loginButton) {
@@ -117,7 +128,7 @@
                     if (!credential) throw new Error('El dispositivo no devolvió una credencial.');
                     const result = await request('login-verify', assertionPayload(credential));
                     setStatus(status, 'Acceso verificado. Abriendo el sistema…');
-                    window.location.assign(result.redirect);
+                    window.location.assign(sameOriginRedirect(result.redirect));
                 } catch (error) {
                     setStatus(status, readableError(error), true);
                     loginButton.disabled = false;
