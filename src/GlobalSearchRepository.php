@@ -52,7 +52,7 @@ final class GlobalSearchRepository
                 END) LIKE :search";
             $params = ['search' => '%' . $term . '%', 'exact' => $term];
         }
-        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.tipo_movimiento, p.descripcion,
+        $query = $this->pdo->prepare("SELECT p.id, p.monto, p.saldo_acreditable, p.tipo_movimiento, p.descripcion,
             p.descripcion_detallada, p.detalle, p.factura, p.status,
             COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura) AS fecha,
             COALESCE(cl.nombre, 'Sin asignar') AS cliente,
@@ -68,7 +68,8 @@ final class GlobalSearchRepository
             $description = self::firstText($row['descripcion'], $row['descripcion_detallada'], $row['detalle'], $row['factura']);
             $rawMovementType = trim((string) ($row['tipo_movimiento'] ?? ''));
             $normalizedMovementType = mb_strtolower($rawMovementType, 'UTF-8');
-            $movementType = str_starts_with($normalizedMovementType, 'abono por comisi')
+            $isCommissionBonus = str_starts_with($normalizedMovementType, 'abono por comisi');
+            $movementType = $isCommissionBonus
                 ? 'Bono de porcentaje por comisión'
                 : ($normalizedMovementType === 'deposito' ? 'Depósito' : ($rawMovementType ?: 'Sin tipo'));
             return [
@@ -76,7 +77,7 @@ final class GlobalSearchRepository
                 'title' => 'Pago #' . $row['id'] . ' · ' . $movementType,
                 'description' => $description !== '' ? $description : ($row['tipo_movimiento'] ?: 'Movimiento sin descripción'),
                 'meta' => 'Tipo: ' . $movementType . ' · ' . trim((string) $row['cliente']) . ' · ' . trim((string) $row['empresa']),
-                'value' => self::money($row['monto']),
+                'value' => self::money($isCommissionBonus ? $row['saldo_acreditable'] : $row['monto']),
                 'date' => (string) ($row['fecha'] ?? ''),
                 'url' => '?movement=totales&q=' . rawurlencode((string) $row['id']),
             ];

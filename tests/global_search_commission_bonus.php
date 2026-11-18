@@ -9,7 +9,7 @@ use App\Movements;
 
 $pdo = db();
 $bonus = $pdo->query(
-    "SELECT id, monto
+    "SELECT id, monto, saldo_acreditable
      FROM pagos
      WHERE LOWER(COALESCE(tipo_movimiento, '')) LIKE 'abono por comisi%'
        AND LOWER(COALESCE(detalle, '')) LIKE 'abono de porcentaje por comision%'
@@ -31,6 +31,12 @@ if ($byAlias === []) {
 }
 if (!str_contains((string) $byAlias[0]['title'], 'Bono de porcentaje por comisión')) {
     throw new RuntimeException('El resultado no identifica claramente el bono de comisión.');
+}
+$balanceQuery = $pdo->prepare('SELECT saldo_acreditable FROM pagos WHERE id = :id');
+$balanceQuery->execute(['id' => (int) $byAlias[0]['id']]);
+$expectedCreditableBalance = '$' . number_format((float) $balanceQuery->fetchColumn(), 2);
+if ((string) $byAlias[0]['value'] !== $expectedCreditableBalance) {
+    throw new RuntimeException('El bono no muestra el saldo acreditable como importe principal.');
 }
 
 $byId = $repository->search((string) $paymentId, 1, 10)['payments'];
