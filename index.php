@@ -7,6 +7,12 @@ require __DIR__ . '/src/auth.php';
 require __DIR__ . '/src/webauthn.php';
 
 send_security_headers();
+
+if (isset($_GET['cron'])) {
+    require __DIR__ . '/src/cron.php';
+    handle_cron_endpoint((string) $_GET['cron']);
+}
+
 handle_authentication();
 
 if (isset($_GET['webauthn'])) {

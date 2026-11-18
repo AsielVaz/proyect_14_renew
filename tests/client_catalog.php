@@ -12,7 +12,7 @@ $expected = [
     'sub_com1', 'porcentaje1', 'sub_com2', 'porcentaje2', 'sub_com3', 'porcentaje3',
     'correo', 'correoSaldos2', 'correoSaldos3',
     'correo2', 'correoF2', 'correoF3',
-    'fact_auto', 'grupo', 'notificar_saldo', 'lidera',
+    'fact_auto', 'grupo', 'notificar_saldo', 'notificacion_movimientos', 'lidera',
     'razon_social', 'rfc', 'domicilio',
 ];
 
@@ -36,6 +36,20 @@ foreach (['1_subcomision', '2_subcomision', '3_subcomision', 'imagen', 'facturac
     if (!in_array($column, $mappedColumns, true)) {
         throw new RuntimeException('Falta el mapeo de la columna ' . $column . '.');
     }
+}
+
+$notification = $catalog['fields']['notificacion_movimientos'] ?? null;
+if (!is_array($notification)
+    || ($notification['column'] ?? '') !== 'info_3'
+    || ($notification['options'] ?? []) !== [
+        'no' => 'Sin notificar',
+        'movimiento' => 'Notificar por movimiento',
+        'fin_dia' => 'Notificar al final del día',
+    ]) {
+    throw new RuntimeException('El selector de notificación no está vinculado correctamente con info_3.');
+}
+if (($catalog['defaults']['info_3'] ?? null) !== 'no') {
+    throw new RuntimeException('Los clientes nuevos deben iniciar sin notificaciones.');
 }
 
 echo count($expected) . " campos del formulario de carteras verificados.\n";

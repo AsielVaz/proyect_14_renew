@@ -97,12 +97,18 @@ final class Catalogs
                     'fact_auto' => self::select('Facturación automática', ['No' => 'No', 'Si' => 'Sí']) + ['column' => 'facturacion_automatica', 'section' => 'Información adicional', 'caseInsensitiveOptions' => true],
                     'grupo' => self::relation('Grupo de cliente', 'grupo', 'id', 'nombre') + ['showId' => false],
                     'notificar_saldo' => self::checkbox('Notificar saldos'),
+                    'notificacion_movimientos' => self::select('Notificación de movimientos', [
+                        'no' => 'Sin notificar',
+                        'movimiento' => 'Notificar por movimiento',
+                        'fin_dia' => 'Notificar al final del día',
+                    ], true) + ['column' => 'info_3'],
                     'lidera' => self::checkbox('Lidera grupo'),
 
                     'razon_social' => self::text('Razón social', false, 250) + ['section' => 'Información de facturación'],
                     'rfc' => self::text('RFC', false, 50),
                     'domicilio' => self::textarea('Domicilio'),
                 ],
+                'defaults' => ['info_3' => 'no'],
             ],
             'grupos' => [
                 'label' => 'Grupos de clientes', 'table' => 'grupo', 'title' => 'nombre',

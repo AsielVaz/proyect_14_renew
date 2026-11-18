@@ -82,6 +82,15 @@ final class CatalogRepository
             if (($field['required'] ?? false) && $value === '' && !($id && ($field['writeOnly'] ?? false))) {
                 throw new RuntimeException('El campo “' . $field['label'] . '” es obligatorio.');
             }
+            if ($type === 'select' && $value !== '') {
+                $allowedOptions = array_map('strval', array_keys((array) ($field['options'] ?? [])));
+                $validOption = ($field['caseInsensitiveOptions'] ?? false)
+                    ? array_filter($allowedOptions, static fn (string $option): bool => strcasecmp($option, $value) === 0) !== []
+                    : in_array($value, $allowedOptions, true);
+                if (!$validOption) {
+                    throw new RuntimeException('Selecciona un valor válido para “' . $field['label'] . '”.');
+                }
+            }
             if ($id && ($field['writeOnly'] ?? false) && $value === '') {
                 continue;
             }
