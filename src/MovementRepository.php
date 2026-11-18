@@ -1172,7 +1172,8 @@ final class MovementRepository
                  LEFT JOIN clientes cl ON cl.id = p.nombre
                  LEFT JOIN usuarios u ON u.id = p.usuario_asigna_fac
                  LEFT JOIN captura c ON c.id = p.id_captura
-                 WHERE p.tipo_movimiento <> 'Abono por comisión' AND p.banco <> 'STP' AND p.banco <> '99'
+                 WHERE " . ($filterByClient ? "1 = 1" : "p.tipo_movimiento <> 'Abono por comisión'") . "
+                   AND p.banco <> 'STP' AND p.banco <> '99'
                  " . ($filterByClient ? '' : 'ORDER BY p.id DESC LIMIT 500'),
                 '`id` DESC',
             ],

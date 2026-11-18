@@ -44,7 +44,12 @@ final class GlobalSearchRepository
         } else {
             $condition = "CONCAT_WS(' ', CAST(p.id AS CHAR), CAST(p.monto AS CHAR), p.descripcion,
                 p.descripcion_detallada, p.detalle, p.banco, p.factura,
-                p.tipo_movimiento, cl.nombre, e.razon) LIKE :search";
+                p.tipo_movimiento, cl.nombre, e.razon,
+                CASE
+                    WHEN LOWER(COALESCE(p.tipo_movimiento, '')) LIKE 'abono por comisi%'
+                    THEN 'bono de porcentaje por comision bono porcentaje comision'
+                    ELSE ''
+                END) LIKE :search";
             $params = ['search' => '%' . $term . '%', 'exact' => $term];
         }
         $query = $this->pdo->prepare("SELECT p.id, p.monto, p.tipo_movimiento, p.descripcion,
@@ -55,7 +60,7 @@ final class GlobalSearchRepository
             FROM pagos p
             LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
             LEFT JOIN empresas e ON e.id = CAST(p.empresa AS UNSIGNED)
-            WHERE {$condition} AND LOWER(COALESCE(p.tipo_movimiento, '')) NOT LIKE 'abono por comisi%'{$access}
+            WHERE {$condition}{$access}
             ORDER BY (CAST(p.id AS CHAR) = :exact) DESC, p.id DESC LIMIT {$limit}");
         $query->execute($params);
 
@@ -63,8 +68,8 @@ final class GlobalSearchRepository
             $description = self::firstText($row['descripcion'], $row['descripcion_detallada'], $row['detalle'], $row['factura']);
             $rawMovementType = trim((string) ($row['tipo_movimiento'] ?? ''));
             $normalizedMovementType = mb_strtolower($rawMovementType, 'UTF-8');
-            $movementType = str_starts_with($normalizedMovementType, 'abono')
-                ? 'Abono'
+            $movementType = str_starts_with($normalizedMovementType, 'abono por comisi')
+                ? 'Bono de porcentaje por comisión'
                 : ($normalizedMovementType === 'deposito' ? 'Depósito' : ($rawMovementType ?: 'Sin tipo'));
             return [
                 'id' => (int) $row['id'],
