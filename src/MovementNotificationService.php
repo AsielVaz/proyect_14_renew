@@ -109,6 +109,41 @@ final class MovementNotificationService
         return array_values($valid);
     }
 
+    /** @return array<string, mixed> */
+    public function sendExample(int $paymentId, string $recipient, DateTimeImmutable $now): array
+    {
+        $recipients = self::recipientAddresses([$recipient]);
+        if ($paymentId <= 0 || $recipients === []) {
+            throw new RuntimeException('El movimiento o destinatario de prueba no es válido.');
+        }
+        $query = $this->pdo->prepare(<<<'SQL'
+            SELECT p.id, p.monto, p.saldo_acreditable, p.tipo_movimiento,
+                   p.fecha_banco, p.fecha_asignacion, p.fecha_operacion,
+                   p.detalle, p.descripcion, p.descripcion_detallada,
+                   p.empresa, p.banco, p.nombre_corto,
+                   c.id AS client_id, c.nombre AS client_name, c.info_3 AS notification_mode
+              FROM pagos p
+              INNER JOIN clientes c ON p.nombre = CAST(c.id AS CHAR)
+             WHERE p.id = :id
+             LIMIT 1
+            SQL);
+        $query->execute(['id' => $paymentId]);
+        $movement = $query->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($movement)) {
+            throw new RuntimeException('No se encontró el movimiento solicitado para la prueba.');
+        }
+        $delivery = ($this->transport)([
+            'subject' => '[PRUEBA] Notificación de movimiento · ' . (string) $movement['client_name'],
+            'html' => $this->html($movement, [$movement], $now),
+            'text' => $this->text($movement, [$movement], $now),
+            'recipients' => $recipients,
+        ]);
+        if (!is_array($delivery)) {
+            throw new RuntimeException('El proveedor devolvió una respuesta no válida.');
+        }
+        return $delivery;
+    }
+
     /** @return list<array<string, mixed>> */
     private function pendingMovements(DateTimeImmutable $now): array
     {
@@ -167,7 +202,7 @@ final class MovementNotificationService
     }
 
     /** @param array<string, mixed> $message
-     *  @return array{accepted: bool, message: string}
+     *  @return array{accepted: bool, message: string, provider_ids: list<string>}
      */
     private function sendWithMandrill(array $message): array
     {
@@ -210,7 +245,6 @@ final class MovementNotificationService
         $raw = curl_exec($handle);
         $http = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         $networkError = curl_error($handle);
-        curl_close($handle);
         if ($raw === false) {
             throw new RuntimeException('No fue posible contactar al proveedor de correo: ' . $networkError);
         }
@@ -220,14 +254,19 @@ final class MovementNotificationService
         }
 
         $accepted = 0;
+        $providerIds = [];
         foreach ($decoded as $recipient) {
             if (is_array($recipient) && in_array(strtolower((string) ($recipient['status'] ?? '')), ['sent', 'queued', 'scheduled'], true)) {
                 ++$accepted;
+                if (trim((string) ($recipient['_id'] ?? '')) !== '') {
+                    $providerIds[] = (string) $recipient['_id'];
+                }
             }
         }
         return [
             'accepted' => $accepted > 0,
             'message' => $accepted > 0 ? 'Correo aceptado.' : 'Ningún destinatario fue aceptado por el proveedor.',
+            'provider_ids' => $providerIds,
         ];
     }
 
@@ -254,7 +293,7 @@ final class MovementNotificationService
                 . '<td style="padding:11px 8px;border-bottom:1px solid #e6e8ec">' . $this->escape($date) . '</td>'
                 . '<td style="padding:11px 8px;border-bottom:1px solid #e6e8ec;color:' . $color . ';font-weight:700">' . $this->escape($type) . '</td>'
                 . '<td style="padding:11px 8px;border-bottom:1px solid #e6e8ec">' . $this->escape($detail ?: 'Sin descripción') . '</td>'
-                . '<td align="right" style="padding:11px 8px;border-bottom:1px solid #e6e8ec;font-weight:700;white-space:nowrap">$' . number_format((float) $movement['monto'], 2) . '</td>'
+                . '<td align="right" style="padding:11px 8px;border-bottom:1px solid #e6e8ec;font-weight:700;white-space:nowrap">$' . number_format($this->displayAmount($movement), 2) . '</td>'
                 . '</tr>';
         }
 
@@ -284,7 +323,7 @@ final class MovementNotificationService
             $lines[] = sprintf('#%d | %s | %s | $%s | %s', (int) $movement['id'],
                 (string) ($movement['fecha_banco'] ?: $movement['fecha_asignacion'] ?: $movement['fecha_operacion']),
                 (string) ($movement['tipo_movimiento'] ?? 'Movimiento'),
-                number_format((float) $movement['monto'], 2), $detail);
+                number_format($this->displayAmount($movement), 2), $detail);
         }
         return implode("\n", $lines);
     }
@@ -292,5 +331,15 @@ final class MovementNotificationService
     private function escape(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /** @param array<string, mixed> $movement */
+    private function displayAmount(array $movement): float
+    {
+        $type = mb_strtolower(trim((string) ($movement['tipo_movimiento'] ?? '')));
+        if ($type === 'abono por comisión' || $type === 'abono por comision') {
+            return (float) ($movement['saldo_acreditable'] ?? $movement['monto'] ?? 0);
+        }
+        return (float) ($movement['monto'] ?? 0);
     }
 }
