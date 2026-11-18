@@ -23,22 +23,14 @@ $assert(count($page['rows']) > 0, 'el reporte devuelve pagos documentados');
 foreach ($page['rows'] as $row) {
     $hasInvoice = (int) ($row['factura_id'] ?? 0) > 0;
     $hasComplement = (int) ($row['complemento_id'] ?? 0) > 0;
+    $assert((string) ($row['tipo_movimiento'] ?? '') === 'Deposito', 'cada fila corresponde a un depósito');
     $assert($hasInvoice || $hasComplement, 'cada fila contiene al menos una referencia documental');
     $assert(in_array($row['documentos'], ['Factura', 'Complemento', 'Factura y complemento'], true), 'clasifica la relación documental');
 }
 
-$legacy = report_repository()->run('conta', $definition, ['q' => '564774'], 1, 25);
-$legacyRow = null;
-foreach ($legacy['rows'] as $row) {
-    if ((int) $row['pago_id'] === 564774) {
-        $legacyRow = $row;
-        break;
-    }
-}
-$assert(is_array($legacyRow), 'encuentra un pago con documento histórico');
-$assert((int) $legacyRow['complemento_id'] === 116887, 'conserva la referencia id_factura_res');
-$assert(str_starts_with((string) $legacyRow['complemento_estado'], 'Registro histórico'), 'resuelve el documento histórico desde facturas');
-$assert((string) $legacyRow['complemento_folio'] !== '', 'muestra el registro documental correspondiente');
+$withdrawal = report_repository()->run('conta', $definition, ['q' => '564774'], 1, 25);
+$withdrawalIds = array_map('intval', array_column($withdrawal['rows'], 'pago_id'));
+$assert(!in_array(564774, $withdrawalIds, true), 'excluye retiros aunque tengan un documento histórico relacionado');
 
 $both = report_repository()->run('conta', $definition, ['q' => '494038'], 1, 25);
 $bothRow = null;

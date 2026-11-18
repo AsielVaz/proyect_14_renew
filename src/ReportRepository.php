@@ -139,9 +139,10 @@ final class ReportRepository
                  LEFT JOIN facturas legacy_response ON legacy_response.id = CASE
                     WHEN TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
                     THEN CAST(p.id_factura_res AS UNSIGNED) ELSE NULL END
-                 WHERE COALESCE(p.id_factura, 0) > 0
+                 WHERE p.tipo_movimiento = 'Deposito'
+                   AND (COALESCE(p.id_factura, 0) > 0
                     OR (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
-                        AND CAST(p.id_factura_res AS UNSIGNED) > 0)",
+                        AND CAST(p.id_factura_res AS UNSIGNED) > 0))",
                 [], '`pago_id` DESC',
             ],
             'conta-interno' => [

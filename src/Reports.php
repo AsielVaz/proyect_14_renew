@@ -38,7 +38,7 @@ final class Reports
             ],
             'conta' => [
                 'label' => 'Conta14',
-                'description' => 'Todos los pagos que tienen una factura, un complemento de pago o ambos, junto con el registro documental correspondiente.',
+                'description' => 'Depósitos que tienen una factura, un complemento de pago o ambos, junto con el registro documental correspondiente.',
                 'columns' => [
                     'pago_id' => 'ID pago', 'documentos' => 'Documentos relacionados',
                     'empresa' => 'Empresa', 'cliente' => 'Cliente', 'cuenta' => 'Cuenta',

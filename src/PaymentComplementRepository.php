@@ -30,9 +30,16 @@ final class PaymentComplementRepository
         $where = ' WHERE 1 = 1';
         $params = [];
         if ($search !== '') {
-            $where .= " AND CONCAT_WS(' ', CAST(fc.id AS CHAR), fc.uuid, c.nombre,
-                e.razon, cc.rfc, CAST(fc.folio AS CHAR)) LIKE :search";
+            $textCondition = "CONCAT_WS(' ', CAST(fc.id AS CHAR), fc.uuid, c.nombre,
+                e.razon, cc.rfc, CAST(fc.folio AS CHAR), CAST(fc.total_factura AS CHAR)) LIKE :search";
+            $amount = self::numericSearchValue($search);
+            $where .= $amount !== null
+                ? " AND (fc.total_factura = :search_amount OR {$textCondition})"
+                : " AND {$textCondition}";
             $params['search'] = '%' . $search . '%';
+            if ($amount !== null) {
+                $params['search_amount'] = $amount;
+            }
         }
         if ($dateFrom !== '') {
             $where .= ' AND fc.fecha_pago >= :date_from';
@@ -558,5 +565,11 @@ final class PaymentComplementRepository
     {
         $value = trim((string) $value);
         return preg_match('/^[0-9]+$/D', $value) && (int) $value > 0 ? (int) $value : 0;
+    }
+
+    private static function numericSearchValue(string $value): ?float
+    {
+        $normalized = str_replace([',', '$', ' '], '', trim($value));
+        return $normalized !== '' && is_numeric($normalized) ? (float) $normalized : null;
     }
 }
