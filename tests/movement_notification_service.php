@@ -72,6 +72,11 @@ try {
         && str_contains($messages[0]['html'], '$1,250.50')
         && str_contains($messages[0]['text'], 'Saldo actual de la cartera: $1,250.50'),
         'El correo debe mostrar el saldo de la cartera calculado al momento del envío.');
+    $expect(str_contains($messages[0]['html'], 'name="viewport"')
+        && str_contains($messages[0]['html'], '@media only screen and (max-width:620px)')
+        && str_contains($messages[0]['html'], 'class="movement-row"')
+        && str_contains($messages[0]['html'], '<span class="mobile-label">Monto</span>'),
+        'El correo debe convertir los movimientos en tarjetas legibles en pantallas móviles.');
     $expect($pdo->query('SELECT notificado FROM pagos WHERE id = 900001')->fetchColumn() === 'Si',
         'El pago sólo debe quedar marcado después del envío aceptado.');
 
