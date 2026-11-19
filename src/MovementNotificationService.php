@@ -45,96 +45,130 @@ final class MovementNotificationService
         }
 
         try {
-            $rows = $this->pendingMovements($now);
-            $groups = [];
-            foreach ($rows as $row) {
-                $groups[(int) $row['client_id']][] = $row;
+            $clientIds = [];
+            $this->processGroups($this->pendingImmediateMovements(), 'immediate', $now, $result, $clientIds);
+            if (self::modeIsDue('fin_dia', $now, (int) env_value('MOVEMENT_NOTIFICATION_DAILY_HOUR', '18'))) {
+                $this->ensureDailyNotificationTable();
+                $this->processGroups($this->dailyMovements($now), 'daily_summary', $now, $result, $clientIds);
             }
-
-            $result['clients'] = count($groups);
-            $result['movements'] = count($rows);
-
-            foreach ($groups as $clientId => $movements) {
-                $first = $movements[0];
-                $movementDetails = $this->movementDetails($movements);
-                $balance = null;
-                $recipients = self::recipientAddresses([
-                    $first['email'] ?? null,
-                    $first['email_2'] ?? null,
-                    $first['email_3'] ?? null,
-                ]);
-                if ($recipients === []) {
-                    ++$result['errors'];
-                    $result['notifications'][] = [
-                        'client_id' => $clientId,
-                        'client_name' => (string) $first['client_name'],
-                        'mode' => (string) $first['notification_mode'],
-                        'status' => 'skipped_no_recipients',
-                        'recipients' => [],
-                        'movements' => $movementDetails,
-                        'balance' => null,
-                        'marked' => 0,
-                        'provider_ids' => [],
-                        'message' => 'La cartera no tiene correos de saldos válidos.',
-                    ];
-                    error_log('MovementNotification: la cartera ' . $clientId . ' no tiene correos de saldos válidos.');
-                    continue;
-                }
-
-                try {
-                    $mode = (string) $first['notification_mode'];
-                    $balance = $this->currentBalance($clientId);
-                    $delivery = ($this->transport)([
-                        'subject' => $mode === 'fin_dia'
-                            ? 'Resumen de movimientos del día · ' . (string) $first['client_name']
-                            : 'Nuevos movimientos · ' . (string) $first['client_name'],
-                        'html' => $this->html($first, $movements, $balance, $now),
-                        'text' => $this->text($first, $movements, $balance, $now),
-                        'recipients' => $recipients,
-                    ]);
-                    if (!is_array($delivery) || !($delivery['accepted'] ?? false)) {
-                        throw new RuntimeException((string) ($delivery['message'] ?? 'El proveedor no aceptó el correo.'));
-                    }
-                    $marked = $this->markNotified(array_map(
-                        static fn (array $movement): int => (int) $movement['id'],
-                        $movements
-                    ));
-                    $result['marked'] += $marked;
-                    $result['notifications'][] = [
-                        'client_id' => $clientId,
-                        'client_name' => (string) $first['client_name'],
-                        'mode' => $mode,
-                        'status' => 'sent',
-                        'recipients' => $recipients,
-                        'movements' => $movementDetails,
-                        'balance' => $balance,
-                        'marked' => $marked,
-                        'provider_ids' => array_values(array_map('strval', is_array($delivery['provider_ids'] ?? null) ? $delivery['provider_ids'] : [])),
-                        'message' => (string) ($delivery['message'] ?? 'Correo aceptado.'),
-                    ];
-                } catch (Throwable $exception) {
-                    ++$result['errors'];
-                    $result['notifications'][] = [
-                        'client_id' => $clientId,
-                        'client_name' => (string) $first['client_name'],
-                        'mode' => (string) $first['notification_mode'],
-                        'status' => 'error',
-                        'recipients' => $recipients,
-                        'movements' => $movementDetails,
-                        'balance' => $balance,
-                        'marked' => 0,
-                        'provider_ids' => [],
-                        'message' => $exception->getMessage(),
-                    ];
-                    error_log('MovementNotification client ' . $clientId . ': ' . $exception->getMessage());
-                }
-            }
+            $result['clients'] = count($clientIds);
         } finally {
             $this->releaseLock();
         }
 
         $result['ok'] = $result['errors'] === 0;
         return $result;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @param array<string, mixed> $result
+     * @param array<int, true> $clientIds
+     */
+    private function processGroups(array $rows, string $notificationType, DateTimeImmutable $now, array &$result, array &$clientIds): void
+    {
+        $groups = [];
+        foreach ($rows as $row) {
+            $groups[(int) $row['client_id']][] = $row;
+        }
+        $result['movements'] += count($rows);
+
+        foreach ($groups as $clientId => $movements) {
+            $first = $movements[0];
+            $movementDetails = $this->movementDetails($movements);
+            $balance = null;
+            $dailyClaimed = false;
+            $emailAccepted = false;
+            $recipients = self::recipientAddresses([
+                $first['email'] ?? null,
+                $first['email_2'] ?? null,
+                $first['email_3'] ?? null,
+            ]);
+            $clientIds[$clientId] = true;
+            if ($recipients === []) {
+                ++$result['errors'];
+                $result['notifications'][] = $this->notificationResult(
+                    $clientId, $first, $notificationType, 'skipped_no_recipients', [],
+                    $movementDetails, null, 0, [], 'La cartera no tiene correos de saldos válidos.'
+                );
+                error_log('MovementNotification: la cartera ' . $clientId . ' no tiene correos de saldos válidos.');
+                continue;
+            }
+
+            if ($notificationType === 'daily_summary') {
+                $dailyClaimed = $this->claimDailySummary($clientId, $now->format('Y-m-d'));
+                if (!$dailyClaimed) continue;
+            }
+
+            try {
+                $balance = $this->currentBalance($clientId);
+                $delivery = ($this->transport)([
+                    'subject' => $notificationType === 'daily_summary'
+                        ? 'Resumen de movimientos del día · ' . (string) $first['client_name']
+                        : 'Nuevos movimientos · ' . (string) $first['client_name'],
+                    'html' => $this->html($first, $movements, $balance, $now, $notificationType),
+                    'text' => $this->text($first, $movements, $balance, $now, $notificationType),
+                    'recipients' => $recipients,
+                ]);
+                if (!is_array($delivery) || !($delivery['accepted'] ?? false)) {
+                    throw new RuntimeException((string) ($delivery['message'] ?? 'El proveedor no aceptó el correo.'));
+                }
+                $emailAccepted = true;
+                $providerIds = array_values(array_map('strval',
+                    is_array($delivery['provider_ids'] ?? null) ? $delivery['provider_ids'] : []));
+                if ($notificationType === 'daily_summary') {
+                    $this->finishDailySummary($clientId, $now->format('Y-m-d'), count($movements), $balance, $recipients, $providerIds);
+                }
+                $marked = $this->markNotified(array_map(
+                    static fn (array $movement): int => (int) $movement['id'],
+                    $movements
+                ));
+                $result['marked'] += $marked;
+                $result['notifications'][] = $this->notificationResult(
+                    $clientId, $first, $notificationType, 'sent', $recipients,
+                    $movementDetails, $balance, $marked, $providerIds,
+                    (string) ($delivery['message'] ?? 'Correo aceptado.')
+                );
+            } catch (Throwable $exception) {
+                if ($dailyClaimed && !$emailAccepted) {
+                    $this->releaseDailySummary($clientId, $now->format('Y-m-d'));
+                }
+                ++$result['errors'];
+                $result['notifications'][] = $this->notificationResult(
+                    $clientId, $first, $notificationType, 'error', $recipients,
+                    $movementDetails, $balance, 0, [], $exception->getMessage()
+                );
+                error_log('MovementNotification client ' . $clientId . ' [' . $notificationType . ']: ' . $exception->getMessage());
+            }
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function notificationResult(
+        int $clientId,
+        array $client,
+        string $notificationType,
+        string $status,
+        array $recipients,
+        array $movements,
+        ?float $balance,
+        int $marked,
+        array $providerIds,
+        string $message,
+    ): array {
+        return [
+            'client_id' => $clientId,
+            'client_name' => (string) $client['client_name'],
+            'mode' => (string) $client['notification_mode'],
+            'notification_type' => $notificationType,
+            'status' => $status,
+            'recipients' => $recipients,
+            'movements' => $movements,
+            'balance' => $balance,
+            'marked' => $marked,
+            'provider_ids' => $providerIds,
+            'message' => $message,
+        ];
     }
 
     private function currentBalance(int $clientId): float
@@ -212,8 +246,8 @@ final class MovementNotificationService
         $balance = $this->currentBalance((int) $movement['client_id']);
         $delivery = ($this->transport)([
             'subject' => '[PRUEBA] Notificación de movimiento · ' . (string) $movement['client_name'],
-            'html' => $this->html($movement, [$movement], $balance, $now),
-            'text' => $this->text($movement, [$movement], $balance, $now),
+            'html' => $this->html($movement, [$movement], $balance, $now, 'immediate'),
+            'text' => $this->text($movement, [$movement], $balance, $now, 'immediate'),
             'recipients' => $recipients,
         ]);
         if (!is_array($delivery)) {
@@ -223,11 +257,9 @@ final class MovementNotificationService
     }
 
     /** @return list<array<string, mixed>> */
-    private function pendingMovements(DateTimeImmutable $now): array
+    private function pendingImmediateMovements(): array
     {
-        $dailyHour = max(0, min(23, (int) env_value('MOVEMENT_NOTIFICATION_DAILY_HOUR', '18')));
-        $dailyDue = (int) $now->format('G') >= $dailyHour ? 1 : 0;
-        $query = $this->pdo->prepare(<<<'SQL'
+        $query = $this->pdo->query(<<<'SQL'
             SELECT p.id, p.monto, p.saldo_acreditable, p.tipo_movimiento,
                    p.fecha_banco, p.fecha_asignacion, p.fecha_operacion,
                    p.detalle, p.descripcion, p.descripcion_detallada,
@@ -237,14 +269,101 @@ final class MovementNotificationService
               FROM clientes c
               STRAIGHT_JOIN pagos p ON p.nombre = CAST(c.id AS CHAR) AND p.notificado = 'no'
              WHERE COALESCE(c.activo, 1) = 1
-               AND (
-                    LOWER(TRIM(COALESCE(c.info_3, ''))) = 'movimiento'
-                    OR (LOWER(TRIM(COALESCE(c.info_3, ''))) = 'fin_dia' AND :daily_due = 1)
+               AND LOWER(TRIM(COALESCE(c.info_3, ''))) = 'movimiento'
+             ORDER BY c.id, p.id
+            SQL);
+        return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function dailyMovements(DateTimeImmutable $now): array
+    {
+        $query = $this->pdo->prepare(<<<'SQL'
+            SELECT p.id, p.monto, p.saldo_acreditable, p.tipo_movimiento,
+                   p.fecha_banco, p.fecha_asignacion, p.fecha_operacion,
+                   p.detalle, p.descripcion, p.descripcion_detallada,
+                   p.empresa, p.banco, p.nombre_corto,
+                   c.id AS client_id, c.nombre AS client_name, c.info_3 AS notification_mode,
+                   c.correo AS email, c.correo_2_s AS email_2, c.correo_3_s AS email_3
+              FROM clientes c
+              STRAIGHT_JOIN pagos p ON p.nombre = CAST(c.id AS CHAR) AND p.fecha_asignacion = :summary_date
+             WHERE COALESCE(c.activo, 1) = 1
+               AND LOWER(TRIM(COALESCE(c.info_3, ''))) IN ('movimiento', 'fin_dia')
+               AND NOT EXISTS (
+                    SELECT 1 FROM s14_cartera_notificacion_diaria d
+                     WHERE d.cliente_id = c.id AND d.fecha_resumen = :existing_date
                )
              ORDER BY c.id, p.id
             SQL);
-        $query->execute(['daily_due' => $dailyDue]);
+        $date = $now->format('Y-m-d');
+        $query->execute(['summary_date' => $date, 'existing_date' => $date]);
         return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function ensureDailyNotificationTable(): void
+    {
+        $this->pdo->exec(<<<'SQL'
+            CREATE TABLE IF NOT EXISTS s14_cartera_notificacion_diaria (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                fecha_resumen DATE NOT NULL,
+                estado VARCHAR(20) NOT NULL DEFAULT 'procesando',
+                movimientos INT NOT NULL DEFAULT 0,
+                saldo DECIMAL(18,2) NULL,
+                destinatarios LONGTEXT NULL,
+                provider_ids LONGTEXT NULL,
+                creado_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                enviado_at DATETIME NULL,
+                UNIQUE KEY uq_cliente_fecha (cliente_id, fecha_resumen),
+                KEY idx_fecha_estado (fecha_resumen, estado)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            SQL);
+    }
+
+    private function claimDailySummary(int $clientId, string $date): bool
+    {
+        $query = $this->pdo->prepare(
+            "INSERT IGNORE INTO s14_cartera_notificacion_diaria
+                (cliente_id, fecha_resumen, estado) VALUES (:client, :summary_date, 'procesando')"
+        );
+        $query->execute(['client' => $clientId, 'summary_date' => $date]);
+        return $query->rowCount() === 1;
+    }
+
+    private function finishDailySummary(
+        int $clientId,
+        string $date,
+        int $movementCount,
+        float $balance,
+        array $recipients,
+        array $providerIds,
+    ): void {
+        $query = $this->pdo->prepare(<<<'SQL'
+            UPDATE s14_cartera_notificacion_diaria
+               SET estado = 'enviado', movimientos = :movements, saldo = :balance,
+                   destinatarios = :recipients, provider_ids = :provider_ids, enviado_at = NOW()
+             WHERE cliente_id = :client AND fecha_resumen = :summary_date AND estado = 'procesando'
+            SQL);
+        $query->execute([
+            'movements' => $movementCount,
+            'balance' => $balance,
+            'recipients' => json_encode($recipients, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'provider_ids' => json_encode($providerIds, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'client' => $clientId,
+            'summary_date' => $date,
+        ]);
+        if ($query->rowCount() !== 1) {
+            throw new RuntimeException('No fue posible confirmar el registro del resumen diario.');
+        }
+    }
+
+    private function releaseDailySummary(int $clientId, string $date): void
+    {
+        $query = $this->pdo->prepare(
+            "DELETE FROM s14_cartera_notificacion_diaria
+              WHERE cliente_id = :client AND fecha_resumen = :summary_date AND estado = 'procesando'"
+        );
+        $query->execute(['client' => $clientId, 'summary_date' => $date]);
     }
 
     /** @param list<int> $ids */
@@ -351,7 +470,13 @@ final class MovementNotificationService
     /** @param array<string, mixed> $client
      *  @param list<array<string, mixed>> $movements
      */
-    private function html(array $client, array $movements, float $balance, DateTimeImmutable $now): string
+    private function html(
+        array $client,
+        array $movements,
+        float $balance,
+        DateTimeImmutable $now,
+        string $notificationType,
+    ): string
     {
         $rows = '';
         foreach ($movements as $movement) {
@@ -375,14 +500,20 @@ final class MovementNotificationService
                 . '</tr>';
         }
 
+        $daily = $notificationType === 'daily_summary';
+        $heading = $daily ? 'Resumen diario de ' : 'Movimientos de ';
+        $intro = $daily
+            ? 'Este resumen incluye <strong>' . count($movements) . '</strong> movimiento(s) asignado(s) durante el día, aunque ya hayan sido notificados individualmente.'
+            : 'Se registraron <strong>' . count($movements) . '</strong> movimiento(s) pendiente(s) de notificar.';
+
         return '<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,sans-serif;color:#20242c">'
             . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:28px 12px">'
             . '<table role="presentation" width="760" cellpadding="0" cellspacing="0" style="max-width:760px;width:100%;background:#fff;border-radius:16px;overflow:hidden">'
             . '<tr><td style="background:#171717;color:#fff;padding:24px 28px;border-left:6px solid #f36b0a">'
             . '<div style="color:#ff9a45;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px">Sistema 14</div>'
-            . '<div style="font-size:24px;font-weight:700;margin-top:5px">Movimientos de ' . $this->escape((string) $client['client_name']) . '</div>'
+            . '<div style="font-size:24px;font-weight:700;margin-top:5px">' . $heading . $this->escape((string) $client['client_name']) . '</div>'
             . '<div style="color:#c9c9c9;font-size:13px;margin-top:7px">Generado el ' . $this->escape($now->format('d/m/Y H:i')) . '</div></td></tr>'
-            . '<tr><td style="padding:24px 28px"><p style="margin:0 0 18px">Se registraron <strong>' . count($movements) . '</strong> movimiento(s) pendiente(s) de notificar.</p>'
+            . '<tr><td style="padding:24px 28px"><p style="margin:0 0 18px">' . $intro . '</p>'
             . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#151d2d;border-radius:12px"><tr>'
             . '<td style="padding:16px 18px;color:#c8d0dd;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Saldo actual de la cartera<br><span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:#929dad">Al momento de enviar este correo</span></td>'
             . '<td align="right" style="padding:16px 18px;color:' . ($balance < 0 ? '#ff8a80' : '#ffffff') . ';font-size:24px;font-weight:700;white-space:nowrap">$' . number_format($balance, 2) . '</td>'
@@ -397,12 +528,22 @@ final class MovementNotificationService
     /** @param array<string, mixed> $client
      *  @param list<array<string, mixed>> $movements
      */
-    private function text(array $client, array $movements, float $balance, DateTimeImmutable $now): string
+    private function text(
+        array $client,
+        array $movements,
+        float $balance,
+        DateTimeImmutable $now,
+        string $notificationType,
+    ): string
     {
         $lines = [
-            'Movimientos de ' . (string) $client['client_name'],
+            ($notificationType === 'daily_summary' ? 'Resumen diario de ' : 'Movimientos de ')
+                . (string) $client['client_name'],
             'Generado: ' . $now->format('d/m/Y H:i'),
             'Saldo actual de la cartera: $' . number_format($balance, 2),
+            ($notificationType === 'daily_summary'
+                ? 'Movimientos asignados durante el día: ' . count($movements)
+                : 'Movimientos pendientes notificados: ' . count($movements)),
             '',
         ];
         foreach ($movements as $movement) {
