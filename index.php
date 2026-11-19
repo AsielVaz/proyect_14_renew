@@ -770,7 +770,17 @@ try {
             redirect('?movement=' . rawurlencode($movementKey));
         } elseif ($catalog) {
             if ($postAction === 'save') {
-                $savedId = repository()->save($catalog, $_POST, filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT) ?: null, $_FILES);
+                $recordId = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT) ?: null;
+                $savedId = $key === 'usuarios' && (string) ($_POST['company_access_form'] ?? '') === '1'
+                    ? repository()->saveUserWithCompanies(
+                        $catalog,
+                        $_POST,
+                        $recordId,
+                        $_FILES,
+                        is_array($_POST['company_ids'] ?? null) ? $_POST['company_ids'] : [],
+                        current_operator_id()
+                    )
+                    : repository()->save($catalog, $_POST, $recordId, $_FILES);
                 flash('success', 'Registro guardado correctamente (ID ' . $savedId . ').');
             } elseif ($postAction === 'delete') {
                 repository()->delete($catalog, (int) ($_POST['id'] ?? 0));
@@ -849,12 +859,16 @@ if ($invoiceView === 'create' && isset($_GET['payment_id'])) {
     }
 }
 $record = null;
+$userCompanyOptions = [];
 if ($catalog && $action === 'form' && $id) {
     $record = repository()->find($catalog, $id);
     if (!$record) {
         flash('error', 'No se encontró el registro solicitado.');
         redirect('?catalog=' . rawurlencode($key));
     }
+}
+if ($catalog && $key === 'usuarios' && $action === 'form') {
+    $userCompanyOptions = repository()->userCompanyOptions($id ?: null);
 }
 
 $companyError = null;
@@ -2407,10 +2421,27 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <div><p class="eyebrow"><?= $record ? 'Edición' : 'Alta' ?></p><h2><?= $record ? e($record[$catalog['title']] ?? ('Registro ' . $id)) : 'Nuevo registro' ?></h2></div>
                 <a class="button" href="?catalog=<?= e($key) ?>">Cancelar</a>
             </div>
-            <form method="post" class="form-grid" enctype="multipart/form-data">
+            <?php $isUserEditor = $key === 'usuarios'; ?>
+            <form method="post" class="<?= $isUserEditor ? 'user-editor-form' : 'form-grid' ?>" enctype="multipart/form-data"<?= $isUserEditor ? ' data-user-editor' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="save">
                 <input type="hidden" name="id" value="<?= e($record['id'] ?? '') ?>">
+                <?php if ($isUserEditor): ?>
+                    <input type="hidden" name="company_access_form" value="1">
+                    <div class="user-editor-tabs" role="tablist" aria-label="Secciones del usuario">
+                        <button type="button" class="user-editor-tab is-active" id="user-tab-data" role="tab" aria-selected="true" aria-controls="user-panel-data" tabindex="0" data-user-tab="data">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.3 3.5-6.5 8-6.5s7.2 2.2 8 6.5"/></svg>
+                            <span>Datos de usuario</span>
+                        </button>
+                        <button type="button" class="user-editor-tab" id="user-tab-billing" role="tab" aria-selected="false" aria-controls="user-panel-billing" tabindex="-1" data-user-tab="billing">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8m-8 4h5"/></svg>
+                            <span>Características de facturación</span>
+                            <strong data-user-company-count><?= count(array_filter($userCompanyOptions, static fn (array $company): bool => (int) $company['selected'] === 1)) ?></strong>
+                        </button>
+                    </div>
+                    <section class="user-editor-panel is-active" id="user-panel-data" role="tabpanel" aria-labelledby="user-tab-data" data-user-panel="data">
+                        <div class="form-grid user-editor-data-grid">
+                <?php endif; ?>
                 <?php foreach ($catalog['fields'] as $name => $field): ?>
                     <?php
                     $column = (string) ($field['column'] ?? $name);
@@ -2461,7 +2492,42 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <?php endif; ?>
                     </label>
                 <?php endforeach; ?>
-                <div class="form-actions wide"><a class="button" href="?catalog=<?= e($key) ?>">Cancelar</a><button class="button primary" type="submit">Guardar registro</button></div>
+                <?php if ($isUserEditor): ?>
+                        </div>
+                    </section>
+                    <section class="user-editor-panel" id="user-panel-billing" role="tabpanel" aria-labelledby="user-tab-billing" data-user-panel="billing" hidden>
+                        <header class="user-company-heading">
+                            <div>
+                                <h3>Empresas disponibles para facturación</h3>
+                                <p>Selecciona las razones sociales que este usuario podrá utilizar en los flujos de facturación.</p>
+                            </div>
+                            <span><strong data-user-company-summary><?= count(array_filter($userCompanyOptions, static fn (array $company): bool => (int) $company['selected'] === 1)) ?></strong> seleccionadas</span>
+                        </header>
+                        <div class="user-company-toolbar">
+                            <label class="user-company-search">
+                                <span class="sr-only">Buscar empresa</span>
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+                                <input type="search" placeholder="Buscar por razón social o RFC…" autocomplete="off" data-user-company-search>
+                            </label>
+                            <div class="user-company-actions">
+                                <button type="button" class="button" data-user-companies="all">Seleccionar visibles</button>
+                                <button type="button" class="button" data-user-companies="none">Limpiar selección</button>
+                            </div>
+                        </div>
+                        <div class="user-company-grid" data-user-company-grid>
+                            <?php foreach ($userCompanyOptions as $company): ?>
+                                <?php $companySelected = (int) $company['selected'] === 1; ?>
+                                <label class="user-company-option<?= $companySelected ? ' is-selected' : '' ?>" data-user-company-option data-company-search="<?= e(mb_strtolower(trim($company['razon'] . ' ' . $company['rfc']))) ?>">
+                                    <input type="checkbox" name="company_ids[]" value="<?= e($company['id']) ?>" <?= $companySelected ? 'checked' : '' ?>>
+                                    <span class="user-company-check" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></span>
+                                    <span class="user-company-copy"><strong><?= e($company['razon']) ?></strong><small><?= e($company['rfc'] !== '' ? $company['rfc'] : 'RFC no registrado') ?></small></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <p class="empty user-company-empty" data-user-company-empty <?= $userCompanyOptions !== [] ? 'hidden' : '' ?>>No hay empresas que coincidan con la búsqueda.</p>
+                    </section>
+                <?php endif; ?>
+                <div class="form-actions wide<?= $isUserEditor ? ' user-editor-actions' : '' ?>"><a class="button" href="?catalog=<?= e($key) ?>">Cancelar</a><button class="button primary" type="submit">Guardar registro</button></div>
             </form>
         </section>
     <?php else: ?>
@@ -4947,6 +5013,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <script src="assets/transfer.js"></script>
 <script src="assets/apexcharts.js"></script>
 <script src="assets/statistics.js"></script>
+<?php if ($catalog && $key === 'usuarios' && $action === 'form'): ?><script src="assets/user-editor.js"></script><?php endif; ?>
 <?php if ($bankingModule): ?><script src="assets/banking-editor.js"></script><?php endif; ?>
 <?php if ($securityModule): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>

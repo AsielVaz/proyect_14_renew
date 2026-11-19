@@ -3342,6 +3342,331 @@ tbody tr:hover {
     padding-top: 10px;
 }
 
+.user-editor-form {
+    display: grid;
+}
+
+.user-editor-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.user-editor-tab {
+    position: relative;
+    display: inline-flex;
+    min-height: 58px;
+    align-items: center;
+    gap: 9px;
+    padding: 0 16px;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 750;
+    white-space: nowrap;
+}
+
+.user-editor-tab::after {
+    position: absolute;
+    right: 12px;
+    bottom: -1px;
+    left: 12px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background: var(--color-primary);
+    content: '';
+    opacity: 0;
+    transform: scaleX(.55);
+    transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.user-editor-tab svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+}
+
+.user-editor-tab > strong {
+    display: inline-grid;
+    min-width: 22px;
+    height: 22px;
+    place-items: center;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--color-page);
+    color: var(--color-text-secondary);
+    font-size: 11px;
+}
+
+.user-editor-tab:hover,
+.user-editor-tab.is-active {
+    color: var(--color-text);
+}
+
+.user-editor-tab.is-active::after {
+    opacity: 1;
+    transform: scaleX(1);
+}
+
+.user-editor-tab:focus-visible {
+    border-radius: 8px;
+    outline: 3px solid var(--color-primary-soft);
+    outline-offset: -4px;
+}
+
+.user-editor-panel[hidden] {
+    display: none;
+}
+
+.user-editor-data-grid {
+    padding-top: 28px;
+}
+
+.user-editor-panel[data-user-panel="billing"] {
+    padding: 26px 24px 8px;
+}
+
+.user-company-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+}
+
+.user-company-heading h3 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 18px;
+}
+
+.user-company-heading p {
+    max-width: 650px;
+    margin: 6px 0 0;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+}
+
+.user-company-heading > span {
+    flex: 0 0 auto;
+    padding: 7px 11px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-page);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.user-company-heading > span strong {
+    color: var(--color-primary-dark);
+}
+
+.user-company-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 20px 0 16px;
+}
+
+.user-company-search {
+    position: relative;
+    flex: 1 1 360px;
+    max-width: 520px;
+}
+
+.user-company-search svg {
+    position: absolute;
+    top: 50%;
+    left: 13px;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: var(--color-text-secondary);
+    stroke-linecap: round;
+    stroke-width: 1.8;
+    transform: translateY(-50%);
+}
+
+.user-company-search input {
+    width: 100%;
+    padding-left: 40px;
+}
+
+.user-company-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 8px;
+}
+
+.user-company-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.user-company-option {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    min-height: 76px;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 11px;
+    padding: 13px;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: 11px;
+    background: var(--color-surface);
+    cursor: pointer;
+    transition: border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease, transform 160ms ease;
+}
+
+.user-company-option:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 7px 18px rgba(36, 42, 53, .08);
+}
+
+.user-company-option.is-selected {
+    border-color: var(--color-primary);
+    background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 72%);
+}
+
+.user-company-option.is-filtered-out {
+    opacity: 0;
+    transform: scale(.97);
+}
+
+.user-company-option > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.user-company-option:focus-within {
+    outline: 3px solid var(--color-primary-soft);
+    outline-offset: 1px;
+}
+
+.user-company-check {
+    display: grid;
+    width: 23px;
+    height: 23px;
+    place-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    background: var(--color-surface);
+    color: transparent;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.user-company-check svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.2;
+}
+
+.user-company-option.is-selected .user-company-check {
+    border-color: var(--color-primary);
+    background: var(--color-primary);
+    color: #fff;
+}
+
+.user-company-copy {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.user-company-copy strong {
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+}
+
+.user-company-copy small {
+    overflow: hidden;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-company-empty {
+    margin: 16px 0 0;
+}
+
+.user-editor-actions {
+    margin-top: 10px;
+    padding: 0 24px 24px;
+}
+
+@media (max-width: 1100px) {
+    .user-company-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 680px) {
+    .user-editor-tabs {
+        padding: 0 12px;
+    }
+
+    .user-editor-tab {
+        min-height: 54px;
+        padding-inline: 10px;
+    }
+
+    .user-editor-panel[data-user-panel="billing"] {
+        padding: 20px 16px 6px;
+    }
+
+    .user-company-heading,
+    .user-company-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .user-company-heading > span {
+        align-self: flex-start;
+    }
+
+    .user-company-search {
+        flex-basis: auto;
+        max-width: none;
+    }
+
+    .user-company-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .user-company-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .user-editor-actions {
+        padding-inline: 16px;
+    }
+}
+
 /* Sistema de alertas glassmorfista -------------------------------------- */
 
 .toast-stack {

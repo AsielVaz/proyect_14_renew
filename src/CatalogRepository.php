@@ -149,6 +149,115 @@ final class CatalogRepository
         return (int) $this->pdo->lastInsertId();
     }
 
+    /**
+     * Guarda el usuario y las empresas que puede utilizar en facturación como
+     * una sola operación. Si alguna relación no es válida no se modifica nada.
+     *
+     * @param array<int, mixed> $companyIds
+     */
+    public function saveUserWithCompanies(
+        array $catalog,
+        array $input,
+        ?int $id,
+        array $files,
+        array $companyIds,
+        int $operatorId,
+    ): int {
+        $startedTransaction = !$this->pdo->inTransaction();
+        if ($startedTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $savedId = $this->save($catalog, $input, $id, $files);
+            $this->syncUserCompanies($savedId, $companyIds, $operatorId);
+            if ($startedTransaction) {
+                $this->pdo->commit();
+            }
+            return $savedId;
+        } catch (\Throwable $exception) {
+            if ($startedTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /** @return list<array{id: int, razon: string, rfc: string, selected: int}> */
+    public function userCompanyOptions(?int $userId): array
+    {
+        $query = $this->pdo->prepare(<<<'SQL'
+            SELECT e.id, COALESCE(NULLIF(TRIM(e.razon), ''), CONCAT('Empresa ', e.id)) AS razon,
+                   COALESCE(e.rfc, '') AS rfc,
+                   CASE WHEN ce.id IS NULL THEN 0 ELSE 1 END AS selected
+              FROM empresas e
+              LEFT JOIN cliente_empresa ce
+                ON ce.id_empresa = e.id AND ce.id_usuario = :user_id
+             ORDER BY razon, e.id
+            SQL);
+        $query->execute(['user_id' => max(0, (int) $userId)]);
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'razon' => (string) $row['razon'],
+            'rfc' => (string) $row['rfc'],
+            'selected' => (int) $row['selected'],
+        ], $query->fetchAll());
+    }
+
+    /** @param array<int, mixed> $companyIds */
+    private function syncUserCompanies(int $userId, array $companyIds, int $operatorId): void
+    {
+        if ($userId <= 0 || $operatorId <= 0) {
+            throw new RuntimeException('No fue posible identificar al usuario o al operador.');
+        }
+
+        $selected = [];
+        foreach ($companyIds as $companyId) {
+            if (!is_scalar($companyId) || !preg_match('/^\d+$/', (string) $companyId) || (int) $companyId <= 0) {
+                throw new RuntimeException('La selección de empresas contiene un valor no válido.');
+            }
+            $selected[(int) $companyId] = (int) $companyId;
+        }
+        $selected = array_values($selected);
+
+        if ($selected !== []) {
+            $placeholders = implode(',', array_fill(0, count($selected), '?'));
+            $query = $this->pdo->prepare("SELECT id FROM empresas WHERE id IN ({$placeholders})");
+            $query->execute($selected);
+            $existingCompanies = array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+            sort($existingCompanies);
+            $validatedSelection = $selected;
+            sort($validatedSelection);
+            if ($existingCompanies !== $validatedSelection) {
+                throw new RuntimeException('Una o más empresas seleccionadas ya no existen. Actualiza la página e inténtalo otra vez.');
+            }
+        }
+
+        $query = $this->pdo->prepare('SELECT id_empresa FROM cliente_empresa WHERE id_usuario = :user FOR UPDATE');
+        $query->execute(['user' => $userId]);
+        $current = array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+        $toDelete = array_values(array_diff($current, $selected));
+        $toInsert = array_values(array_diff($selected, $current));
+
+        if ($toDelete !== []) {
+            $placeholders = implode(',', array_fill(0, count($toDelete), '?'));
+            $delete = $this->pdo->prepare(
+                "DELETE FROM cliente_empresa WHERE id_usuario = ? AND id_empresa IN ({$placeholders})"
+            );
+            $delete->execute(array_merge([$userId], $toDelete));
+        }
+
+        if ($toInsert !== []) {
+            $insert = $this->pdo->prepare(
+                'INSERT INTO cliente_empresa (id_usuario, id_empresa, usuario_crea, fecha_crea)
+                 VALUES (:user, :company, :operator, NOW())'
+            );
+            foreach ($toInsert as $companyId) {
+                $insert->execute(['user' => $userId, 'company' => $companyId, 'operator' => $operatorId]);
+            }
+        }
+    }
+
     private function storeUploadedImage(mixed $file, array $field): string
     {
         if (!is_array($file)) {
