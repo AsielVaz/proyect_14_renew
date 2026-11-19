@@ -1996,13 +1996,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                         <?php $cepPdfUrl = legacy_cep_pdf_url((int) ($row['id'] ?? 0)); ?>
                                         <span class="stp-document-links">
                                             <a
+                                                class="stp-document-button stp-document-button--cep"
                                                 href="<?= e($row[$columnKey]) ?>"
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                <?= $cepPdfUrl !== '' ? 'data-stp-cep-pdf="' . e($cepPdfUrl) . '"' : '' ?>
-                                            >Abrir Banxico<?= $cepPdfUrl !== '' ? ' y PDF' : '' ?></a>
+                                                title="Abrir comprobante CEP en Banxico"
+                                            ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3M5.5 7h5M5.5 9.5h5M5.5 12h3.5"/></svg><span>CEP</span></a>
                                             <?php if ($cepPdfUrl !== ''): ?>
-                                                <a class="stp-pdf-fallback" href="<?= e($cepPdfUrl) ?>" target="_blank" rel="noopener noreferrer">Solo PDF</a>
+                                                <a
+                                                    class="stp-document-button stp-document-button--s14"
+                                                    href="<?= e($cepPdfUrl) ?>"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    title="Descargar PDF de Sistema 14"
+                                                ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v8M5 6.5l3 3 3-3M2.5 11.5v2h11v-2"/></svg><span>S14</span></a>
                                             <?php endif; ?>
                                         </span>
                                     <?php else: ?>
@@ -4940,7 +4947,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <script src="assets/transfer.js"></script>
 <script src="assets/apexcharts.js"></script>
 <script src="assets/statistics.js"></script>
-<?php if ($movementKey === 'stp'): ?><script src="assets/stp-documents.js"></script><?php endif; ?>
 <?php if ($bankingModule): ?><script src="assets/banking-editor.js"></script><?php endif; ?>
 <?php if ($securityModule): ?><script src="assets/passkeys.js"></script><?php endif; ?>
 </body>

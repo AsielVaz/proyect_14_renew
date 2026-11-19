@@ -34,16 +34,11 @@ if ($decrypted !== (string) $paymentId) {
 }
 
 $view = file_get_contents($root . '/index.php');
-$script = file_get_contents($root . '/assets/stp-documents.js');
 if (!is_string($view)
-    || !str_contains($view, 'data-stp-cep-pdf')
-    || !str_contains($view, "movementKey === 'stp'")) {
-    throw new RuntimeException('Movimientos STP no incluye la apertura conjunta de Banxico y PDF.');
-}
-if (!is_string($script)
-    || !str_contains($script, "window.open('about:blank', '_blank')")
-    || !str_contains($script, 'pdfWindow.location.replace(pdfUrl)')) {
-    throw new RuntimeException('El controlador de documentos STP no abre el PDF directo.');
+    || !str_contains($view, 'stp-document-button--cep')
+    || !str_contains($view, 'stp-document-button--s14')
+    || !str_contains($view, 'Descargar PDF de Sistema 14')) {
+    throw new RuntimeException('Movimientos STP no incluye los botones CEP y S14.');
 }
 
 echo "PDF directo de movimientos STP: ok\n";
