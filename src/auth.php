@@ -176,24 +176,34 @@ function auth_validate_session(): void
     $now = time();
     $idleLimit = max(300, (int) env_value('SESSION_IDLE_SECONDS', '1800'));
     $absoluteLimit = max($idleLimit, (int) env_value('SESSION_ABSOLUTE_SECONDS', '28800'));
+    $lastActivity = (int) ($user['last_activity'] ?? 0);
+    $idleSeconds = $lastActivity > 0 ? max(0, $now - $lastActivity) : null;
+    $idleExpired = $idleSeconds !== null && $idleSeconds > $idleLimit;
     $reasons = [];
     if ((int) ($user['id'] ?? 0) <= 0) $reasons[] = 'identificador de usuario ausente';
     if (!hash_equals((string) ($user['ua_hash'] ?? ''), auth_user_agent_hash())) $reasons[] = 'el navegador cambió durante la sesión';
-    if ($now - (int) ($user['last_activity'] ?? 0) > $idleLimit) $reasons[] = 'límite de inactividad excedido';
+    if ($lastActivity <= 0) $reasons[] = 'última actividad de sesión ausente';
+    elseif ($idleExpired) $reasons[] = 'límite de inactividad excedido';
     if ($now - (int) ($user['authenticated_at'] ?? 0) > $absoluteLimit) $reasons[] = 'duración máxima de sesión excedida';
     $invalid = $reasons !== [];
 
     if ($invalid) {
         auth_log_event('session_invalidated', 'Sesión vencida', 'La sesión fue invalidada por seguridad.', [
             'reasons' => $reasons,
-            'idle_seconds' => $now - (int) ($user['last_activity'] ?? 0),
+            'idle_seconds' => $idleSeconds,
             'idle_limit_seconds' => $idleLimit,
             'session_age_seconds' => $now - (int) ($user['authenticated_at'] ?? 0),
             'absolute_limit_seconds' => $absoluteLimit,
         ], $user, '', (string) ($user['method'] ?? 'session'));
         auth_forget_identity();
         unset($_SESSION['csrf_token']);
-        $_SESSION['auth_notice'] = 'Tu sesión terminó por seguridad. Vuelve a ingresar.';
+        if ($idleExpired) {
+            $idleMinutes = max(1, intdiv((int) $idleSeconds, 60));
+            $_SESSION['auth_notice'] = 'Tu sesión terminó después de ' . $idleMinutes
+                . ' minuto' . ($idleMinutes === 1 ? '' : 's') . ' de inactividad. Vuelve a ingresar.';
+        } else {
+            $_SESSION['auth_notice'] = 'Tu sesión terminó por seguridad. Vuelve a ingresar.';
+        }
         session_regenerate_id(true);
         return;
     }
