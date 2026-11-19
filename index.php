@@ -934,6 +934,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <base href="<?= e(app_url('/')) ?>">
+    <link rel="icon" href="assets/favicon.ico?v=20261119" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png?v=20261119">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20261119">
     <title><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos') : ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14'))))))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
