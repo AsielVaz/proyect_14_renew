@@ -1888,6 +1888,24 @@ tbody tr:hover {
     }
 }
 
+.stp-document-links {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+}
+
+.stp-document-links .stp-pdf-fallback {
+    color: var(--muted, #6b6670);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.stp-document-links.is-popup-blocked .stp-pdf-fallback {
+    color: #c2410c;
+    text-decoration: underline;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .movement-table tr[data-visible-search-row] > td,
     .movement-table tr.is-visible-search-restored > td {

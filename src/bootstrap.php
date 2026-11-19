@@ -173,6 +173,56 @@ function company_asset_url(?string $path): string
     return $base . '/' . implode('/', array_map('rawurlencode', $segments));
 }
 
+/**
+ * Genera el token que espera el generador de CEP del sistema anterior.
+ *
+ * Se conserva deliberadamente el formato heredado: openssl_encrypt() con
+ * options=0 devuelve el cifrado en Base64 y después IV+cifrado se codifican
+ * nuevamente en Base64.
+ */
+function legacy_cep_pdf_token(int $paymentId): string
+{
+    if ($paymentId <= 0) {
+        return '';
+    }
+
+    $secret = env_value('LEGACY_CEP_ENCRYPTION_KEY', '');
+    $cipher = 'aes-256-cbc';
+    $ivLength = openssl_cipher_iv_length($cipher);
+    if ($secret === '' || $ivLength <= 0) {
+        return '';
+    }
+
+    try {
+        $iv = random_bytes($ivLength);
+    } catch (Throwable) {
+        return '';
+    }
+
+    $encrypted = openssl_encrypt((string) $paymentId, $cipher, $secret, 0, $iv);
+    if ($encrypted === false) {
+        return '';
+    }
+
+    return base64_encode($iv . $encrypted);
+}
+
+function legacy_cep_pdf_url(int $paymentId): string
+{
+    $token = legacy_cep_pdf_token($paymentId);
+    $baseUrl = trim(env_value(
+        'LEGACY_CEP_PDF_URL',
+        'https://old.sistema14.com/gen_cep_pdf-directo.php'
+    ));
+
+    if ($token === '' || filter_var($baseUrl, FILTER_VALIDATE_URL) === false) {
+        return '';
+    }
+
+    $separator = str_contains($baseUrl, '?') ? '&' : '?';
+    return $baseUrl . $separator . 'pago=' . rawurlencode($token);
+}
+
 function db(): PDO
 {
     static $pdo;
