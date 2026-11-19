@@ -64,5 +64,20 @@ if (isset($_SESSION['auth_user']) || isset($_SESSION['csrf_token'])) {
     throw new RuntimeException('La sesión vencida debe eliminar la identidad y el token CSRF.');
 }
 
+// Si PHP ya eliminó la sesión antes de la siguiente navegación, la marca firmada
+// debe conservar el instante necesario para mostrar el mismo aviso en el login.
+unset($_SESSION['auth_notice']);
+$_COOKIE[auth_idle_marker_name()] = auth_idle_marker_value($now - 1900);
+$markerNotice = auth_idle_notice_from_marker($now);
+if ($markerNotice !== 'Tu sesión terminó después de 31 minutos de inactividad. Vuelve a ingresar.') {
+    throw new RuntimeException('La marca de actividad no recuperó el aviso tras perderse la sesión: ' . $markerNotice);
+}
+
+$parts = explode('.', (string) $_COOKIE[auth_idle_marker_name()], 2);
+$_COOKIE[auth_idle_marker_name()] = ((int) $parts[0] - 600) . '.' . ($parts[1] ?? '');
+if (auth_idle_notice_from_marker($now) !== '') {
+    throw new RuntimeException('Una marca de actividad alterada no debe aceptarse.');
+}
+
 session_destroy();
 echo "session_idle_notice: ok\n";

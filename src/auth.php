@@ -19,6 +19,91 @@ function auth_user_agent_hash(): string
     return hash_hmac('sha256', substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500), env_value('APP_KEY'));
 }
 
+function auth_idle_marker_name(): string
+{
+    $sessionName = preg_replace('/[^a-zA-Z0-9_]/', '_', session_name()) ?: 's14_session';
+    return $sessionName . '_idle';
+}
+
+function auth_idle_marker_value(int $timestamp): string
+{
+    $timestamp = max(1, $timestamp);
+    $payload = (string) $timestamp;
+    $signature = hash_hmac('sha256', $payload . '|' . auth_user_agent_hash(), env_value('APP_KEY'));
+    return $payload . '.' . $signature;
+}
+
+function auth_idle_marker_timestamp(): ?int
+{
+    $marker = (string) ($_COOKIE[auth_idle_marker_name()] ?? '');
+    if (!preg_match('/^(\d{1,12})\.([a-f0-9]{64})$/', $marker, $matches)) {
+        return null;
+    }
+
+    $timestamp = (int) $matches[1];
+    if ($timestamp <= 0) {
+        return null;
+    }
+    $expected = hash_hmac('sha256', $matches[1] . '|' . auth_user_agent_hash(), env_value('APP_KEY'));
+    return hash_equals($expected, $matches[2]) ? $timestamp : null;
+}
+
+function auth_write_idle_marker(int $timestamp): void
+{
+    if (headers_sent()) {
+        return;
+    }
+    $parameters = session_get_cookie_params();
+    $value = auth_idle_marker_value($timestamp);
+    setcookie(auth_idle_marker_name(), $value, [
+        'expires' => time() + max(86400, (int) env_value('SESSION_ABSOLUTE_SECONDS', '28800')),
+        'path' => (string) ($parameters['path'] ?? '/'),
+        'domain' => (string) ($parameters['domain'] ?? ''),
+        'secure' => (bool) ($parameters['secure'] ?? false),
+        'httponly' => true,
+        'samesite' => (string) ($parameters['samesite'] ?? 'Lax'),
+    ]);
+    // Permite que varias validaciones dentro de la misma solicitud utilicen el valor nuevo.
+    $_COOKIE[auth_idle_marker_name()] = $value;
+}
+
+function auth_clear_idle_marker(): void
+{
+    $name = auth_idle_marker_name();
+    unset($_COOKIE[$name]);
+    if (headers_sent()) {
+        return;
+    }
+    $parameters = session_get_cookie_params();
+    setcookie($name, '', [
+        'expires' => time() - 42000,
+        'path' => (string) ($parameters['path'] ?? '/'),
+        'domain' => (string) ($parameters['domain'] ?? ''),
+        'secure' => (bool) ($parameters['secure'] ?? false),
+        'httponly' => true,
+        'samesite' => (string) ($parameters['samesite'] ?? 'Lax'),
+    ]);
+}
+
+function auth_idle_notice_from_marker(?int $now = null): string
+{
+    $lastActivity = auth_idle_marker_timestamp();
+    if ($lastActivity === null) {
+        return '';
+    }
+
+    $now ??= time();
+    $idleSeconds = max(0, $now - $lastActivity);
+    $idleLimit = max(300, (int) env_value('SESSION_IDLE_SECONDS', '1800'));
+    if ($idleSeconds <= $idleLimit) {
+        return '';
+    }
+
+    $idleMinutes = max(1, intdiv($idleSeconds, 60));
+    return 'Tu sesión terminó después de ' . $idleMinutes
+        . ' minuto' . ($idleMinutes === 1 ? '' : 's') . ' de inactividad. Vuelve a ingresar.';
+}
+
 function auth_request_id(): string
 {
     static $requestId;
@@ -151,6 +236,7 @@ function auth_forget_identity(): void
 
 function auth_destroy_session(): void
 {
+    auth_clear_idle_marker();
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {
         $parameters = session_get_cookie_params();
@@ -209,6 +295,7 @@ function auth_validate_session(): void
     }
 
     $_SESSION['auth_user']['last_activity'] = $now;
+    auth_write_idle_marker($now);
     if ($now - (int) ($user['rotated_at'] ?? 0) > 900) {
         // Renovar el identificador protege la sesión sin invalidar formularios
         // que el usuario ya tiene abiertos. El token CSRF sólo cambia al
@@ -248,6 +335,7 @@ function auth_establish_session(array $user, string $method): string
     $_SESSION['id_cliente_14'] = (int) ($user['cliente'] ?? 0);
     $_SESSION['nombre'] = (string) ($user['nombre'] ?? '');
     unset($_SESSION['auth_pending'], $_SESSION['csrf_token']);
+    auth_write_idle_marker($now);
 
     auth_log_event('login_success', 'Correcto', 'Inicio de sesión completado correctamente.', [
         'user_id' => (int) $user['id'],
@@ -271,6 +359,9 @@ function auth_render_login(string $step = 'password', ?string $error = null, str
     header('Cache-Control: no-store, max-age=0');
     header('Pragma: no-cache');
     $notice = (string) ($_SESSION['auth_notice'] ?? '');
+    if ($notice === '') {
+        $notice = auth_idle_notice_from_marker();
+    }
     unset($_SESSION['auth_notice']);
     require APP_ROOT . '/login.php';
     exit;
