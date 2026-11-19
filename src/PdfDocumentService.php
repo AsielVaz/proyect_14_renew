@@ -77,6 +77,7 @@ final class PdfDocumentService
         $this->coverHeader($pdf, 'COMPLEMENTO DE PAGO', $complement);
         $this->fiscalIdentity($pdf, $complement, 'CFDI de recepción de pagos');
         $this->parties($pdf, $complement);
+        $this->complementMetaBar($pdf, $complement);
         $this->paymentSummary($pdf, $complement, $relations);
         $this->relationsTable($pdf, $relations);
         $this->compactFiscalBlock($pdf, $complement, 'Complemento de pago');
@@ -415,9 +416,28 @@ final class PdfDocumentService
             ['FORMA DE PAGO', $this->satCode($invoice['forma_clave'] ?? null)],
             ['MÉTODO DE PAGO', (string) (($invoice['metodo_clave'] ?? '') ?: '-')],
             ['MONEDA', (string) (($invoice['moneda_clave'] ?? '') ?: 'MXN')],
+            ['USO DE CFDI', $this->cfdiUse($invoice)],
             ['RÉGIMEN FISCAL', (string) (($invoice['empresa_regimen'] ?? '') ?: '-')],
         ];
-        $widths = [48, 48, 38, 54];
+        $this->metaBar($pdf, $items, [38, 38, 24, 48, 40]);
+    }
+
+    private function complementMetaBar(FiscalPdf $pdf, array $complement): void
+    {
+        $items = [
+            ['USO DE CFDI', $this->cfdiUse($complement)],
+            ['FORMA DE PAGO', $this->satCode($complement['forma_clave'] ?? null)],
+            ['MONEDA', 'MXN'],
+            ['RÉGIMEN FISCAL', (string) (($complement['empresa_regimen'] ?? '') ?: '-')],
+        ];
+        $this->metaBar($pdf, $items, [68, 45, 25, 50]);
+    }
+
+    /** @param list<array{0:string,1:string}> $items
+     *  @param list<int|float> $widths
+     */
+    private function metaBar(FiscalPdf $pdf, array $items, array $widths): void
+    {
         $x = self::LEFT;
         foreach ($items as $index => [$label, $value]) {
             $pdf->SetFont('Arial', 'B', 5.5);
@@ -431,6 +451,17 @@ final class PdfDocumentService
             $x += $widths[$index];
         }
         $pdf->SetY(107);
+    }
+
+    private function cfdiUse(array $row): string
+    {
+        $code = trim((string) ($row['uso_clave'] ?? ''));
+        $description = preg_replace('/\s+/u', ' ', trim((string) ($row['uso_cfdi_descripcion'] ?? $row['uso_cfdi'] ?? ''))) ?? '';
+        if ($code !== '' && $description !== '') {
+            $description = preg_replace('/^' . preg_quote($code, '/') . '(?:\s*[-–—:]?\s*)/iu', '', $description) ?? $description;
+        }
+        if ($code === '') return $description !== '' ? $description : '-';
+        return $description !== '' ? $code . ' - ' . $description : $code;
     }
 
     private function invoiceTable(FiscalPdf $pdf, array $details): void
@@ -889,7 +920,8 @@ final class PdfDocumentService
             cc.rfc AS receptor_rfc, cc.domicilio AS receptor_domicilio, cc.cp AS receptor_cp,
             cc.regimen_fiscal AS receptor_regimen, fp.clave AS forma_clave,
             fp.forma_pago, mp.clave AS metodo_clave, mp.metodo_pago,
-            cm.clave_moneda AS moneda_clave, uc.cod_sat AS uso_clave, uc.uso_cfdi,
+            cm.clave_moneda AS moneda_clave, uc.cod_sat AS uso_clave,
+            uc.uso_cfdi AS uso_cfdi_descripcion,
             f.folio AS folio_interno
             FROM facturas f
             LEFT JOIN empresas e ON e.id = f.razon
@@ -920,11 +952,13 @@ final class PdfDocumentService
             e.regimen AS empresa_regimen, e.logo, cc.razon_social AS receptor,
             cc.rfc AS receptor_rfc, cc.domicilio AS receptor_domicilio, cc.cp AS receptor_cp,
             cc.regimen_fiscal AS receptor_regimen, fp.clave AS forma_clave, fp.forma_pago,
+            uc.cod_sat AS uso_clave, uc.uso_cfdi AS uso_cfdi_descripcion,
             COALESCE((SELECT cf.folio FROM complementos_folio cf WHERE cf.id_factura = fc.id ORDER BY cf.id DESC LIMIT 1), fc.folio) AS folio_interno
             FROM facturas_complementos fc
             LEFT JOIN empresas e ON e.id = fc.razon
             LEFT JOIN claves_cortas cc ON cc.id = CAST(fc.id_clave_corta AS UNSIGNED)
             LEFT JOIN formas_pago fp ON fp.id = CAST(fc.forma_pago AS UNSIGNED)
+            LEFT JOIN catalogo_usos_cfdi uc ON uc.id = fc.uso_cfdi
             WHERE fc.id = :id LIMIT 1");
         $query->execute(['id' => $id]);
         $row = $query->fetch();
