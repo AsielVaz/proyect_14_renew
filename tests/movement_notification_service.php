@@ -47,6 +47,11 @@ try {
 
     $expect($result['clients'] === 1 && $result['movements'] === 1 && $result['marked'] === 1,
         'El cron debe enviar y marcar el movimiento pendiente.');
+    $expect(($result['notifications'][0]['status'] ?? '') === 'sent'
+        && ($result['notifications'][0]['recipients'] ?? []) === ['uno@example.com', 'dos@example.com']
+        && ($result['notifications'][0]['movements'][0]['id'] ?? 0) === 900001
+        && ($result['notifications'][0]['movements'][0]['amount'] ?? 0) === 1250.50,
+        'El JSON debe detallar la cartera, destinatarios y movimientos notificados.');
     $expect(count($messages) === 1 && $messages[0]['recipients'] === ['uno@example.com', 'dos@example.com'],
         'El cron debe usar los correos de saldos de la cartera.');
     $expect($pdo->query('SELECT notificado FROM pagos WHERE id = 900001')->fetchColumn() === 'Si',

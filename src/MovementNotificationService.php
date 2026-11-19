@@ -25,11 +25,20 @@ final class MovementNotificationService
     }
 
     /**
-     * @return array{ok: bool, busy: bool, clients: int, movements: int, marked: int, errors: int}
+     * @return array{ok: bool, busy: bool, executed_at: string, clients: int, movements: int, marked: int, errors: int, notifications: list<array<string, mixed>>}
      */
     public function run(DateTimeImmutable $now): array
     {
-        $result = ['ok' => true, 'busy' => false, 'clients' => 0, 'movements' => 0, 'marked' => 0, 'errors' => 0];
+        $result = [
+            'ok' => true,
+            'busy' => false,
+            'executed_at' => $now->format(DATE_ATOM),
+            'clients' => 0,
+            'movements' => 0,
+            'marked' => 0,
+            'errors' => 0,
+            'notifications' => [],
+        ];
         if (!$this->acquireLock()) {
             $result['busy'] = true;
             return $result;
@@ -47,6 +56,7 @@ final class MovementNotificationService
 
             foreach ($groups as $clientId => $movements) {
                 $first = $movements[0];
+                $movementDetails = $this->movementDetails($movements);
                 $recipients = self::recipientAddresses([
                     $first['email'] ?? null,
                     $first['email_2'] ?? null,
@@ -54,6 +64,17 @@ final class MovementNotificationService
                 ]);
                 if ($recipients === []) {
                     ++$result['errors'];
+                    $result['notifications'][] = [
+                        'client_id' => $clientId,
+                        'client_name' => (string) $first['client_name'],
+                        'mode' => (string) $first['notification_mode'],
+                        'status' => 'skipped_no_recipients',
+                        'recipients' => [],
+                        'movements' => $movementDetails,
+                        'marked' => 0,
+                        'provider_ids' => [],
+                        'message' => 'La cartera no tiene correos de saldos válidos.',
+                    ];
                     error_log('MovementNotification: la cartera ' . $clientId . ' no tiene correos de saldos válidos.');
                     continue;
                 }
@@ -71,12 +92,35 @@ final class MovementNotificationService
                     if (!is_array($delivery) || !($delivery['accepted'] ?? false)) {
                         throw new RuntimeException((string) ($delivery['message'] ?? 'El proveedor no aceptó el correo.'));
                     }
-                    $result['marked'] += $this->markNotified(array_map(
+                    $marked = $this->markNotified(array_map(
                         static fn (array $movement): int => (int) $movement['id'],
                         $movements
                     ));
+                    $result['marked'] += $marked;
+                    $result['notifications'][] = [
+                        'client_id' => $clientId,
+                        'client_name' => (string) $first['client_name'],
+                        'mode' => $mode,
+                        'status' => 'sent',
+                        'recipients' => $recipients,
+                        'movements' => $movementDetails,
+                        'marked' => $marked,
+                        'provider_ids' => array_values(array_map('strval', is_array($delivery['provider_ids'] ?? null) ? $delivery['provider_ids'] : [])),
+                        'message' => (string) ($delivery['message'] ?? 'Correo aceptado.'),
+                    ];
                 } catch (Throwable $exception) {
                     ++$result['errors'];
+                    $result['notifications'][] = [
+                        'client_id' => $clientId,
+                        'client_name' => (string) $first['client_name'],
+                        'mode' => (string) $first['notification_mode'],
+                        'status' => 'error',
+                        'recipients' => $recipients,
+                        'movements' => $movementDetails,
+                        'marked' => 0,
+                        'provider_ids' => [],
+                        'message' => $exception->getMessage(),
+                    ];
                     error_log('MovementNotification client ' . $clientId . ': ' . $exception->getMessage());
                 }
             }
@@ -86,6 +130,25 @@ final class MovementNotificationService
 
         $result['ok'] = $result['errors'] === 0;
         return $result;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $movements
+     * @return list<array{id: int, type: string, amount: float, date: string}>
+     */
+    private function movementDetails(array $movements): array
+    {
+        return array_map(function (array $movement): array {
+            $date = trim((string) ($movement['fecha_banco'] ?? ''))
+                ?: trim((string) ($movement['fecha_asignacion'] ?? ''))
+                ?: trim((string) ($movement['fecha_operacion'] ?? ''));
+            return [
+                'id' => (int) $movement['id'],
+                'type' => trim((string) ($movement['tipo_movimiento'] ?? 'Movimiento')) ?: 'Movimiento',
+                'amount' => $this->displayAmount($movement),
+                'date' => $date,
+            ];
+        }, $movements);
     }
 
     public static function modeIsDue(string $mode, DateTimeImmutable $now, int $dailyHour = 18): bool
