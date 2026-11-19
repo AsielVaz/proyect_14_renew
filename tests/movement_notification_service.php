@@ -35,8 +35,8 @@ try {
     )');
     $pdo->exec("INSERT INTO clientes (id, nombre, correo, correo_2_s, info_3, activo)
         VALUES (900001, 'Cartera de prueba', 'uno@example.com', 'dos@example.com', 'movimiento', 1)");
-    $pdo->exec("INSERT INTO pagos (id, nombre, monto, factura, empresa, status, tipo_movimiento, notificado)
-        VALUES (900001, '900001', 1250.50, '', '', 'asignado', 'Deposito', 'no')");
+    $pdo->exec("INSERT INTO pagos (id, nombre, monto, saldo_acreditable, factura, empresa, status, tipo_movimiento, notificado)
+        VALUES (900001, '900001', 1250.50, 1250.50, '', '', 'asignado', 'Deposito', 'no')");
 
     $messages = [];
     $service = new MovementNotificationService($pdo, static function (array $message) use (&$messages): array {
@@ -50,10 +50,15 @@ try {
     $expect(($result['notifications'][0]['status'] ?? '') === 'sent'
         && ($result['notifications'][0]['recipients'] ?? []) === ['uno@example.com', 'dos@example.com']
         && ($result['notifications'][0]['movements'][0]['id'] ?? 0) === 900001
-        && ($result['notifications'][0]['movements'][0]['amount'] ?? 0) === 1250.50,
-        'El JSON debe detallar la cartera, destinatarios y movimientos notificados.');
+        && ($result['notifications'][0]['movements'][0]['amount'] ?? 0) === 1250.50
+        && ($result['notifications'][0]['balance'] ?? 0) === 1250.50,
+        'El JSON debe detallar la cartera, saldo, destinatarios y movimientos notificados.');
     $expect(count($messages) === 1 && $messages[0]['recipients'] === ['uno@example.com', 'dos@example.com'],
         'El cron debe usar los correos de saldos de la cartera.');
+    $expect(str_contains($messages[0]['html'], 'Saldo actual de la cartera')
+        && str_contains($messages[0]['html'], '$1,250.50')
+        && str_contains($messages[0]['text'], 'Saldo actual de la cartera: $1,250.50'),
+        'El correo debe mostrar el saldo de la cartera calculado al momento del envío.');
     $expect($pdo->query('SELECT notificado FROM pagos WHERE id = 900001')->fetchColumn() === 'Si',
         'El pago sólo debe quedar marcado después del envío aceptado.');
 } finally {

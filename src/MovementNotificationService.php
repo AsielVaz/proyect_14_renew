@@ -57,6 +57,7 @@ final class MovementNotificationService
             foreach ($groups as $clientId => $movements) {
                 $first = $movements[0];
                 $movementDetails = $this->movementDetails($movements);
+                $balance = null;
                 $recipients = self::recipientAddresses([
                     $first['email'] ?? null,
                     $first['email_2'] ?? null,
@@ -71,6 +72,7 @@ final class MovementNotificationService
                         'status' => 'skipped_no_recipients',
                         'recipients' => [],
                         'movements' => $movementDetails,
+                        'balance' => null,
                         'marked' => 0,
                         'provider_ids' => [],
                         'message' => 'La cartera no tiene correos de saldos válidos.',
@@ -81,12 +83,13 @@ final class MovementNotificationService
 
                 try {
                     $mode = (string) $first['notification_mode'];
+                    $balance = $this->currentBalance($clientId);
                     $delivery = ($this->transport)([
                         'subject' => $mode === 'fin_dia'
                             ? 'Resumen de movimientos del día · ' . (string) $first['client_name']
                             : 'Nuevos movimientos · ' . (string) $first['client_name'],
-                        'html' => $this->html($first, $movements, $now),
-                        'text' => $this->text($first, $movements, $now),
+                        'html' => $this->html($first, $movements, $balance, $now),
+                        'text' => $this->text($first, $movements, $balance, $now),
                         'recipients' => $recipients,
                     ]);
                     if (!is_array($delivery) || !($delivery['accepted'] ?? false)) {
@@ -104,6 +107,7 @@ final class MovementNotificationService
                         'status' => 'sent',
                         'recipients' => $recipients,
                         'movements' => $movementDetails,
+                        'balance' => $balance,
                         'marked' => $marked,
                         'provider_ids' => array_values(array_map('strval', is_array($delivery['provider_ids'] ?? null) ? $delivery['provider_ids'] : [])),
                         'message' => (string) ($delivery['message'] ?? 'Correo aceptado.'),
@@ -117,6 +121,7 @@ final class MovementNotificationService
                         'status' => 'error',
                         'recipients' => $recipients,
                         'movements' => $movementDetails,
+                        'balance' => $balance,
                         'marked' => 0,
                         'provider_ids' => [],
                         'message' => $exception->getMessage(),
@@ -130,6 +135,15 @@ final class MovementNotificationService
 
         $result['ok'] = $result['errors'] === 0;
         return $result;
+    }
+
+    private function currentBalance(int $clientId): float
+    {
+        $query = $this->pdo->prepare(
+            'SELECT COALESCE(SUM(saldo_acreditable), 0) FROM pagos WHERE nombre = :client'
+        );
+        $query->execute(['client' => (string) $clientId]);
+        return round((float) $query->fetchColumn(), 2);
     }
 
     /**
@@ -195,10 +209,11 @@ final class MovementNotificationService
         if (!is_array($movement)) {
             throw new RuntimeException('No se encontró el movimiento solicitado para la prueba.');
         }
+        $balance = $this->currentBalance((int) $movement['client_id']);
         $delivery = ($this->transport)([
             'subject' => '[PRUEBA] Notificación de movimiento · ' . (string) $movement['client_name'],
-            'html' => $this->html($movement, [$movement], $now),
-            'text' => $this->text($movement, [$movement], $now),
+            'html' => $this->html($movement, [$movement], $balance, $now),
+            'text' => $this->text($movement, [$movement], $balance, $now),
             'recipients' => $recipients,
         ]);
         if (!is_array($delivery)) {
@@ -336,7 +351,7 @@ final class MovementNotificationService
     /** @param array<string, mixed> $client
      *  @param list<array<string, mixed>> $movements
      */
-    private function html(array $client, array $movements, DateTimeImmutable $now): string
+    private function html(array $client, array $movements, float $balance, DateTimeImmutable $now): string
     {
         $rows = '';
         foreach ($movements as $movement) {
@@ -368,6 +383,10 @@ final class MovementNotificationService
             . '<div style="font-size:24px;font-weight:700;margin-top:5px">Movimientos de ' . $this->escape((string) $client['client_name']) . '</div>'
             . '<div style="color:#c9c9c9;font-size:13px;margin-top:7px">Generado el ' . $this->escape($now->format('d/m/Y H:i')) . '</div></td></tr>'
             . '<tr><td style="padding:24px 28px"><p style="margin:0 0 18px">Se registraron <strong>' . count($movements) . '</strong> movimiento(s) pendiente(s) de notificar.</p>'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#151d2d;border-radius:12px"><tr>'
+            . '<td style="padding:16px 18px;color:#c8d0dd;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Saldo actual de la cartera<br><span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:#929dad">Al momento de enviar este correo</span></td>'
+            . '<td align="right" style="padding:16px 18px;color:' . ($balance < 0 ? '#ff8a80' : '#ffffff') . ';font-size:24px;font-weight:700;white-space:nowrap">$' . number_format($balance, 2) . '</td>'
+            . '</tr></table>'
             . '<div style="overflow-x:auto"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px">'
             . '<thead><tr style="background:#f7f8fa;color:#636b78"><th align="left" style="padding:10px 8px">ID</th><th align="left" style="padding:10px 8px">Fecha</th><th align="left" style="padding:10px 8px">Tipo</th><th align="left" style="padding:10px 8px">Descripción</th><th align="right" style="padding:10px 8px">Monto</th></tr></thead>'
             . '<tbody>' . $rows . '</tbody></table></div>'
@@ -378,9 +397,14 @@ final class MovementNotificationService
     /** @param array<string, mixed> $client
      *  @param list<array<string, mixed>> $movements
      */
-    private function text(array $client, array $movements, DateTimeImmutable $now): string
+    private function text(array $client, array $movements, float $balance, DateTimeImmutable $now): string
     {
-        $lines = ['Movimientos de ' . (string) $client['client_name'], 'Generado: ' . $now->format('d/m/Y H:i'), ''];
+        $lines = [
+            'Movimientos de ' . (string) $client['client_name'],
+            'Generado: ' . $now->format('d/m/Y H:i'),
+            'Saldo actual de la cartera: $' . number_format($balance, 2),
+            '',
+        ];
         foreach ($movements as $movement) {
             $detail = trim((string) ($movement['detalle'] ?? $movement['descripcion'] ?? ''));
             $lines[] = sprintf('#%d | %s | %s | $%s | %s', (int) $movement['id'],
