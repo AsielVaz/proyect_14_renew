@@ -49,6 +49,8 @@ try {
         VALUES (900001, '900001', 1250.50, 1250.50, '2026-11-18', '', '', 'asignado', 'Deposito', 'no')");
     $pdo->exec("INSERT INTO pagos (id, nombre, monto, saldo_acreditable, fecha_asignacion, factura, empresa, status, tipo_movimiento, notificado)
         VALUES (900002, '900002', 500.00, 500.00, '2026-11-18', '', '', 'asignado', 'Retiro', 'no')");
+    $pdo->exec("INSERT INTO pagos (id, nombre, monto, saldo_acreditable, fecha_asignacion, factura, empresa, status, tipo_movimiento, notificado)
+        VALUES (900003, '900001', 300.00, 300.00, '2026-11-17', '', '', 'asignado', 'Deposito', 'Si')");
 
     $messages = [];
     $service = new MovementNotificationService($pdo, static function (array $message) use (&$messages): array {
@@ -64,13 +66,13 @@ try {
         && ($result['notifications'][0]['recipients'] ?? []) === ['uno@example.com', 'dos@example.com']
         && ($result['notifications'][0]['movements'][0]['id'] ?? 0) === 900001
         && ($result['notifications'][0]['movements'][0]['amount'] ?? 0) === 1250.50
-        && ($result['notifications'][0]['balance'] ?? 0) === 1250.50,
+        && ($result['notifications'][0]['balance'] ?? 0) === 1550.50,
         'El JSON debe detallar la cartera, saldo, destinatarios y movimientos notificados.');
     $expect(count($messages) === 1 && $messages[0]['recipients'] === ['uno@example.com', 'dos@example.com'],
         'El cron debe usar los correos de saldos de la cartera.');
     $expect(str_contains($messages[0]['html'], 'Saldo actual de la cartera')
-        && str_contains($messages[0]['html'], '$1,250.50')
-        && str_contains($messages[0]['text'], 'Saldo actual de la cartera: $1,250.50'),
+        && str_contains($messages[0]['html'], '$1,550.50')
+        && str_contains($messages[0]['text'], 'Saldo actual de la cartera: $1,550.50'),
         'El correo debe mostrar el saldo de la cartera calculado al momento del envío.');
     $expect(str_contains($messages[0]['html'], 'name="viewport"')
         && str_contains($messages[0]['html'], '@media only screen and (max-width:620px)')
@@ -86,11 +88,15 @@ try {
     $expect(count($dailyResult['notifications']) === 2
         && ($dailyResult['notifications'][0]['notification_type'] ?? '') === 'daily_summary'
         && ($dailyResult['notifications'][0]['movements'][0]['id'] ?? 0) === 900001
+        && ($dailyResult['notifications'][0]['balance'] ?? null) === 300.0
         && ($dailyResult['notifications'][1]['notification_type'] ?? '') === 'daily_summary'
         && ($dailyResult['notifications'][1]['movements'][0]['id'] ?? 0) === 900002,
         'El resumen debe incluir movimientos ya notificados por movimiento y los configurados sólo al final del día.');
     $expect(count($messages) === 3
         && str_contains($messages[1]['html'], 'Resumen diario de')
+        && str_contains($messages[1]['html'], 'Saldo del día anterior')
+        && str_contains($messages[1]['html'], '$300.00')
+        && str_contains($messages[1]['text'], 'Saldo del día anterior: $300.00')
         && str_contains($messages[1]['text'], 'Movimientos asignados durante el día: 1'),
         'El correo diario debe identificarse como resumen de todos los movimientos asignados.');
     $expect($pdo->query("SELECT COUNT(*) FROM s14_cartera_notificacion_diaria WHERE estado = 'enviado'")->fetchColumn() === 2,

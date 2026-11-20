@@ -101,7 +101,9 @@ final class MovementNotificationService
             }
 
             try {
-                $balance = $this->currentBalance($clientId);
+                $balance = $notificationType === 'daily_summary'
+                    ? $this->previousDayBalance($clientId, $now)
+                    : $this->currentBalance($clientId);
                 $delivery = ($this->transport)([
                     'subject' => $notificationType === 'daily_summary'
                         ? 'Resumen de movimientos del día · ' . (string) $first['client_name']
@@ -177,6 +179,20 @@ final class MovementNotificationService
             'SELECT COALESCE(SUM(saldo_acreditable), 0) FROM pagos WHERE nombre = :client'
         );
         $query->execute(['client' => (string) $clientId]);
+        return round((float) $query->fetchColumn(), 2);
+    }
+
+    private function previousDayBalance(int $clientId, DateTimeImmutable $now): float
+    {
+        $query = $this->pdo->prepare(
+            'SELECT COALESCE(SUM(saldo_acreditable), 0)
+               FROM pagos
+              WHERE nombre = :client AND fecha_asignacion < :summary_date'
+        );
+        $query->execute([
+            'client' => (string) $clientId,
+            'summary_date' => $now->format('Y-m-d'),
+        ]);
         return round((float) $query->fetchColumn(), 2);
     }
 
@@ -502,6 +518,10 @@ final class MovementNotificationService
 
         $daily = $notificationType === 'daily_summary';
         $heading = $daily ? 'Resumen diario de ' : 'Movimientos de ';
+        $balanceLabel = $daily ? 'Saldo del día anterior' : 'Saldo actual de la cartera';
+        $balanceCaption = $daily
+            ? 'Movimientos asignados antes del ' . $now->format('d/m/Y')
+            : 'Al momento de enviar este correo';
         $intro = $daily
             ? 'Este resumen incluye <strong>' . count($movements) . '</strong> movimiento(s) asignado(s) durante el día, aunque ya hayan sido notificados individualmente.'
             : 'Se registraron <strong>' . count($movements) . '</strong> movimiento(s) pendiente(s) de notificar.';
@@ -531,7 +551,7 @@ final class MovementNotificationService
             . '<div style="color:#c9c9c9;font-size:13px;margin-top:7px">Generado el ' . $this->escape($now->format('d/m/Y H:i')) . '</div></td></tr>'
             . '<tr><td class="email-content" style="padding:24px 28px"><p class="email-intro" style="margin:0 0 18px">' . $intro . '</p>'
             . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#151d2d;border-radius:12px"><tr>'
-            . '<td class="balance-label" style="padding:16px 18px;color:#c8d0dd;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Saldo actual de la cartera<br><span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:#929dad">Al momento de enviar este correo</span></td>'
+            . '<td class="balance-label" style="padding:16px 18px;color:#c8d0dd;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px">' . $balanceLabel . '<br><span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:#929dad">' . $balanceCaption . '</span></td>'
             . '<td class="balance-value" align="right" style="padding:16px 18px;color:' . ($balance < 0 ? '#ff8a80' : '#ffffff') . ';font-size:24px;font-weight:700;white-space:nowrap">$' . number_format($balance, 2) . '</td>'
             . '</tr></table>'
             . '<table class="movement-table" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;table-layout:fixed">'
@@ -556,7 +576,8 @@ final class MovementNotificationService
             ($notificationType === 'daily_summary' ? 'Resumen diario de ' : 'Movimientos de ')
                 . (string) $client['client_name'],
             'Generado: ' . $now->format('d/m/Y H:i'),
-            'Saldo actual de la cartera: $' . number_format($balance, 2),
+            ($notificationType === 'daily_summary' ? 'Saldo del día anterior: $' : 'Saldo actual de la cartera: $')
+                . number_format($balance, 2),
             ($notificationType === 'daily_summary'
                 ? 'Movimientos asignados durante el día: ' . count($movements)
                 : 'Movimientos pendientes notificados: ' . count($movements)),
