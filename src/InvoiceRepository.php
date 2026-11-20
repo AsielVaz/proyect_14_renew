@@ -25,8 +25,16 @@ final class InvoiceRepository
         $where = 'WHERE f.razon <> 132';
         $params = [];
         if ($search !== '') {
-            $where .= " AND CONCAT_WS(' ', f.id, f.folio, f.serie, f.uuid, c.nombre, e.razon, cc.rfc, cc.razon_social) LIKE :search";
+            $textCondition = "CONCAT_WS(' ', CAST(f.id AS CHAR), CAST(f.folio AS CHAR), f.serie,
+                f.uuid, c.nombre, e.razon, cc.rfc, cc.razon_social, CAST(f.total_iva AS CHAR)) LIKE :search";
+            $amount = self::numericSearchValue($search);
+            $where .= $amount !== null
+                ? " AND (f.total_iva = :search_amount OR {$textCondition})"
+                : " AND {$textCondition}";
             $params['search'] = '%' . $search . '%';
+            if ($amount !== null) {
+                $params['search_amount'] = $amount;
+            }
         }
         if ($dateFrom !== '') {
             $where .= ' AND f.fecha >= :date_from';
@@ -80,6 +88,12 @@ final class InvoiceRepository
         }
 
         return $this->page($search, 1, 10000, $dateFrom, $dateTo)['rows'];
+    }
+
+    private static function numericSearchValue(string $value): ?float
+    {
+        $normalized = str_replace([',', '$', ' '], '', trim($value));
+        return $normalized !== '' && is_numeric($normalized) ? (float) $normalized : null;
     }
 
     public function formData(): array
