@@ -52,4 +52,22 @@ if (($catalog['defaults']['info_3'] ?? null) !== 'no') {
     throw new RuntimeException('Los clientes nuevos deben iniciar sin notificaciones.');
 }
 
+$expectedSections = [
+    'Datos generales',
+    'Comisiones adicionales',
+    'Correos de saldos',
+    'Correos de facturación',
+    'Automatización y notificaciones',
+    'Datos fiscales',
+];
+$actualSections = [];
+foreach ($catalog['fields'] as $field) {
+    if (!empty($field['section'])) {
+        $actualSections[] = $field['section'];
+    }
+}
+if ($actualSections !== $expectedSections) {
+    throw new RuntimeException('Las categorías del formulario de carteras no están definidas en el orden esperado.');
+}
+
 echo count($expected) . " campos del formulario de carteras verificados.\n";

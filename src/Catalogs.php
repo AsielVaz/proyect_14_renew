@@ -52,7 +52,7 @@ final class Catalogs
                 'label' => 'Carteras / clientes', 'table' => 'clientes', 'title' => 'nombre',
                 'list' => ['id', 'nombre', 'razon_social', 'rfc', 'correo', 'telefono', 'activo'],
                 'fields' => [
-                    'nombre' => self::text('Nombre', false, 150) + ['section' => 'Datos básicos'],
+                    'nombre' => self::text('Nombre', false, 150) + ['section' => 'Datos generales'],
                     'telefono' => self::text('Teléfono', false, 15) + ['inputMode' => 'tel'],
                     'esquema_comision' => self::select('Esquema de comisión', [
                         'Total' => 'Total',
@@ -90,11 +90,11 @@ final class Catalogs
                     'correoSaldos2' => self::email('Correo de saldos (2)', false, 100) + ['column' => 'correo_2_s'],
                     'correoSaldos3' => self::email('Correo de saldos (3)', false, 100) + ['column' => 'correo_3_s'],
 
-                    'correo2' => self::email('Correo de facturas (1)', false, 100) + ['section' => 'Correos para envío de facturas'],
+                    'correo2' => self::email('Correo de facturas (1)', false, 100) + ['section' => 'Correos de facturación'],
                     'correoF2' => self::email('Correo de facturas (2)', false, 100) + ['column' => 'correo2_2_f'],
                     'correoF3' => self::email('Correo de facturas (3)', false, 100) + ['column' => 'correo2_3_f'],
 
-                    'fact_auto' => self::select('Facturación automática', ['No' => 'No', 'Si' => 'Sí']) + ['column' => 'facturacion_automatica', 'section' => 'Información adicional', 'caseInsensitiveOptions' => true],
+                    'fact_auto' => self::select('Facturación automática', ['No' => 'No', 'Si' => 'Sí']) + ['column' => 'facturacion_automatica', 'section' => 'Automatización y notificaciones', 'caseInsensitiveOptions' => true],
                     'grupo' => self::relation('Grupo de cliente', 'grupo', 'id', 'nombre') + ['showId' => false],
                     'notificar_saldo' => self::checkbox('Notificar saldos'),
                     'notificacion_movimientos' => self::select('Notificación de movimientos', [
@@ -104,7 +104,7 @@ final class Catalogs
                     ], true) + ['column' => 'info_3'],
                     'lidera' => self::checkbox('Lidera grupo'),
 
-                    'razon_social' => self::text('Razón social', false, 250) + ['section' => 'Información de facturación'],
+                    'razon_social' => self::text('Razón social', false, 250) + ['section' => 'Datos fiscales'],
                     'rfc' => self::text('RFC', false, 50),
                     'domicilio' => self::textarea('Domicilio'),
                 ],
