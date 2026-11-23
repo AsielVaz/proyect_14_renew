@@ -52,7 +52,8 @@ final class PaymentComplementRepository
 
         $query = $this->pdo->prepare("SELECT fc.id, fc.serie, fc.folio, fc.total_factura,
             fc.uuid, fc.fecha_timbrado, fc.fecha_pago, fc.status, fc.status_error,
-            fc.cadena AS tipo_complemento, c.nombre AS cliente, e.razon AS empresa,
+            fc.cadena AS tipo_complemento, c.nombre AS cliente,
+            NULLIF(TRIM(c.correo2), '') AS cliente_correo, e.razon AS empresa,
             cc.razon_social AS receptor, cc.rfc, fp.forma_pago,
             COALESCE(cf.folio, fc.folio) AS folio_interno,
             (SELECT COUNT(*) FROM facturar_rel_complementos rel WHERE rel.id_complemento = fc.id) AS facturas_relacionadas
@@ -269,7 +270,8 @@ final class PaymentComplementRepository
 
     public function find(int $id): ?array
     {
-        $query = $this->pdo->prepare('SELECT fc.*, c.nombre AS cliente, e.razon AS empresa,
+        $query = $this->pdo->prepare('SELECT fc.*, c.nombre AS cliente,
+            NULLIF(TRIM(c.correo2), "") AS cliente_correo, e.razon AS empresa,
             cc.razon_social AS receptor, cc.rfc, fp.forma_pago
             FROM facturas_complementos fc
             LEFT JOIN clientes c ON c.id = fc.nombre

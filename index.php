@@ -128,6 +128,32 @@ if (isset($_GET['invoice_email']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+if (isset($_GET['complement_email']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=UTF-8');
+    try {
+        verify_csrf();
+        $result = complement_email_service()->send(
+            (int) ($_POST['complement_id'] ?? 0),
+            (string) ($_POST['email'] ?? ''),
+            current_operator_id()
+        );
+        $accepted = in_array((string) ($result['status'] ?? ''), ['sent', 'queued', 'scheduled'], true);
+        if (!$accepted) http_response_code(422);
+        echo json_encode(['ok' => $accepted, 'result' => $result, 'message' => $result['message'] ?? ''],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    } catch (RuntimeException $exception) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => $exception->getMessage()],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (Throwable $exception) {
+        error_log('Complement email: ' . $exception->getMessage());
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No fue posible confirmar el envío. Inténtalo nuevamente.'],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit;
+}
+
 if (isset($_GET['fondeadora_mail']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=UTF-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -621,14 +647,31 @@ try {
                 flash('success', 'Complemento pendiente eliminado junto con sus relaciones.');
                 redirect('?complement=list');
             } elseif ($postAction === 'complement_stamp') {
-                $message = fiscal_document_service()->stampComplement(
-                    (int) ($_POST['id'] ?? 0), (string) ($_POST['treatment'] ?? '')
-                );
+                $complementId = (int) ($_POST['id'] ?? 0);
+                $operatorId = current_operator_id();
+                $message = fiscal_document_service()->stampComplement($complementId, (string) ($_POST['treatment'] ?? ''));
+                try {
+                    $emailResult = complement_email_service()->sendToComplementContact($complementId, $operatorId, true, true);
+                    $message .= ' ' . ($emailResult['status'] === 'skipped'
+                        ? $emailResult['message']
+                        : 'Se adjuntaron el PDF y el XML al correo del cliente. ' . $emailResult['message']);
+                } catch (Throwable $emailException) {
+                    error_log('Complement automatic email #' . $complementId . ': ' . $emailException->getMessage());
+                    $message .= ' El complemento quedó timbrado, pero el correo automático no pudo completarse: ' . $emailException->getMessage();
+                }
                 flash('success', $message);
                 redirect('?complement=list');
             } elseif ($postAction === 'complement_resend') {
-                $message = fiscal_document_service()->resendComplement((int) ($_POST['id'] ?? 0));
-                flash('success', $message);
+                $complementId = (int) ($_POST['id'] ?? 0);
+                ignore_user_abort(true);
+                @set_time_limit(180);
+                $emailResult = complement_email_service()->sendToComplementContact(
+                    $complementId, current_operator_id(), true, true
+                );
+                if (($emailResult['status'] ?? '') === 'skipped') {
+                    throw new RuntimeException((string) $emailResult['message']);
+                }
+                flash('success', 'Se prepararon el PDF y el XML del complemento. ' . ($emailResult['message'] ?? ''));
                 redirect('?complement=list');
             } else {
                 throw new RuntimeException('Acción de complemento no permitida.');
@@ -1568,7 +1611,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php else: ?>
                 <section class="report-intro"><p>Relación fiscal y aplicación del pago a sus facturas PPD.</p><span class="operation-badge"><?= e(trim((string) ($complement['uuid'] ?? '')) !== '' ? 'Timbrado' : 'Pendiente de timbrado') ?></span></section>
                 <section class="panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><div class="panel-actions"><?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><button type="button" class="button primary" data-complement-stamp-trigger data-complement-id="<?= e($complement['id']) ?>">Timbrar complemento</button><?php endif; ?><a class="button" href="?complement=list">Volver</a></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><div class="panel-actions"><?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><button type="button" class="button primary" data-complement-stamp-trigger data-complement-id="<?= e($complement['id']) ?>">Timbrar complemento</button><?php else: ?><button type="button" class="button primary" data-complement-email-trigger data-complement-id="<?= e($complement['id']) ?>" data-complement-folio="<?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?>" data-complement-email="<?= e($complement['cliente_correo'] ?? '') ?>">Enviar a otro correo</button><?php endif; ?><a class="button" href="?complement=list">Volver</a></div></div>
                     <?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><form method="post" id="complementStamp<?= e($complement['id']) ?>" class="complement-stamp-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($complement['id']) ?>"><input type="hidden" name="treatment" value="<?= e(in_array($complement['cadena'], ['T','T0','SV'], true) ? $complement['cadena'] : 'T') ?>"></form><?php endif; ?>
                     <dl class="complement-detail-grid">
                         <div><dt>Empresa emisora</dt><dd><?= e($complement['empresa'] ?: '—') ?></dd></div><div><dt>Cliente</dt><dd><?= e($complement['cliente'] ?: '—') ?></dd></div>
@@ -1605,6 +1648,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                     <form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
                                 <?php else: ?>
                                     <form method="post" data-confirm="¿Reenviar por correo este complemento timbrado?" data-confirm-title="Reenviar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_resend"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Reenviar por correo" data-action-icon="↗">Reenviar</button></form>
+                                    <button type="button" data-record-action data-action-label="Enviar a otro correo" data-action-icon="mail" data-complement-email-trigger data-complement-id="<?= e($row['id']) ?>" data-complement-folio="<?= e(($row['serie'] ?? 'P') . ($row['folio_interno'] ?? $row['folio'] ?? '')) ?>" data-complement-email="<?= e($row['cliente_correo'] ?? '') ?>">Enviar a otro correo</button>
                                     <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
                                     <a data-record-action data-action-label="Descargar PDF" data-action-icon="▧" href="?document=complement_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
                                     <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/firmados-comp/XML-complemento-<?= e($row['id']) ?>-<?= e(rawurlencode((string) $row['uuid'])) ?>.xml" target="_blank" rel="noopener">XML</a>
@@ -2795,6 +2839,29 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     </section>
 </div>
 
+<div class="glass-modal-backdrop invoice-email-modal" id="complementEmailModal" hidden>
+    <section class="glass-modal invoice-email-dialog" role="dialog" aria-modal="true" aria-labelledby="complementEmailTitle" aria-describedby="complementEmailDescription">
+        <div class="glass-modal-icon invoice-email-icon" aria-hidden="true">@</div>
+        <div class="glass-modal-copy">
+            <p class="eyebrow">Mailchimp Transactional</p>
+            <h2 id="complementEmailTitle">Enviar complemento por correo</h2>
+            <p id="complementEmailDescription">Se adjuntarán el PDF generado por Sistema 14 y el XML timbrado.</p>
+        </div>
+        <form id="complementEmailForm" class="invoice-email-form" data-endpoint="?complement_email=1">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="complement_id" id="complementEmailComplementId" value="">
+            <div class="invoice-email-document"><span>Complemento seleccionado</span><strong id="complementEmailFolio">—</strong></div>
+            <label class="field"><span>Correo destinatario *</span><input type="email" name="email" id="complementEmailRecipient" maxlength="100" autocomplete="email" placeholder="destinatario@empresa.com" required></label>
+            <div class="invoice-email-sender"><span>Remitente</span><strong>no-reply@sistema14.org</strong></div>
+            <div class="invoice-email-result" id="complementEmailResult" role="status" aria-live="polite" hidden></div>
+            <div class="glass-modal-actions">
+                <button type="button" class="button" id="complementEmailCancel">Cancelar</button>
+                <button type="submit" class="button primary" id="complementEmailSend"><span>Enviar complemento</span></button>
+            </div>
+        </form>
+    </section>
+</div>
+
 <script nonce="<?= e(csp_nonce()) ?>">
 (() => {
     const systemLoader = document.getElementById('systemLoader');
@@ -2844,7 +2911,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         invoice_stamp: ['Timbrando factura', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
         invoice_resend: ['Reenviando factura', 'Obteniendo el PDF y el XML para enviarlos al correo del cliente…'],
         complement_stamp: ['Timbrando complemento', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
-        complement_resend: ['Reenviando complemento', 'Solicitando el reenvío al servicio de Ultra Sistema 14…'],
+        complement_resend: ['Reenviando complemento', 'Generando el PDF, adjuntando el XML y esperando la respuesta de Mailchimp…'],
     };
 
     document.addEventListener('submit', (event) => {
@@ -3091,6 +3158,94 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && invoiceEmailModal && !invoiceEmailModal.hidden) closeInvoiceEmailModal();
+    });
+
+    const complementEmailModal = document.getElementById('complementEmailModal');
+    const complementEmailForm = document.getElementById('complementEmailForm');
+    const complementEmailRecipient = document.getElementById('complementEmailRecipient');
+    const complementEmailComplementId = document.getElementById('complementEmailComplementId');
+    const complementEmailFolio = document.getElementById('complementEmailFolio');
+    const complementEmailResult = document.getElementById('complementEmailResult');
+    const complementEmailSend = document.getElementById('complementEmailSend');
+    const complementEmailCancel = document.getElementById('complementEmailCancel');
+    let complementEmailSending = false;
+
+    const closeComplementEmailModal = () => {
+        if (complementEmailSending) return;
+        complementEmailModal.classList.remove('is-visible');
+        document.body.classList.remove('has-invoice-email-modal');
+        window.setTimeout(() => {
+            if (!complementEmailModal.classList.contains('is-visible')) complementEmailModal.hidden = true;
+        }, 220);
+    };
+
+    const openComplementEmailModal = (button) => {
+        complementEmailForm.reset();
+        complementEmailComplementId.value = button.dataset.complementId || '';
+        complementEmailFolio.textContent = button.dataset.complementFolio || `#${button.dataset.complementId || ''}`;
+        complementEmailRecipient.value = button.dataset.complementEmail || '';
+        complementEmailResult.hidden = true;
+        complementEmailResult.className = 'invoice-email-result';
+        complementEmailResult.textContent = '';
+        complementEmailSend.disabled = false;
+        complementEmailSend.querySelector('span').textContent = 'Enviar complemento';
+        complementEmailCancel.disabled = false;
+        complementEmailCancel.textContent = 'Cancelar';
+        complementEmailSending = false;
+        complementEmailModal.hidden = false;
+        document.body.classList.add('has-invoice-email-modal');
+        window.requestAnimationFrame(() => complementEmailModal.classList.add('is-visible'));
+        window.setTimeout(() => complementEmailRecipient.focus(), 80);
+    };
+
+    document.querySelectorAll('[data-complement-email-trigger]').forEach((button) => {
+        button.addEventListener('click', () => openComplementEmailModal(button));
+    });
+
+    complementEmailCancel?.addEventListener('click', closeComplementEmailModal);
+    complementEmailModal?.addEventListener('click', (event) => {
+        if (event.target === complementEmailModal) closeComplementEmailModal();
+    });
+
+    complementEmailForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (complementEmailSending || !complementEmailForm.reportValidity()) return;
+        complementEmailSending = true;
+        complementEmailSend.disabled = true;
+        complementEmailCancel.disabled = true;
+        complementEmailSend.querySelector('span').textContent = 'Esperando respuesta…';
+        complementEmailResult.hidden = false;
+        complementEmailResult.className = 'invoice-email-result is-waiting';
+        complementEmailResult.textContent = 'Generando el PDF, adjuntando el XML y esperando la respuesta de Mailchimp Transactional…';
+        try {
+            const response = await fetch(complementEmailForm.dataset.endpoint, {
+                method: 'POST',
+                body: new FormData(complementEmailForm),
+                headers: {'Accept': 'application/json'},
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.message || data.result?.message || 'Mailchimp no aceptó el correo.');
+            const status = String(data.result?.status || 'sent');
+            complementEmailResult.className = `invoice-email-result is-success is-${status}`;
+            complementEmailResult.textContent = data.result?.message || 'Correo aceptado correctamente.';
+            complementEmailSend.querySelector('span').textContent = status === 'sent' ? 'Enviado correctamente' : 'Aceptado por Mailchimp';
+            complementEmailCancel.textContent = 'Cerrar';
+            complementEmailCancel.disabled = false;
+            showToast(complementEmailResult.textContent, 'success');
+        } catch (error) {
+            complementEmailResult.className = 'invoice-email-result is-error';
+            complementEmailResult.textContent = error instanceof Error ? error.message : 'No fue posible confirmar el envío.';
+            complementEmailSend.disabled = false;
+            complementEmailSend.querySelector('span').textContent = 'Intentar nuevamente';
+            complementEmailCancel.disabled = false;
+            showToast(complementEmailResult.textContent, 'error');
+        } finally {
+            complementEmailSending = false;
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && complementEmailModal && !complementEmailModal.hidden) closeComplementEmailModal();
     });
 
     const stampModal = document.getElementById('complementStampModal');

@@ -17,6 +17,7 @@ use App\GlobalSearchRepository;
 use App\ManualEmailService;
 use App\PdfDocumentService;
 use App\InvoiceEmailService;
+use App\ComplementEmailService;
 use App\XlsxExportService;
 use App\FondeadoraMailboxService;
 use App\GroupRepository;
@@ -334,6 +335,12 @@ function invoice_email_service(): InvoiceEmailService
 {
     static $service;
     return $service ??= new InvoiceEmailService(db(), pdf_document_service());
+}
+
+function complement_email_service(): ComplementEmailService
+{
+    static $service;
+    return $service ??= new ComplementEmailService(db(), pdf_document_service());
 }
 
 function dashboard_repository(): DashboardRepository

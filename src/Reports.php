@@ -117,7 +117,7 @@ final class Reports
             ],
             'correos-factura' => [
                 'label' => 'Log de correos de facturas',
-                'description' => 'Peticiones y respuestas del procesamiento de facturas por correo.',
+                'description' => 'Peticiones y respuestas de facturas y complementos enviados por correo.',
                 'columns' => [
                     'origen' => 'Correo de origen', 'destino' => 'Correo destino',
                     'peticion' => 'Mensaje de petición', 'respuesta' => 'Mensaje respuesta',

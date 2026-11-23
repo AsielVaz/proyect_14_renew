@@ -206,11 +206,12 @@ final class ReportRepository
                 '`empresa_origen`, `porcentaje_real` DESC',
             ],
             'correos-factura' => [
-                'SELECT fc.id, e1.razon AS origen, e2.razon AS destino, fc.tamplate AS peticion,
+                'SELECT fc.id, COALESCE(e1.razon, fc.correo_origen) AS origen,
+                        COALESCE(e2.razon, fc.correo_destino) AS destino, fc.tamplate AS peticion,
                         fc.respuesta, fc.fecha_envia, fc.fecha_recibe
                  FROM facturas_correo fc
-                 INNER JOIN empresas e1 ON e1.id = fc.empresa_origen
-                 INNER JOIN empresas e2 ON e2.id = fc.empresa_destino',
+                 LEFT JOIN empresas e1 ON e1.id = fc.empresa_origen
+                 LEFT JOIN empresas e2 ON e2.id = fc.empresa_destino',
                 [], '`id` DESC',
             ],
             'correos-contexto' => [
