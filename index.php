@@ -699,15 +699,15 @@ try {
                 $result = movement_repository()->assignBatch((array) ($_POST['assignments'] ?? []), $operatorId);
                 flash('success', $result['movements'] . ' movimientos asignados. Se generaron ' . $result['commissions'] . ' movimientos de comisión.');
             } elseif ($postAction === 'movement_mark_without_document') {
-                if ($movementKey !== 'sin-asignar'
+                if ($movementKey !== 'asignados'
                     || !BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))) {
-                    throw new RuntimeException('Solo un administrador puede realizar esta acción desde Movimientos sin asignar.');
+                    throw new RuntimeException('Solo un administrador puede realizar esta acción desde Movimientos asignados.');
                 }
                 movement_repository()->markWithoutDocument($paymentId, $operatorId);
                 flash('success', 'El movimiento #' . $paymentId . ' se marcó como que no requiere documento.');
                 $returnUrl = (string) ($_POST['return_url'] ?? '');
-                if (!preg_match('/^\?movement=sin-asignar(?:&|$)/D', $returnUrl)) {
-                    $returnUrl = '?movement=sin-asignar';
+                if (!preg_match('/^\?movement=asignados(?:&|$)/D', $returnUrl)) {
+                    $returnUrl = '?movement=asignados';
                 }
                 redirect($returnUrl);
             } elseif ($postAction === 'movement_assign') {
@@ -746,6 +746,10 @@ try {
                 $returnMovementType = in_array((string) ($_POST['return_movement_type'] ?? ''), ['', 'deposit', 'withdrawal'], true)
                     ? (string) ($_POST['return_movement_type'] ?? '')
                     : '';
+                [$returnFrom, $returnTo] = filter_date_range(
+                    $_POST['return_from'] ?? '',
+                    $_POST['return_to'] ?? ''
+                );
                 $returnPerPage = in_array((string) ($_POST['return_per_page'] ?? '25'), ['25', '50', '100', 'all'], true)
                     ? (string) ($_POST['return_per_page'] ?? '25')
                     : '25';
@@ -759,6 +763,8 @@ try {
                     'q' => $returnQuery ?: null,
                     'doc_filter' => $returnDocumentFilters ?: null,
                     'movement_type' => $returnMovementType ?: null,
+                    'from' => $returnFrom ?: null,
+                    'to' => $returnTo ?: null,
                     'per_page' => $returnPerPage,
                     'page' => max(1, (int) ($_POST['return_page'] ?? 1)),
                 ];
@@ -1685,7 +1691,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php
         $movementPage = max(1, (int) ($_GET['page'] ?? 1));
         $movementSearch = trim((string) ($_GET['q'] ?? ''));
-        [$movementFrom, $movementTo] = $movementKey === 'cartera'
+        [$movementFrom, $movementTo] = in_array($movementKey, ['cartera', 'asignados'], true)
             ? filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? '')
             : ['', ''];
         $movementDateType = $movementKey === 'cartera'
@@ -1771,8 +1777,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             && $action === 'assign-document'
             && is_array($movementDocumentAssignment);
         $isMovementAdministrator = BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''));
-        $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true)
-            || ($movementKey === 'sin-asignar' && $isMovementAdministrator);
+        $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
         $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,
             $movement,
@@ -1891,6 +1896,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-query-filter"><span>Buscar movimientos</span><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>></label><?php else: ?><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>><?php endif; ?>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
+                    <?php if ($movementKey === 'asignados'): ?><label class="movement-date-filter"><span>Fecha inicio</span><input type="date" name="from" value="<?= e($movementFrom) ?>" aria-label="Fecha de asignación inicial"></label><label class="movement-date-filter"><span>Fecha fin</span><input type="date" name="to" value="<?= e($movementTo) ?>" aria-label="Fecha de asignación final"></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type" data-movement-type-filter<?= $movementDocumentFilterForcesDeposits ? ' disabled title="Los filtros documentales solo aplican a depósitos"' : '' ?>><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?>
                         <?php $selectedMovementCompanyCount = count($movementCompanies) - count($movementExcludedCompanies); ?>
@@ -1976,9 +1982,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && (int) ($row['company_id'] ?? 0) > 0
                             && !$hasStoredMovementDocument
                             && $matchedMovementInvoiceId <= 0;
-                        $canMarkMovementWithoutDocument = $movementKey === 'sin-asignar'
+                        $canMarkMovementWithoutDocument = $movementKey === 'asignados'
                             && $isMovementAdministrator
-                            && !$hasStoredMovementDocument;
+                            && !$isWithdrawalMovement
+                            && (string) ($row['status'] ?? '') === 'asignado'
+                            && !$hasStoredMovementDocument
+                            && $matchedMovementInvoiceId <= 0;
                         $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice || $canAssignMovementDocument;
                         $hasMovementContextMenu = $canMarkMovementWithoutDocument
                             || (!$isWithdrawalMovement
@@ -2076,23 +2085,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <?php if ($movementAction || $hasMovementContextActions): ?>
                                 <td class="movement-action">
                                     <?php if ($movementAction === 'assign'): ?>
-                                        <div class="movement-record-actions">
-                                            <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>" data-client-picker>
-                                                <option value="">Seleccionar cartera…</option>
-                                            </select>
-                                            <?php if ($canMarkMovementWithoutDocument): ?>
-                                                <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
-                                                <div class="record-action-source" hidden>
-                                                    <form method="post" data-confirm="¿Confirmas que el movimiento #<?= e($row['id']) ?> no requiere factura, complemento ni otro documento? Dejará de aparecer en Movimientos sin asignar y en sus conteos." data-confirm-title="Movimiento sin documento">
-                                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                                        <input type="hidden" name="action" value="movement_mark_without_document">
-                                                        <input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
-                                                        <input type="hidden" name="return_url" value="<?= e($movementReturnUrl) ?>">
-                                                        <button type="submit" data-record-action data-action-label="Movimiento sin documento" data-action-icon="—">Movimiento sin documento</button>
-                                                    </form>
-                                                </div>
-                                            <?php endif; ?>
-                                        </div>
+                                        <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>" data-client-picker>
+                                            <option value="">Seleccionar cartera…</option>
+                                        </select>
                                     <?php elseif ($movementAction === 'reassign'): ?>
                                         <form method="post" class="inline-operation" data-confirm="¿Confirmar esta reasignación y su cálculo de comisiones?" data-confirm-title="Confirmar reasignación">
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -2110,6 +2105,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             <?php if ($hasMovementContextMenu): ?>
                                                 <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
                                                 <div class="record-action-source" hidden><?php if ($displayMovementInvoiceId > 0 || $movementComplementId > 0): ?><?php if ($displayMovementInvoiceId > 0): ?><a data-record-action data-action-label="Mostrar factura" data-action-icon="document" href="?document=invoice_pdf&amp;id=<?= e($displayMovementInvoiceId) ?>" target="_blank" rel="noopener">Mostrar factura</a><?php endif; ?><?php if ($movementComplementId > 0): ?><a data-record-action data-action-label="Mostrar complemento" data-action-icon="receipt" href="?complement=detail&amp;id=<?= e($movementComplementId) ?>">Mostrar complemento</a><?php endif; ?><?php else: ?><?php if ($canAssignMovementDocument): ?><a data-record-action data-action-label="Asignar documento" data-action-icon="receipt" href="?<?= e(http_build_query($movementPaginationQuery + ['action'=>'assign-document','payment_id'=>$row['id'],'page'=>$movementResult['page']])) ?>" target="_blank" rel="noopener" title="Abre en una pestaña nueva">Asignar documento</a><?php endif; ?><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?><?php endif; ?></div>
+                                                <?php if ($canMarkMovementWithoutDocument): ?>
+                                                    <div class="record-action-source" hidden><form method="post" data-confirm="¿Confirmas que el movimiento #<?= e($row['id']) ?> no requiere factura, complemento ni otro documento? Dejará de aparecer en Movimientos asignados y en sus conteos." data-confirm-title="Movimiento sin documento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="movement_mark_without_document"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>"><input type="hidden" name="return_url" value="<?= e($movementReturnUrl) ?>"><button type="submit" data-record-action data-action-label="Movimiento sin documento" data-action-icon="—">Movimiento sin documento</button></form></div>
+                                                <?php endif; ?>
                                             <?php endif; ?>
                                         </div>
                                     <?php elseif ($movementAction === 'transfer'): ?>
@@ -2120,6 +2118,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                     <?php elseif ($hasMovementContextMenu): ?>
                                         <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
                                         <div class="record-action-source" hidden><?php if ($displayMovementInvoiceId > 0 || $movementComplementId > 0): ?><?php if ($displayMovementInvoiceId > 0): ?><a data-record-action data-action-label="Mostrar factura" data-action-icon="document" href="?document=invoice_pdf&amp;id=<?= e($displayMovementInvoiceId) ?>" target="_blank" rel="noopener">Mostrar factura</a><?php endif; ?><?php if ($movementComplementId > 0): ?><a data-record-action data-action-label="Mostrar complemento" data-action-icon="receipt" href="?complement=detail&amp;id=<?= e($movementComplementId) ?>">Mostrar complemento</a><?php endif; ?><?php else: ?><?php if ($canAssignMovementDocument): ?><a data-record-action data-action-label="Asignar documento" data-action-icon="receipt" href="?<?= e(http_build_query($movementPaginationQuery + ['action'=>'assign-document','payment_id'=>$row['id'],'page'=>$movementResult['page']])) ?>" target="_blank" rel="noopener" title="Abre en una pestaña nueva">Asignar documento</a><?php endif; ?><?php if ($canCreateMovementInvoice): ?><a data-record-action data-action-label="Hacer factura" data-action-icon="document" href="?invoice=create&amp;payment_id=<?= e($row['id']) ?>">Hacer factura</a><?php endif; ?><?php if ($canCreateMovementComplement): ?><a data-record-action data-action-label="Hacer complemento" data-action-icon="receipt" href="?complement=create&amp;payment_id=<?= e($row['id']) ?>">Hacer complemento</a><?php endif; ?><?php endif; ?></div>
+                                        <?php if ($canMarkMovementWithoutDocument): ?>
+                                            <div class="record-action-source" hidden><form method="post" data-confirm="¿Confirmas que el movimiento #<?= e($row['id']) ?> no requiere factura, complemento ni otro documento? Dejará de aparecer en Movimientos asignados y en sus conteos." data-confirm-title="Movimiento sin documento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="movement_mark_without_document"><input type="hidden" name="payment_id" value="<?= e($row['id']) ?>"><input type="hidden" name="return_url" value="<?= e($movementReturnUrl) ?>"><button type="submit" data-record-action data-action-label="Movimiento sin documento" data-action-icon="—">Movimiento sin documento</button></form></div>
+                                        <?php endif; ?>
                                     <?php else: ?>
                                         <span aria-hidden="true">—</span>
                                     <?php endif; ?>

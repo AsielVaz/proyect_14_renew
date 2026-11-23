@@ -30,8 +30,11 @@ $pdo->exec('CREATE TEMPORARY TABLE s14_movimiento_auditoria (
 )');
 
 $pdo->exec("INSERT INTO usuarios (id, tipo) VALUES (1, 'administrador'), (2, 'operador')");
-$pdo->exec("INSERT INTO pagos (id, nombre, status, id_factura, id_factura_res)
-    VALUES (101, NULL, 'sin asignar', 0, NULL), (102, NULL, 'sin asignar', 0, NULL)");
+$pdo->exec('ALTER TABLE pagos ADD tipo_movimiento VARCHAR(40) NULL');
+$pdo->exec("INSERT INTO pagos (id, nombre, status, id_factura, id_factura_res, tipo_movimiento)
+    VALUES (101, '74', 'asignado', 0, NULL, 'Deposito'),
+           (102, '74', 'asignado', 0, NULL, 'Deposito'),
+           (103, NULL, 'sin asignar', 0, NULL, 'Deposito')");
 
 $repository = new MovementRepository($pdo);
 $result = $repository->markWithoutDocument(101, 1);
@@ -59,4 +62,13 @@ if ((int) $pdo->query('SELECT COALESCE(id_factura, 0) FROM pagos WHERE id = 102'
     throw new RuntimeException('Se modificó un movimiento después de rechazar a un usuario sin permiso.');
 }
 
-echo "5 comprobaciones de movimiento sin documento superadas.\n";
+try {
+    $repository->markWithoutDocument(103, 1);
+    throw new RuntimeException('La acción se aplicó incorrectamente en Movimientos sin asignar.');
+} catch (RuntimeException $exception) {
+    if (!str_contains($exception->getMessage(), 'continúan asignados')) {
+        throw $exception;
+    }
+}
+
+echo "6 comprobaciones de movimiento sin documento superadas.\n";

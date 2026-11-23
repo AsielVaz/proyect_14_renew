@@ -55,8 +55,9 @@ final class MovementRepository
                 static fn (int $id): bool => $id > 0
             )))
             : [];
-        $dateFrom = $view === 'cartera' ? self::dateFilterValue($dateFrom) : '';
-        $dateTo = $view === 'cartera' ? self::dateFilterValue($dateTo) : '';
+        $supportsDateRange = in_array($view, ['cartera', 'asignados'], true);
+        $dateFrom = $supportsDateRange ? self::dateFilterValue($dateFrom) : '';
+        $dateTo = $supportsDateRange ? self::dateFilterValue($dateTo) : '';
         $dateType = $view === 'cartera' && in_array($dateType, ['bank', 'assigned'], true)
             ? $dateType
             : 'assigned';
@@ -111,11 +112,11 @@ final class MovementRepository
             $conditions[] = 'company_id NOT IN (' . implode(', ', $companyPlaceholders) . ')';
         }
         if ($dateFrom !== '') {
-            $conditions[] = 'DATE(' . $dateColumn . ') >= :date_from';
+            $conditions[] = $dateColumn . ' >= :date_from';
             $params['date_from'] = $dateFrom;
         }
         if ($dateTo !== '') {
-            $conditions[] = 'DATE(' . $dateColumn . ') <= :date_to';
+            $conditions[] = $dateColumn . ' < DATE_ADD(:date_to, INTERVAL 1 DAY)';
             $params['date_to'] = $dateTo;
         }
         if ($search !== '') {
@@ -295,9 +296,12 @@ final class MovementRepository
         return $this->transaction(function () use ($paymentId, $operatorId): array {
             $this->assertAdministrator($operatorId);
             $payment = $this->paymentForUpdate($paymentId);
-            if (!in_array($payment['nombre'] ?? null, [null, '', '0', 0], true)
-                || mb_strtolower(trim((string) ($payment['status'] ?? '')), 'UTF-8') === 'asignado') {
-                throw new RuntimeException('Solo se pueden marcar movimientos que continúan sin asignar.');
+            if (in_array($payment['nombre'] ?? null, [null, '', '0', 0], true)
+                || mb_strtolower(trim((string) ($payment['status'] ?? '')), 'UTF-8') !== 'asignado') {
+                throw new RuntimeException('Solo se pueden marcar movimientos que continúan asignados.');
+            }
+            if (strcasecmp(trim((string) ($payment['tipo_movimiento'] ?? '')), 'Retiro') === 0) {
+                throw new RuntimeException('Los retiros no admiten acciones de documentación.');
             }
             if ((int) ($payment['id_factura'] ?? 0) === 2) {
                 throw new RuntimeException('El movimiento ya está marcado como que no requiere documento.');
@@ -310,7 +314,9 @@ final class MovementRepository
             $update = $this->pdo->prepare("UPDATE pagos
                 SET id_factura = 2, fecha_asig_factura = NOW(), usuario_asigna_fac = :operator
                 WHERE id = :payment
-                  AND (nombre IS NULL OR TRIM(CAST(nombre AS CHAR)) IN ('', '0'))
+                  AND nombre IS NOT NULL AND TRIM(CAST(nombre AS CHAR)) NOT IN ('', '0')
+                  AND LOWER(TRIM(COALESCE(status, ''))) = 'asignado'
+                  AND LOWER(TRIM(COALESCE(tipo_movimiento, ''))) <> 'retiro'
                   AND COALESCE(id_factura, 0) <= 0");
             $update->execute(['operator' => $operatorId, 'payment' => $paymentId]);
             if ($update->rowCount() !== 1) {
@@ -1177,6 +1183,9 @@ final class MovementRepository
             'withdrawal' => " AND p.tipo_movimiento = 'Retiro'",
             default => '',
         };
+        $assignedMarkerCondition = $view === 'asignados'
+            ? ' AND COALESCE(p.id_factura, 0) <> 2'
+            : '';
         $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
@@ -1198,13 +1207,13 @@ final class MovementRepository
         return match ($view) {
             'sin-asignar' => [
                 $base . " WHERE (p.nombre = 0 OR p.nombre = '' OR p.nombre IS NULL)
-                          AND COALESCE(p.id_factura, 0) <> 2
                           AND p.id <> 212733 AND p.monto NOT IN (7.5, 2.88, 8, 1.28, 1.2, 0.8, 5)",
                 '`id` DESC',
             ],
             'asignados', 'reasignar' => [
                 $base . " WHERE p.status = 'asignado' AND p.tipo_movimiento <> 'Abono por comisión'
-                          AND p.banco <> 'STP' AND p.banco <> '99'" . $assignedDocumentCondition . $assignedMovementTypeCondition
+                          AND p.banco <> 'STP' AND p.banco <> '99'" . $assignedMarkerCondition
+                    . $assignedDocumentCondition . $assignedMovementTypeCondition
                     . ($filterByClient ? '' : ' ORDER BY p.id DESC LIMIT 500'),
                 '`id` DESC',
             ],

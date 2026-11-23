@@ -15,6 +15,8 @@ $documentReturnFields = [
     'return_q' => $movementSearch,
     'return_client' => $movementClient['id'] ?? '',
     'return_movement_type' => $movementTypeFilter,
+    'return_from' => $movementFrom,
+    'return_to' => $movementTo,
     'return_per_page' => $movementPerPageValue,
 ];
 ?>
