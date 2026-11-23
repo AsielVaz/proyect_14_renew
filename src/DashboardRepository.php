@@ -122,7 +122,7 @@ final class DashboardRepository
             CROSS JOIN (
                 SELECT
                     COALESCE(SUM(CASE WHEN nombre = 13 THEN saldo_acreditable ELSE 0 END), 0) AS internal_balance,
-                    COALESCE(SUM(CASE WHEN nombre = 0 THEN monto ELSE 0 END), 0) AS without_reference,
+                    COALESCE(SUM(CASE WHEN nombre = 0 AND COALESCE(id_factura, 0) <> 2 THEN monto ELSE 0 END), 0) AS without_reference,
                     COALESCE(SUM(saldo_acreditable), 0) AS credited_balance
                 FROM pagos
             ) payment_summary
@@ -136,6 +136,7 @@ final class DashboardRepository
                 LEFT JOIN captura ca ON ca.id = p.id_captura
                 LEFT JOIN bancos b ON b.id = ca.nombre_corto
                 WHERE p.status <> 'asignado'
+                  AND COALESCE(p.id_factura, 0) <> 2
             ) pending_summary
             CROSS JOIN (
                 SELECT COALESCE(SUM(deposito), 0) - COALESCE(SUM(retiro), 0) AS captured_balance,

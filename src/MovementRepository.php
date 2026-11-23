@@ -286,6 +286,47 @@ final class MovementRepository
             ORDER BY razon ASC, id ASC")->fetchAll();
     }
 
+    public function markWithoutDocument(int $paymentId, int $operatorId): array
+    {
+        if ($paymentId <= 0) {
+            throw new RuntimeException('El movimiento seleccionado no es válido.');
+        }
+
+        return $this->transaction(function () use ($paymentId, $operatorId): array {
+            $this->assertAdministrator($operatorId);
+            $payment = $this->paymentForUpdate($paymentId);
+            if (!in_array($payment['nombre'] ?? null, [null, '', '0', 0], true)
+                || mb_strtolower(trim((string) ($payment['status'] ?? '')), 'UTF-8') === 'asignado') {
+                throw new RuntimeException('Solo se pueden marcar movimientos que continúan sin asignar.');
+            }
+            if ((int) ($payment['id_factura'] ?? 0) === 2) {
+                throw new RuntimeException('El movimiento ya está marcado como que no requiere documento.');
+            }
+            if (Movements::invoiceDocumentId($payment['id_factura'] ?? null) > 0
+                || self::positiveIntegerReference($payment['id_factura_res'] ?? null) > 0) {
+                throw new RuntimeException('El movimiento ya tiene un documento relacionado.');
+            }
+
+            $update = $this->pdo->prepare("UPDATE pagos
+                SET id_factura = 2, fecha_asig_factura = NOW(), usuario_asigna_fac = :operator
+                WHERE id = :payment
+                  AND (nombre IS NULL OR TRIM(CAST(nombre AS CHAR)) IN ('', '0'))
+                  AND COALESCE(id_factura, 0) <= 0");
+            $update->execute(['operator' => $operatorId, 'payment' => $paymentId]);
+            if ($update->rowCount() !== 1) {
+                throw new RuntimeException('El movimiento cambió mientras se procesaba. Actualiza el listado e inténtalo nuevamente.');
+            }
+
+            $this->audit('without_document', $operatorId, $paymentId, [
+                'previousInvoiceId' => $payment['id_factura'] ?? null,
+                'previousComplementId' => $payment['id_factura_res'] ?? null,
+                'marker' => 2,
+            ]);
+
+            return ['paymentId' => $paymentId];
+        });
+    }
+
     public function assignDocument(int $paymentId, string $documentType, int $documentId, int $operatorId): array
     {
         if (!in_array($documentType, ['invoice', 'complement'], true) || $documentId <= 0) {
@@ -1106,6 +1147,9 @@ final class MovementRepository
         string $movementTypeFilter = ''
     ): array
     {
+        if (array_intersect(['document', 'none'], $documentFilters) !== []) {
+            $movementTypeFilter = 'deposit';
+        }
         $accountStatementReference = $view === 'sin-asignar'
             ? 'cec.referencia AS referencia,'
             : '';
@@ -1154,6 +1198,7 @@ final class MovementRepository
         return match ($view) {
             'sin-asignar' => [
                 $base . " WHERE (p.nombre = 0 OR p.nombre = '' OR p.nombre IS NULL)
+                          AND COALESCE(p.id_factura, 0) <> 2
                           AND p.id <> 212733 AND p.monto NOT IN (7.5, 2.88, 8, 1.28, 1.2, 0.8, 5)",
                 '`id` DESC',
             ],
@@ -1273,6 +1318,16 @@ final class MovementRepository
         $query->execute(['id' => $id]);
         if (!$query->fetchColumn()) {
             throw new RuntimeException('Selecciona un operador válido para registrar la acción.');
+        }
+    }
+
+    private function assertAdministrator(int $id): void
+    {
+        $query = $this->pdo->prepare('SELECT tipo FROM usuarios WHERE id = :id');
+        $query->execute(['id' => $id]);
+        $userType = mb_strtolower(trim((string) $query->fetchColumn()), 'UTF-8');
+        if (!in_array($userType, ['administrador', 'administrador_b'], true)) {
+            throw new RuntimeException('Solo un administrador puede marcar un movimiento como que no requiere documento.');
         }
     }
 

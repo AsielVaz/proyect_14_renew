@@ -56,6 +56,8 @@ $repository = $repositoryReflection->newInstanceWithoutConstructor();
 $sourceMethod = $repositoryReflection->getMethod('source');
 [$withDocumentSource] = $sourceMethod->invoke($repository, 'asignados', true, ['document'], '');
 [$withoutDocumentSource] = $sourceMethod->invoke($repository, 'asignados', true, ['none'], '');
+[$documentWithdrawalSource] = $sourceMethod->invoke($repository, 'asignados', true, ['document'], 'withdrawal');
+[$internalWithdrawalSource] = $sourceMethod->invoke($repository, 'asignados', true, ['internal'], 'withdrawal');
 [$unassignedSource] = $sourceMethod->invoke($repository, 'sin-asignar', true, [], '');
 
 if (!str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) > 0')
@@ -65,6 +67,15 @@ if (!str_contains($withDocumentSource, 'COALESCE(p.id_factura, 0) > 0')
 if (!str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) <= 0')
     || str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) = 2')) {
     throw new RuntimeException('La bandera id_factura = 2 debe excluirse de Sin documento.');
+}
+foreach ([$withDocumentSource, $withoutDocumentSource, $documentWithdrawalSource] as $documentSource) {
+    if (!str_contains($documentSource, "p.tipo_movimiento = 'Deposito'")
+        || str_contains($documentSource, "p.tipo_movimiento = 'Retiro'")) {
+        throw new RuntimeException('Con documento y Sin documento deben limitarse a depósitos.');
+    }
+}
+if (!str_contains($internalWithdrawalSource, "p.tipo_movimiento = 'Retiro'")) {
+    throw new RuntimeException('El filtro Interno debe conservar el tipo de movimiento seleccionado.');
 }
 foreach ([$withDocumentSource, $unassignedSource] as $movementSource) {
     foreach (['p.descripcion AS __descripcion', 'p.detalle AS __detalle',
@@ -78,6 +89,9 @@ foreach ([$withDocumentSource, $unassignedSource] as $movementSource) {
 if (!str_contains($unassignedSource, 'LEFT JOIN captura_edo_cta cec ON cec.id = p.id_captura_edo_cta')
     || !str_contains($unassignedSource, 'cec.referencia AS referencia')) {
     throw new RuntimeException('Movimientos sin asignar debe recuperar la referencia mediante LEFT JOIN al estado de cuenta.');
+}
+if (!str_contains($unassignedSource, 'COALESCE(p.id_factura, 0) <> 2')) {
+    throw new RuntimeException('La bandera id_factura = 2 debe excluirse del listado y conteo de movimientos sin asignar.');
 }
 if (!array_key_exists('referencia', App\Movements::get('sin-asignar')['columns'] ?? [])) {
     throw new RuntimeException('Movimientos sin asignar debe mostrar la referencia bancaria.');

@@ -698,6 +698,18 @@ try {
             } elseif ($postAction === 'movement_assign_batch') {
                 $result = movement_repository()->assignBatch((array) ($_POST['assignments'] ?? []), $operatorId);
                 flash('success', $result['movements'] . ' movimientos asignados. Se generaron ' . $result['commissions'] . ' movimientos de comisión.');
+            } elseif ($postAction === 'movement_mark_without_document') {
+                if ($movementKey !== 'sin-asignar'
+                    || !BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))) {
+                    throw new RuntimeException('Solo un administrador puede realizar esta acción desde Movimientos sin asignar.');
+                }
+                movement_repository()->markWithoutDocument($paymentId, $operatorId);
+                flash('success', 'El movimiento #' . $paymentId . ' se marcó como que no requiere documento.');
+                $returnUrl = (string) ($_POST['return_url'] ?? '');
+                if (!preg_match('/^\?movement=sin-asignar(?:&|$)/D', $returnUrl)) {
+                    $returnUrl = '?movement=sin-asignar';
+                }
+                redirect($returnUrl);
             } elseif ($postAction === 'movement_assign') {
                 $result = movement_repository()->assign($paymentId, (int) ($_POST['client_id'] ?? 0), $operatorId);
                 flash('success', 'Movimiento asignado. Se generaron ' . $result['commissions'] . ' movimientos de comisión.');
@@ -1710,11 +1722,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 static fn (string $filter): bool => $filter !== 'none'
             ));
         }
+        $movementDocumentFilterForcesDeposits = array_intersect(
+            ['document', 'none'],
+            $movementDocumentFilters
+        ) !== [];
         $requestedMovementTypeFilter = (string) ($_GET['movement_type'] ?? '');
         $movementTypeFilter = $movementKey === 'asignados'
             && array_key_exists($requestedMovementTypeFilter, $movementTypeFilterLabels)
                 ? $requestedMovementTypeFilter
                 : '';
+        if ($movementDocumentFilterForcesDeposits) {
+            $movementTypeFilter = 'deposit';
+        }
         $movementCompanies = $movementKey === 'asignados'
             ? movement_repository()->companiesForFilter()
             : [];
@@ -1751,7 +1770,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         $isDocumentAssignment = $movementKey === 'asignados'
             && $action === 'assign-document'
             && is_array($movementDocumentAssignment);
-        $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
+        $isMovementAdministrator = BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''));
+        $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true)
+            || ($movementKey === 'sin-asignar' && $isMovementAdministrator);
         $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,
             $movement,
@@ -1870,7 +1891,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-query-filter"><span>Buscar movimientos</span><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>></label><?php else: ?><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>><?php endif; ?>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
-                    <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type"><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
+                    <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type" data-movement-type-filter<?= $movementDocumentFilterForcesDeposits ? ' disabled title="Los filtros documentales solo aplican a depósitos"' : '' ?>><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?>
                         <?php $selectedMovementCompanyCount = count($movementCompanies) - count($movementExcludedCompanies); ?>
                         <div class="movement-company-filter-group">
@@ -1893,7 +1914,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             </details>
                         </div>
                     <?php endif; ?>
-                    <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes. Sin selección se muestran todos.</small></fieldset><?php endif; ?>
+                    <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes y muestran únicamente depósitos.</small></fieldset><?php endif; ?>
                     <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
                     <button class="button<?= $movementKey === 'asignados' ? ' movement-filter-submit' : '' ?>" type="submit">Buscar</button>
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
@@ -1955,11 +1976,15 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && (int) ($row['company_id'] ?? 0) > 0
                             && !$hasStoredMovementDocument
                             && $matchedMovementInvoiceId <= 0;
+                        $canMarkMovementWithoutDocument = $movementKey === 'sin-asignar'
+                            && $isMovementAdministrator
+                            && !$hasStoredMovementDocument;
                         $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice || $canAssignMovementDocument;
-                        $hasMovementContextMenu = !$isWithdrawalMovement
+                        $hasMovementContextMenu = $canMarkMovementWithoutDocument
+                            || (!$isWithdrawalMovement
                             && ($displayMovementInvoiceId > 0
                                 || $movementComplementId > 0
-                                || $hasMovementCreationActions); ?>
+                                || $hasMovementCreationActions)); ?>
                         <?php
                         $visibleMovementSearchText = '';
                         if ($movementHasVisibleSearch) {
@@ -2051,9 +2076,23 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <?php if ($movementAction || $hasMovementContextActions): ?>
                                 <td class="movement-action">
                                     <?php if ($movementAction === 'assign'): ?>
-                                        <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>" data-client-picker>
-                                            <option value="">Seleccionar cartera…</option>
-                                        </select>
+                                        <div class="movement-record-actions">
+                                            <select name="assignments[<?= e($row['id']) ?>]" form="assignmentBatchForm" aria-label="Cartera para movimiento <?= e($row['id']) ?>" data-client-picker>
+                                                <option value="">Seleccionar cartera…</option>
+                                            </select>
+                                            <?php if ($canMarkMovementWithoutDocument): ?>
+                                                <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del movimiento #<?= e($row['id']) ?>">•••</button>
+                                                <div class="record-action-source" hidden>
+                                                    <form method="post" data-confirm="¿Confirmas que el movimiento #<?= e($row['id']) ?> no requiere factura, complemento ni otro documento? Dejará de aparecer en Movimientos sin asignar y en sus conteos." data-confirm-title="Movimiento sin documento">
+                                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                        <input type="hidden" name="action" value="movement_mark_without_document">
+                                                        <input type="hidden" name="payment_id" value="<?= e($row['id']) ?>">
+                                                        <input type="hidden" name="return_url" value="<?= e($movementReturnUrl) ?>">
+                                                        <button type="submit" data-record-action data-action-label="Movimiento sin documento" data-action-icon="—">Movimiento sin documento</button>
+                                                    </form>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
                                     <?php elseif ($movementAction === 'reassign'): ?>
                                         <form method="post" class="inline-operation" data-confirm="¿Confirmar esta reasignación y su cálculo de comisiones?" data-confirm-title="Confirmar reasignación">
                                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -5015,11 +5054,22 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     document.querySelectorAll('[data-document-switch]').forEach((input) => {
         input.addEventListener('change', () => {
-            if (!input.checked) return;
             const group = input.closest('.movement-document-filters');
-            group?.querySelectorAll('[data-document-switch]').forEach((other) => {
-                if (other !== input) other.checked = false;
-            });
+            if (input.checked) {
+                group?.querySelectorAll('[data-document-switch]').forEach((other) => {
+                    if (other !== input) other.checked = false;
+                });
+            }
+            const hasDocumentFilter = Array.from(group?.querySelectorAll('[data-document-switch]') || [])
+                .some((documentSwitch) => documentSwitch.checked);
+            const movementTypeFilter = document.querySelector('[data-movement-type-filter]');
+            if (movementTypeFilter) {
+                if (hasDocumentFilter) movementTypeFilter.value = 'deposit';
+                movementTypeFilter.disabled = hasDocumentFilter;
+                movementTypeFilter.title = hasDocumentFilter
+                    ? 'Los filtros documentales solo aplican a depósitos'
+                    : '';
+            }
         });
     });
 })();
