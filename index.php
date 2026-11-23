@@ -700,7 +700,7 @@ try {
                 flash('success', $result['movements'] . ' movimientos asignados. Se generaron ' . $result['commissions'] . ' movimientos de comisión.');
             } elseif ($postAction === 'movement_mark_without_document') {
                 if ($movementKey !== 'asignados'
-                    || !BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))) {
+                    || mb_strtolower(trim((string) (current_user()['type'] ?? '')), 'UTF-8') !== 'administrador') {
                     throw new RuntimeException('Solo un administrador puede realizar esta acción desde Movimientos asignados.');
                 }
                 movement_repository()->markWithoutDocument($paymentId, $operatorId);
@@ -1782,7 +1782,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         $isDocumentAssignment = $movementKey === 'asignados'
             && $action === 'assign-document'
             && is_array($movementDocumentAssignment);
-        $isMovementAdministrator = BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''));
+        $isMovementAdministrator = mb_strtolower(
+            trim((string) (current_user()['type'] ?? '')),
+            'UTF-8'
+        ) === 'administrador';
         $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
         $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,

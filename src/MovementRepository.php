@@ -1348,7 +1348,7 @@ final class MovementRepository
         $query = $this->pdo->prepare('SELECT tipo FROM usuarios WHERE id = :id');
         $query->execute(['id' => $id]);
         $userType = mb_strtolower(trim((string) $query->fetchColumn()), 'UTF-8');
-        if (!in_array($userType, ['administrador', 'administrador_b'], true)) {
+        if ($userType !== 'administrador') {
             throw new RuntimeException('Solo un administrador puede marcar un movimiento como que no requiere documento.');
         }
     }

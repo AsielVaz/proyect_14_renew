@@ -29,12 +29,13 @@ $pdo->exec('CREATE TEMPORARY TABLE s14_movimiento_auditoria (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 )');
 
-$pdo->exec("INSERT INTO usuarios (id, tipo) VALUES (1, 'administrador'), (2, 'operador')");
+$pdo->exec("INSERT INTO usuarios (id, tipo) VALUES (1, 'administrador'), (2, 'operador'), (3, 'administrador_b')");
 $pdo->exec('ALTER TABLE pagos ADD tipo_movimiento VARCHAR(40) NULL');
 $pdo->exec("INSERT INTO pagos (id, nombre, status, id_factura, id_factura_res, tipo_movimiento)
     VALUES (101, '74', 'asignado', 0, NULL, 'Deposito'),
            (102, '74', 'asignado', 0, NULL, 'Deposito'),
-           (103, NULL, 'sin asignar', 0, NULL, 'Deposito')");
+           (103, NULL, 'sin asignar', 0, NULL, 'Deposito'),
+           (104, '74', 'asignado', 0, NULL, 'Deposito')");
 
 $repository = new MovementRepository($pdo);
 $result = $repository->markWithoutDocument(101, 1);
@@ -71,4 +72,16 @@ try {
     }
 }
 
-echo "6 comprobaciones de movimiento sin documento superadas.\n";
+try {
+    $repository->markWithoutDocument(104, 3);
+    throw new RuntimeException('Un administrador_b pudo marcar un movimiento sin documento.');
+} catch (RuntimeException $exception) {
+    if (!str_contains($exception->getMessage(), 'Solo un administrador')) {
+        throw $exception;
+    }
+}
+if ((int) $pdo->query('SELECT COALESCE(id_factura, 0) FROM pagos WHERE id = 104')->fetchColumn() !== 0) {
+    throw new RuntimeException('Se modificó un movimiento después de rechazar al administrador_b.');
+}
+
+echo "7 comprobaciones de movimiento sin documento superadas.\n";
