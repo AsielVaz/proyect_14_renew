@@ -188,11 +188,13 @@ $securityView = (string) ($_GET['security'] ?? '');
 $securityModule = $securityView === 'passkeys';
 $bankingView = (string) ($_GET['banking'] ?? '');
 $bankingModule = $bankingView === 'editor';
+$devView = (string) ($_GET['dev'] ?? '');
+$devModule = $devView === 'xml-invoices';
 if ($bankingModule && !BankingEditorService::isAllowed((string) (current_user()['type'] ?? ''))) {
     flash('error', 'Solo un administrador puede abrir el editor del banking.');
     redirect('./');
 }
-$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule && !$bankingModule;
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule && !$bankingModule && !$devModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $captureSection = in_array((string) ($_GET['view'] ?? 'manual'), ['all', 'manual', 'deleted'], true)
     ? (string) ($_GET['view'] ?? 'manual')
@@ -670,6 +672,47 @@ try {
             } else {
                 throw new RuntimeException('Acción de facturación no permitida.');
             }
+        } elseif ($devModule) {
+            if ($postAction === 'xml_invoice_preview') {
+                $file = $_FILES['invoice_xml'] ?? null;
+                if (!is_array($file) || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                    throw new RuntimeException('Selecciona un archivo XML válido para continuar.');
+                }
+                if ((int) ($file['size'] ?? 0) <= 0 || (int) $file['size'] > 5 * 1024 * 1024) {
+                    throw new RuntimeException('El archivo XML debe pesar entre 1 byte y 5 MB.');
+                }
+                $temporaryPath = (string) ($file['tmp_name'] ?? '');
+                if ($temporaryPath === '' || !is_uploaded_file($temporaryPath)) {
+                    throw new RuntimeException('No fue posible validar el archivo recibido.');
+                }
+                $xml = file_get_contents($temporaryPath);
+                if ($xml === false) throw new RuntimeException('No fue posible leer el archivo XML.');
+                xml_invoice_import_service()->inspect($xml);
+                foreach ((array) ($_SESSION['xml_invoice_imports'] ?? []) as $oldToken => $stored) {
+                    if ((int) ($stored['created'] ?? 0) < time() - 3600) unset($_SESSION['xml_invoice_imports'][$oldToken]);
+                }
+                $importToken = bin2hex(random_bytes(20));
+                $_SESSION['xml_invoice_imports'][$importToken] = ['xml' => $xml, 'created' => time()];
+                redirect('?dev=xml-invoices&token=' . rawurlencode($importToken));
+            } elseif ($postAction === 'xml_invoice_save') {
+                $importToken = (string) ($_POST['import_token'] ?? '');
+                $stored = $_SESSION['xml_invoice_imports'][$importToken] ?? null;
+                if (!preg_match('/^[a-f0-9]{40}$/D', $importToken) || !is_array($stored)
+                    || (int) ($stored['created'] ?? 0) < time() - 3600) {
+                    throw new RuntimeException('La vista previa venció. Carga nuevamente el archivo XML.');
+                }
+                $invoiceId = xml_invoice_import_service()->save(
+                    (string) ($stored['xml'] ?? ''),
+                    (int) ($_POST['company_id'] ?? 0),
+                    (int) ($_POST['receiver_id'] ?? 0),
+                    current_operator_id()
+                );
+                unset($_SESSION['xml_invoice_imports'][$importToken]);
+                flash('success', 'Factura #' . $invoiceId . ' importada desde el XML con todos sus conceptos.');
+                redirect('?invoice=list');
+            } else {
+                throw new RuntimeException('Acción de importación XML no permitida.');
+            }
         } elseif ($movement) {
             $paymentId = (int) ($_POST['payment_id'] ?? 0);
             $operatorId = current_operator_id();
@@ -835,9 +878,9 @@ try {
     flash('error', $exception->getMessage());
     $target = $movementKey === 'capturas-manuales' && (string) ($_POST['action'] ?? '') === 'manual_capture_create'
         ? '?movement=capturas-manuales&view=manual&action=form'
-            : ($movementKey === 'capturas-manuales'
+        : ($movementKey === 'capturas-manuales'
             ? '?movement=capturas-manuales&view=' . rawurlencode((string) ($_POST['return_view'] ?? 'manual'))
-                : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './')))));
+            : ($devModule ? '?dev=xml-invoices' : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './'))))));
     redirect($target);
 }
 
@@ -975,6 +1018,24 @@ if ($statisticsModule) {
 $paymentNotifierRecipients = $movementKey === 'notificador'
     ? payment_notifier_repository()->recipientGroups()
     : [];
+$xmlInvoiceToken = $devModule ? (string) ($_GET['token'] ?? '') : '';
+$xmlInvoicePreview = null;
+if ($devModule && $xmlInvoiceToken !== '') {
+    $storedImport = $_SESSION['xml_invoice_imports'][$xmlInvoiceToken] ?? null;
+    if (!preg_match('/^[a-f0-9]{40}$/D', $xmlInvoiceToken) || !is_array($storedImport)
+        || (int) ($storedImport['created'] ?? 0) < time() - 3600) {
+        unset($_SESSION['xml_invoice_imports'][$xmlInvoiceToken]);
+        flash('error', 'La vista previa del XML venció. Carga nuevamente el archivo.');
+        redirect('?dev=xml-invoices');
+    }
+    try {
+        $xmlInvoicePreview = xml_invoice_import_service()->inspect((string) ($storedImport['xml'] ?? ''));
+    } catch (Throwable $exception) {
+        unset($_SESSION['xml_invoice_imports'][$xmlInvoiceToken]);
+        flash('error', $exception->getMessage());
+        redirect('?dev=xml-invoices');
+    }
+}
 $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(current_operator_id()) : [];
 ?>
 <!doctype html>
@@ -986,7 +1047,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     <link rel="icon" href="assets/favicon.ico?v=20261119" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png?v=20261119">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20261119">
-    <title><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos') : ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14'))))))) ?> · Sistema 14</title>
+    <title><?= e($devModule ? 'Carga de XML' : ($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos') : ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))))))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
@@ -1067,7 +1128,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <?php endforeach; ?>
             </div>
         </details>
-        <details class="catalog-menu dev-menu" <?= in_array($reportKey, ['correos-factura', 'correos-contexto'], true) ? 'open' : '' ?>>
+        <details class="catalog-menu dev-menu" <?= $devModule || in_array($reportKey, ['correos-factura', 'correos-contexto'], true) ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3m8-6 4 3-4 3m-2-9-4 12"/></svg></span> Dev</span>
                 <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
@@ -1078,6 +1139,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <span></span><?= e($reports[$navKey]['label']) ?>
                     </a>
                 <?php endforeach; ?>
+                <a class="<?= $devModule ? 'active' : '' ?>" href="?dev=xml-invoices"><span></span>Carga de XML</a>
             </div>
         </details>
         <details class="catalog-menu statistics-menu" <?= $statisticsModule ? 'open' : '' ?>>
@@ -1113,8 +1175,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <main id="main-content">
     <header class="topbar">
         <div class="topbar-copy">
-            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($groupModule ? 'Carteras agrupadas' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración')))))) ?></p>
-            <h1><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos de carteras') : ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal'))))))))) ?></h1>
+            <p class="eyebrow"><?= $devModule ? 'Herramientas de desarrollo' : ($securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($groupModule ? 'Carteras agrupadas' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))))))) ?></p>
+            <h1><?= e($devModule ? 'Carga de XML' : ($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos de carteras') : ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))))))) ?></h1>
             <?php if ($dashboardModule): ?><p class="topbar-description">Visión general de saldos, movimientos y carteras de clientes del sistema.</p><?php endif; ?>
             <?php if ($securityModule): ?><p class="topbar-description">Administra los dispositivos que pueden autenticar tu cuenta sin contraseña.</p><?php endif; ?>
         </div>
@@ -1172,7 +1234,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         </div>
     <?php endif; ?>
 
-    <?php if ($securityModule): ?>
+    <?php if ($devModule): ?>
+        <?php require APP_ROOT . '/views/xml-invoice-upload.php'; ?>
+    <?php elseif ($securityModule): ?>
         <?php require APP_ROOT . '/views/passkeys.php'; ?>
     <?php elseif ($groupModule): ?>
         <?php if ($groupError): ?>
@@ -2772,6 +2836,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (params.has('report')) return ['Generando reporte', 'Procesando la información y los filtros seleccionados…'];
         if (params.has('statistics')) return ['Calculando estadísticas', 'Analizando la información del periodo seleccionado…'];
         if (params.has('catalog')) return ['Cargando catálogo', 'Preparando los registros disponibles…'];
+        if (params.has('dev')) return ['Cargando herramienta', 'Preparando la validación e importación del CFDI…'];
         return ['Cargando Sistema 14', 'Actualizando la información del panel…'];
     };
 

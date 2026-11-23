@@ -2244,6 +2244,282 @@ tbody tr:hover {
     color: #263244 !important;
 }
 
+.xml-import-layout,
+.xml-import-preview,
+.xml-import-confirm {
+    display: grid;
+    gap: 20px;
+}
+
+.xml-import-upload,
+.xml-import-data,
+.xml-import-match,
+.xml-import-concepts {
+    overflow: hidden;
+}
+
+.xml-import-dropzone {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 16px;
+    padding: 24px;
+}
+
+.xml-import-dropzone .button {
+    min-width: 150px;
+}
+
+.xml-import-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 24px 26px;
+    border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+    border-radius: var(--radius-panel);
+    background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-primary-soft) 145%);
+    box-shadow: var(--shadow-panel);
+}
+
+.xml-import-hero h2,
+.xml-import-hero p {
+    margin: 0;
+}
+
+.xml-import-hero h2 {
+    font-size: clamp(24px, 3vw, 34px);
+}
+
+.xml-import-hero p {
+    margin-top: 5px;
+    color: var(--color-text-secondary);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.xml-import-total {
+    display: grid;
+    flex: 0 0 auto;
+    text-align: right;
+}
+
+.xml-import-total span,
+.xml-import-total small {
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    font-weight: 750;
+    text-transform: uppercase;
+}
+
+.xml-import-total strong {
+    color: var(--color-primary-dark);
+    font-size: 28px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xml-import-alert {
+    display: grid;
+    gap: 3px;
+    padding: 14px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+}
+
+.xml-import-alert.error {
+    border-color: color-mix(in srgb, var(--color-danger) 38%, var(--color-border));
+    background: var(--color-danger-bg);
+    color: var(--color-danger-dark);
+}
+
+.xml-import-alert span {
+    font-size: 12px;
+}
+
+.xml-import-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin: 0;
+    padding: 8px 24px;
+}
+
+.xml-import-facts > div {
+    display: grid;
+    gap: 4px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.xml-import-facts > div:not(:nth-child(3n + 1)) {
+    padding-left: 22px;
+    border-left: 1px solid var(--color-border);
+}
+
+.xml-import-facts dt,
+.xml-import-parties span {
+    color: var(--color-muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.xml-import-facts dd {
+    margin: 0;
+    color: var(--color-text);
+    font-weight: 750;
+}
+
+.xml-import-parties {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 16px 24px 24px;
+}
+
+.xml-import-parties article {
+    display: grid;
+    gap: 5px;
+    padding: 15px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface-soft);
+}
+
+.xml-import-parties small {
+    color: var(--color-text-secondary);
+}
+
+.match-count {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.xml-import-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 20px 24px 24px;
+}
+
+.xml-import-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 14px;
+    border: 1px solid var(--color-border-control);
+    border-radius: 12px;
+    background: var(--color-surface);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.xml-import-option:hover,
+.xml-import-option:has(input:focus-visible) {
+    border-color: var(--color-primary-border);
+}
+
+.xml-import-option:has(input:checked) {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+    box-shadow: inset 3px 0 var(--color-primary);
+}
+
+.xml-import-option input {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--color-primary);
+}
+
+.xml-import-option > span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.xml-import-option small {
+    overflow-wrap: anywhere;
+    color: var(--color-text-secondary);
+}
+
+.xml-import-concepts table {
+    min-width: 860px;
+}
+
+.xml-import-concepts td:nth-child(2) {
+    min-width: 300px;
+    white-space: normal;
+}
+
+.xml-import-actions {
+    position: sticky;
+    bottom: 14px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+    box-shadow: 0 12px 35px rgba(50, 33, 23, 0.12);
+    backdrop-filter: blur(14px);
+}
+
+@media (max-width: 760px) {
+    .xml-import-dropzone,
+    .xml-import-facts,
+    .xml-import-parties,
+    .xml-import-options {
+        grid-template-columns: 1fr;
+    }
+
+    .xml-import-dropzone {
+        padding: 18px;
+    }
+
+    .xml-import-dropzone .button {
+        width: 100%;
+    }
+
+    .xml-import-hero {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 20px;
+    }
+
+    .xml-import-total {
+        text-align: left;
+    }
+
+    .xml-import-facts {
+        padding: 8px 18px;
+    }
+
+    .xml-import-facts > div:not(:nth-child(3n + 1)) {
+        padding-left: 0;
+        border-left: 0;
+    }
+
+    .xml-import-parties,
+    .xml-import-options {
+        padding-right: 18px;
+        padding-left: 18px;
+    }
+
+    .xml-import-actions .button {
+        flex: 1 1 0;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .movement-table tr[data-visible-search-row] > td,
     .movement-table tr.is-visible-search-restored > td {

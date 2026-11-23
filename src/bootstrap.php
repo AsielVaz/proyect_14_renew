@@ -22,6 +22,7 @@ use App\FondeadoraMailboxService;
 use App\GroupRepository;
 use App\BankingEditorService;
 use App\PaymentNotifierRepository;
+use App\XmlInvoiceImportService;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -271,6 +272,12 @@ function invoice_repository(): InvoiceRepository
 {
     static $repository;
     return $repository ??= new InvoiceRepository(db());
+}
+
+function xml_invoice_import_service(): XmlInvoiceImportService
+{
+    static $service;
+    return $service ??= new XmlInvoiceImportService(db());
 }
 
 function payment_complement_repository(): PaymentComplementRepository
