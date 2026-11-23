@@ -1728,15 +1728,21 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 static fn (string $filter): bool => $filter !== 'none'
             ));
         }
-        $movementDocumentFilterForcesDeposits = array_intersect(
-            ['document', 'none'],
-            $movementDocumentFilters
-        ) !== [];
         $requestedMovementTypeFilter = (string) ($_GET['movement_type'] ?? '');
         $movementTypeFilter = $movementKey === 'asignados'
             && array_key_exists($requestedMovementTypeFilter, $movementTypeFilterLabels)
                 ? $requestedMovementTypeFilter
                 : '';
+        if ($movementTypeFilter === 'withdrawal') {
+            $movementDocumentFilters = array_values(array_filter(
+                $movementDocumentFilters,
+                static fn (string $filter): bool => !in_array($filter, ['document', 'none'], true)
+            ));
+        }
+        $movementDocumentFilterForcesDeposits = array_intersect(
+            ['document', 'none'],
+            $movementDocumentFilters
+        ) !== [];
         if ($movementDocumentFilterForcesDeposits) {
             $movementTypeFilter = 'deposit';
         }
@@ -1897,7 +1903,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-query-filter"><span>Buscar movimientos</span><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>></label><?php else: ?><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>><?php endif; ?>
                     <?php if ($movementKey === 'cartera'): ?><fieldset class="movement-date-type"><legend>Filtrar rango por</legend><div><label><input type="radio" name="date_type" value="bank" <?= $movementDateType === 'bank' ? 'checked' : '' ?>><span>Fecha de banco</span></label><label><input type="radio" name="date_type" value="assigned" <?= $movementDateType === 'assigned' ? 'checked' : '' ?>><span>Fecha de asignación</span></label></div></fieldset><label class="movement-date-filter"><span>Desde</span><input type="date" name="from" value="<?= e($movementFrom) ?>"></label><label class="movement-date-filter"><span>Hasta</span><input type="date" name="to" value="<?= e($movementTo) ?>"></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-date-filter"><span>Fecha inicio</span><input type="date" name="from" value="<?= e($movementFrom) ?>" aria-label="Fecha de asignación inicial"></label><label class="movement-date-filter"><span>Fecha fin</span><input type="date" name="to" value="<?= e($movementTo) ?>" aria-label="Fecha de asignación final"></label><?php endif; ?>
-                    <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type" data-movement-type-filter<?= $movementDocumentFilterForcesDeposits ? ' disabled title="Los filtros documentales solo aplican a depósitos"' : '' ?>><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
+                    <?php if ($movementKey === 'asignados'): ?><label class="movement-type-filter"><span>Tipo de movimiento</span><select name="movement_type" data-movement-type-filter><?php foreach ($movementTypeFilterLabels as $filterValue => $filterLabel): ?><option value="<?= e($filterValue) ?>" <?= $movementTypeFilter === $filterValue ? 'selected' : '' ?>><?= e($filterLabel) ?></option><?php endforeach; ?></select></label><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?>
                         <?php $selectedMovementCompanyCount = count($movementCompanies) - count($movementExcludedCompanies); ?>
                         <div class="movement-company-filter-group">
@@ -1920,7 +1926,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             </details>
                         </div>
                     <?php endif; ?>
-                    <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes y muestran únicamente depósitos.</small></fieldset><?php endif; ?>
+                    <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' . ($movementTypeFilter === 'withdrawal' ? ' disabled aria-disabled="true"' : '') : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes, aplican solo a depósitos y se desactivan al seleccionar Retiros.</small></fieldset><?php endif; ?>
                     <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
                     <button class="button<?= $movementKey === 'asignados' ? ' movement-filter-submit' : '' ?>" type="submit">Buscar</button>
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
@@ -5053,7 +5059,19 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         walletSearch?.addEventListener('input', applyWalletFilters);
     }
 
-    document.querySelectorAll('[data-document-switch]').forEach((input) => {
+    const movementTypeFilter = document.querySelector('[data-movement-type-filter]');
+    const documentSwitches = Array.from(document.querySelectorAll('[data-document-switch]'));
+    const syncDocumentFiltersWithMovementType = () => {
+        const withdrawalsSelected = movementTypeFilter?.value === 'withdrawal';
+        documentSwitches.forEach((documentSwitch) => {
+            if (withdrawalsSelected) documentSwitch.checked = false;
+            documentSwitch.disabled = withdrawalsSelected;
+            documentSwitch.setAttribute('aria-disabled', String(withdrawalsSelected));
+        });
+    };
+    movementTypeFilter?.addEventListener('change', syncDocumentFiltersWithMovementType);
+
+    documentSwitches.forEach((input) => {
         input.addEventListener('change', () => {
             const group = input.closest('.movement-document-filters');
             if (input.checked) {
@@ -5063,16 +5081,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             }
             const hasDocumentFilter = Array.from(group?.querySelectorAll('[data-document-switch]') || [])
                 .some((documentSwitch) => documentSwitch.checked);
-            const movementTypeFilter = document.querySelector('[data-movement-type-filter]');
             if (movementTypeFilter) {
                 if (hasDocumentFilter) movementTypeFilter.value = 'deposit';
-                movementTypeFilter.disabled = hasDocumentFilter;
-                movementTypeFilter.title = hasDocumentFilter
-                    ? 'Los filtros documentales solo aplican a depósitos'
-                    : '';
             }
+            syncDocumentFiltersWithMovementType();
         });
     });
+    syncDocumentFiltersWithMovementType();
 })();
 </script>
 <script src="assets/date-display.js"></script>

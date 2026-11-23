@@ -1654,6 +1654,11 @@ textarea:focus {
     color: var(--color-primary-dark);
 }
 
+.movement-document-filters label:has(input:disabled) {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
 .movement-document-filters input[type="checkbox"] {
     width: 17px;
     height: 17px;

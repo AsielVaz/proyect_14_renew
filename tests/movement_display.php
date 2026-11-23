@@ -68,11 +68,16 @@ if (!str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) <= 0')
     || str_contains($withoutDocumentSource, 'COALESCE(p.id_factura, 0) = 2')) {
     throw new RuntimeException('La bandera id_factura = 2 debe excluirse de Sin documento.');
 }
-foreach ([$withDocumentSource, $withoutDocumentSource, $documentWithdrawalSource] as $documentSource) {
+foreach ([$withDocumentSource, $withoutDocumentSource] as $documentSource) {
     if (!str_contains($documentSource, "p.tipo_movimiento = 'Deposito'")
         || str_contains($documentSource, "p.tipo_movimiento = 'Retiro'")) {
         throw new RuntimeException('Con documento y Sin documento deben limitarse a depósitos.');
     }
+}
+if (!str_contains($documentWithdrawalSource, "p.tipo_movimiento = 'Retiro'")
+    || str_contains($documentWithdrawalSource, 'COALESCE(p.id_factura, 0) > 0')
+    || str_contains($documentWithdrawalSource, 'COALESCE(p.id_factura, 0) <= 0')) {
+    throw new RuntimeException('Retiros debe desactivar e ignorar los filtros Con documento y Sin documento.');
 }
 if (!str_contains($internalWithdrawalSource, "p.tipo_movimiento = 'Retiro'")) {
     throw new RuntimeException('El filtro Interno debe conservar el tipo de movimiento seleccionado.');

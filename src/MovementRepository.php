@@ -49,6 +49,14 @@ final class MovementRepository
             && in_array($movementTypeFilter, ['deposit', 'withdrawal'], true)
                 ? $movementTypeFilter
                 : '';
+        if ($movementTypeFilter === 'withdrawal') {
+            $documentFilters = array_values(array_filter(
+                $documentFilters,
+                static fn (string $filter): bool => !in_array($filter, ['document', 'none'], true)
+            ));
+        } elseif (array_intersect(['document', 'none'], $documentFilters) !== []) {
+            $movementTypeFilter = 'deposit';
+        }
         $excludedCompanyIds = $view === 'asignados'
             ? array_values(array_unique(array_filter(
                 array_map('intval', $excludedCompanyIds),
@@ -1153,7 +1161,12 @@ final class MovementRepository
         string $movementTypeFilter = ''
     ): array
     {
-        if (array_intersect(['document', 'none'], $documentFilters) !== []) {
+        if ($movementTypeFilter === 'withdrawal') {
+            $documentFilters = array_values(array_filter(
+                $documentFilters,
+                static fn (string $filter): bool => !in_array($filter, ['document', 'none'], true)
+            ));
+        } elseif (array_intersect(['document', 'none'], $documentFilters) !== []) {
             $movementTypeFilter = 'deposit';
         }
         $accountStatementReference = $view === 'sin-asignar'
