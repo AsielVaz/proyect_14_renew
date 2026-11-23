@@ -21,6 +21,7 @@ use App\XlsxExportService;
 use App\FondeadoraMailboxService;
 use App\GroupRepository;
 use App\BankingEditorService;
+use App\PaymentNotifierRepository;
 
 const APP_ROOT = __DIR__ . '/..';
 
@@ -276,6 +277,12 @@ function payment_complement_repository(): PaymentComplementRepository
 {
     static $repository;
     return $repository ??= new PaymentComplementRepository(db());
+}
+
+function payment_notifier_repository(): PaymentNotifierRepository
+{
+    static $repository;
+    return $repository ??= new PaymentNotifierRepository(db());
 }
 
 function xlsx_export_service(): XlsxExportService
