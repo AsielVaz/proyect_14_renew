@@ -177,8 +177,6 @@ $invoiceView = (string) ($_GET['invoice'] ?? '');
 $invoiceModule = in_array($invoiceView, ['list', 'create', 'complements'], true);
 $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
-$paymentsView = (string) ($_GET['payments'] ?? '');
-$paymentNotifierModule = $paymentsView === 'notificador';
 $companyView = (string) ($_GET['companies'] ?? '');
 $companyModule = in_array($companyView, ['list', 'detail', 'captures', 'capture', 'movements', 'account', 'analyze'], true);
 $groupView = (string) ($_GET['groups'] ?? '');
@@ -194,7 +192,7 @@ if ($bankingModule && !BankingEditorService::isAllowed((string) (current_user()[
     flash('error', 'Solo un administrador puede abrir el editor del banking.');
     redirect('./');
 }
-$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$paymentNotifierModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule && !$bankingModule;
+$dashboardModule = !$catalog && !$report && !$movement && !$invoiceModule && !$complementModule && !$companyModule && !$groupModule && !$statisticsModule && !$securityModule && !$bankingModule;
 $action = (string) ($_GET['action'] ?? 'list');
 $captureSection = in_array((string) ($_GET['view'] ?? 'manual'), ['all', 'manual', 'deleted'], true)
     ? (string) ($_GET['view'] ?? 'manual')
@@ -611,20 +609,7 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         verify_csrf();
         $postAction = (string) ($_POST['action'] ?? '');
-        if ($paymentNotifierModule) {
-            if ($postAction !== 'payment_notifier_queue') {
-                throw new RuntimeException('Acción de notificación no permitida.');
-            }
-            $result = payment_notifier_repository()->queue(
-                (string) ($_POST['subject'] ?? ''),
-                (string) ($_POST['message'] ?? ''),
-                is_array($_POST['recipient_phones'] ?? null) ? $_POST['recipient_phones'] : []
-            );
-            flash('success', $result['records'] . ' notificación' . ($result['records'] === 1 ? '' : 'es')
-                . ' preparada' . ($result['records'] === 1 ? '' : 's') . ' para '
-                . $result['clients'] . ' cliente' . ($result['clients'] === 1 ? '' : 's') . '.');
-            redirect('?payments=notificador');
-        } elseif ($complementModule) {
+        if ($complementModule) {
             if ($postAction === 'complement_create') {
                 $complementId = payment_complement_repository()->create($_POST);
                 flash('success', 'Complemento #' . $complementId . ' guardado con sus facturas relacionadas. Quedó pendiente de timbrado.');
@@ -688,7 +673,16 @@ try {
         } elseif ($movement) {
             $paymentId = (int) ($_POST['payment_id'] ?? 0);
             $operatorId = current_operator_id();
-            if ($postAction === 'manual_capture_create' && $movementKey === 'capturas-manuales') {
+            if ($postAction === 'payment_notifier_queue' && $movementKey === 'notificador') {
+                $result = payment_notifier_repository()->queue(
+                    (string) ($_POST['subject'] ?? ''),
+                    (string) ($_POST['message'] ?? ''),
+                    is_array($_POST['recipient_phones'] ?? null) ? $_POST['recipient_phones'] : []
+                );
+                flash('success', $result['records'] . ' notificación' . ($result['records'] === 1 ? '' : 'es')
+                    . ' preparada' . ($result['records'] === 1 ? '' : 's') . ' para '
+                    . $result['clients'] . ' cliente' . ($result['clients'] === 1 ? '' : 's') . '.');
+            } elseif ($postAction === 'manual_capture_create' && $movementKey === 'capturas-manuales') {
                 $result = capture_analysis_service()->createManual($_POST, $operatorId);
                 $message = 'Captura manual #' . $result['captureId'] . ' registrada como movimiento #' . $result['paymentId'] . '.';
                 if ((int) $result['assignedClientId'] > 0) {
@@ -841,9 +835,9 @@ try {
     flash('error', $exception->getMessage());
     $target = $movementKey === 'capturas-manuales' && (string) ($_POST['action'] ?? '') === 'manual_capture_create'
         ? '?movement=capturas-manuales&view=manual&action=form'
-            : ($paymentNotifierModule ? '?payments=notificador' : ($movementKey === 'capturas-manuales'
+            : ($movementKey === 'capturas-manuales'
             ? '?movement=capturas-manuales&view=' . rawurlencode((string) ($_POST['return_view'] ?? 'manual'))
-                : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './'))))));
+                : ($complementModule ? '?complement=' . rawurlencode($complementView) : ($invoiceModule ? '?invoice=' . rawurlencode($invoiceView) : ($movement ? '?movement=' . rawurlencode($movementKey) : ($catalog ? '?catalog=' . rawurlencode($key) : './')))));
     redirect($target);
 }
 
@@ -978,7 +972,7 @@ if ($statisticsModule) {
         $statisticsError = $exception->getMessage();
     }
 }
-$paymentNotifierRecipients = $paymentNotifierModule
+$paymentNotifierRecipients = $movementKey === 'notificador'
     ? payment_notifier_repository()->recipientGroups()
     : [];
 $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(current_operator_id()) : [];
@@ -992,7 +986,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     <link rel="icon" href="assets/favicon.ico?v=20261119" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png?v=20261119">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=20261119">
-    <title><?= e($paymentNotifierModule ? 'Notificador' : ($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos') : ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14')))))))) ?> · Sistema 14</title>
+    <title><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos') : ($companyModule ? ($companyData['razon'] ?? 'Empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? $movement['label'] ?? 'Sistema 14'))))))) ?> · Sistema 14</title>
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
@@ -1048,13 +1042,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     </a>
                 <?php endforeach; ?>
             </div>
-        </details>
-        <details class="catalog-menu payment-menu" <?= $paymentNotifierModule ? 'open' : '' ?>>
-            <summary>
-                <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4V7Zm2-3h12v3M8 11h8m-8 4h5"/></svg></span> Pagos</span>
-                <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
-            </summary>
-            <div class="catalog-links"><a class="<?= $paymentNotifierModule ? 'active' : '' ?>" href="?payments=notificador"><span></span>Notificador</a></div>
         </details>
         <details class="catalog-menu" <?= $invoiceModule || $complementModule ? 'open' : '' ?>>
             <summary><span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6m-6 4h4"/></svg></span> Facturación</span><span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span></summary>
@@ -1126,11 +1113,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <main id="main-content">
     <header class="topbar">
         <div class="topbar-copy">
-            <p class="eyebrow"><?= $paymentNotifierModule ? 'Pagos' : ($securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($groupModule ? 'Carteras agrupadas' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración'))))))) ?></p>
-            <h1><?= e($paymentNotifierModule ? 'Notificador' : ($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos de carteras') : ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal')))))))))) ?></h1>
+            <p class="eyebrow"><?= $securityModule ? 'Seguridad de la cuenta' : ($statisticsModule ? 'Análisis operativo' : ($groupModule ? 'Carteras agrupadas' : ($companyModule ? 'Tesorería por empresa' : ($invoiceModule || $complementModule ? 'Facturación CFDI' : ($report || in_array($movementKey, ['totales', 'stp'], true) ? 'Consulta y análisis' : ($movement ? 'Operación' : 'Administración')))))) ?></p>
+            <h1><?= e($securityModule ? 'Llaves de acceso' : ($statistic['label'] ?? ($groupModule ? ($groupData['nombre'] ?? 'Grupos de carteras') : ($companyModule ? ($companyData['razon'] ?? 'Panel de empresas') : ($complementModule ? ($complementView === 'create' ? 'Nuevo complemento de pago' : ($complementView === 'detail' ? 'Facturas asociadas al complemento' : 'Complementos de pago')) : ($invoiceModule ? ($invoiceView === 'create' ? 'Crear factura' : ($invoiceView === 'complements' ? 'Complementos asociados' : 'Facturas')) : ($catalog['label'] ?? $report['label'] ?? ($movementAction === 'transfer' && $action === 'form' ? 'Nuevo traspaso' : ($movement['label'] ?? 'Panel principal'))))))))) ?></h1>
             <?php if ($dashboardModule): ?><p class="topbar-description">Visión general de saldos, movimientos y carteras de clientes del sistema.</p><?php endif; ?>
             <?php if ($securityModule): ?><p class="topbar-description">Administra los dispositivos que pueden autenticar tu cuenta sin contraseña.</p><?php endif; ?>
-            <?php if ($paymentNotifierModule): ?><p class="topbar-description">Prepara mensajes pendientes para clientes con teléfono registrado.</p><?php endif; ?>
         </div>
         <div class="topbar-actions">
             <button type="button" class="global-search-trigger" data-global-search-open aria-haspopup="dialog" aria-controls="global-search-dialog">
@@ -1188,8 +1174,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     <?php if ($securityModule): ?>
         <?php require APP_ROOT . '/views/passkeys.php'; ?>
-    <?php elseif ($paymentNotifierModule): ?>
-        <?php require APP_ROOT . '/views/payment-notifier.php'; ?>
     <?php elseif ($groupModule): ?>
         <?php if ($groupError): ?>
             <section class="panel"><div class="empty"><strong>No se pudo abrir el módulo de grupos.</strong><br><?= e($groupError) ?><br><a href="?groups=list">Volver a grupos</a></div></section>
@@ -1693,7 +1677,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </section>
         <?php endif; ?>
     <?php elseif ($movement): ?>
-        <?php if ($movementKey === 'correos-manuales'): ?>
+        <?php if ($movementKey === 'notificador'): ?>
+            <?php require __DIR__ . '/views/payment-notifier.php'; ?>
+        <?php elseif ($movementKey === 'correos-manuales'): ?>
             <?php $manualEmailCompanies = manual_email_service()->companies(); ?>
             <?php require __DIR__ . '/views/manual-email.php'; ?>
         <?php elseif ($movementKey === 'capturas-manuales'): ?>
@@ -5136,7 +5122,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <script src="assets/company-directory.js"></script>
 <script src="assets/searchable-select.js"></script>
 <script src="assets/manual-email.js"></script>
-<?php if ($paymentNotifierModule): ?><script src="assets/payment-notifier.js"></script><?php endif; ?>
+<?php if ($movementKey === 'notificador'): ?><script src="assets/payment-notifier.js"></script><?php endif; ?>
 <script src="assets/transfer.js"></script>
 <script src="assets/apexcharts.js"></script>
 <script src="assets/statistics.js"></script>

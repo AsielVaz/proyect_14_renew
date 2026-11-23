@@ -68,6 +68,12 @@ final class Movements
                 'action' => 'manual_capture',
                 'columns' => [],
             ],
+            'notificador' => [
+                'label' => 'Notificador',
+                'description' => 'Prepara mensajes pendientes para clientes con teléfono registrado.',
+                'action' => 'notifier',
+                'columns' => [],
+            ],
             'stp' => [
                 'label' => 'Movimientos STP',
                 'description' => 'Órdenes registradas en la plantilla de ejecución STP.',

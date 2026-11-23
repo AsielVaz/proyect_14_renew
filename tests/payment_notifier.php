@@ -5,6 +5,12 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/src/bootstrap.php';
 
 use App\PaymentNotifierRepository;
+use App\Movements;
+
+$movement = Movements::get('notificador');
+if (($movement['label'] ?? '') !== 'Notificador' || ($movement['action'] ?? '') !== 'notifier') {
+    throw new RuntimeException('El Notificador debe estar registrado dentro del área de Movimientos.');
+}
 
 $pdo = db();
 $pdo->exec('CREATE TEMPORARY TABLE clientes (
@@ -63,4 +69,4 @@ try {
     }
 }
 
-echo "5 comprobaciones del Notificador superadas.\n";
+echo "6 comprobaciones del Notificador superadas.\n";
