@@ -12,20 +12,20 @@ $notifierClientTotal = array_sum(array_map(
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="action" value="payment_notifier_queue">
 
-    <section class="panel notifier-compose-panel">
+    <section class="panel form-panel notifier-compose-panel">
         <div class="panel-heading">
             <div><p class="eyebrow">Nuevo mensaje</p><h2>Redactar notificación</h2><p class="panel-copy">El mensaje se guardará en la cola con estado pendiente.</p></div>
-            <span class="operation-badge">notificado = 0</span>
+            <span class="operation-badge">Pendiente · notificado = 0</span>
         </div>
         <div class="notifier-compose-fields">
             <label class="field"><span>Asunto *</span><input type="text" name="subject" maxlength="256" placeholder="Asunto de la notificación" required data-notifier-subject></label>
             <label class="field"><span>Mensaje *</span><textarea name="message" rows="10" maxlength="20000" placeholder="Escribe el mensaje que recibirán los clientes…" required data-notifier-message></textarea><small><span data-notifier-message-count>0</span> de 20,000 caracteres</small></label>
         </div>
         <div class="notifier-submit-summary" aria-live="polite">
-            <span><strong data-notifier-selected-phones>0</strong> teléfonos seleccionados</span>
-            <span><strong data-notifier-selected-clients>0</strong> clientes incluidos</span>
+            <span class="notifier-summary-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8-1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 20a5 5 0 0 1 10 0m0-7a4 4 0 0 1 8 4v3"/></svg></span>
+            <span><strong><b data-notifier-selected-phones>0</b> teléfonos seleccionados</strong><small><b data-notifier-selected-clients>0</b> clientes incluidos en este mensaje</small></span>
         </div>
-        <button class="button primary notifier-save" type="submit" data-notifier-submit disabled>Guardar notificaciones</button>
+        <button class="button primary notifier-save" type="submit" data-notifier-submit disabled>Guardar mensajes pendientes</button>
     </section>
 
     <section class="panel notifier-recipient-panel">

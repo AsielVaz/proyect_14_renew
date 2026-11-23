@@ -1661,18 +1661,13 @@ textarea:focus {
 
 .payment-notifier {
     display: grid;
-    grid-template-columns: minmax(320px, 0.82fr) minmax(420px, 1.18fr);
+    grid-template-columns: minmax(340px, 0.88fr) minmax(460px, 1.12fr);
     align-items: start;
     gap: 18px;
 }
 
 .payment-notifier .panel {
     margin: 0;
-}
-
-.notifier-compose-panel {
-    position: sticky;
-    top: 18px;
 }
 
 .notifier-compose-fields {
@@ -1691,25 +1686,54 @@ textarea:focus {
 }
 
 .notifier-submit-summary {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin: 18px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin: 18px 0 14px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-surface-soft);
 }
 
-.notifier-submit-summary span {
-    padding: 11px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: 11px;
-    background: var(--color-surface-soft);
+.notifier-summary-icon {
+    display: grid;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--color-primary-soft);
+    color: var(--color-primary-dark);
+}
+
+.notifier-summary-icon svg {
+    width: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.notifier-submit-summary > span:last-child {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.notifier-submit-summary strong {
+    color: var(--color-text);
+    font-size: 13px;
+}
+
+.notifier-submit-summary small {
     color: var(--color-muted);
     font-size: 11px;
 }
 
-.notifier-submit-summary strong {
-    display: block;
-    color: var(--color-text);
-    font-size: 20px;
+.notifier-submit-summary b {
+    font: inherit;
 }
 
 .notifier-save {
@@ -1771,51 +1795,65 @@ textarea:focus {
 }
 
 .notifier-recipient-list {
-    display: grid;
-    gap: 8px;
     max-height: 610px;
-    padding-right: 4px;
     overflow-y: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 11px;
+    background: var(--color-surface);
 }
 
 .notifier-recipient {
+    position: relative;
     display: grid;
-    grid-template-columns: 22px 26px minmax(0, 1fr);
+    grid-template-columns: 26px minmax(0, 1fr);
     align-items: center;
-    gap: 9px;
-    padding: 12px;
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
+    gap: 11px;
+    min-height: 72px;
+    padding: 11px 13px;
+    border: 0;
+    border-bottom: 1px solid var(--color-border);
     background: var(--color-surface);
     cursor: pointer;
-    transition: border-color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast);
+    transition: background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.notifier-recipient:last-of-type {
+    border-bottom: 0;
 }
 
 .notifier-recipient:hover {
-    border-color: var(--color-primary-border);
-    transform: translateY(-1px);
+    background: var(--color-surface-soft);
 }
 
 .notifier-recipient.is-selected {
-    border-color: var(--color-primary-border);
     background: var(--color-primary-soft);
+    box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.notifier-recipient:has(input:focus-visible) {
+    outline: 2px solid var(--color-primary-border);
+    outline-offset: -2px;
 }
 
 .notifier-recipient > input {
+    position: absolute;
     width: 18px;
     height: 18px;
     margin: 0;
-    accent-color: var(--color-primary);
+    opacity: 0;
+    pointer-events: none;
 }
 
 .notifier-check {
     display: grid;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     place-items: center;
-    border-radius: 8px;
-    background: var(--color-surface-soft);
+    border: 1px solid var(--color-border-control);
+    border-radius: 6px;
+    background: var(--color-surface);
     color: transparent;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .notifier-check svg {
@@ -1828,6 +1866,7 @@ textarea:focus {
 }
 
 .notifier-recipient.is-selected .notifier-check {
+    border-color: var(--color-primary);
     background: var(--color-primary);
     color: #fff;
 }
@@ -1854,8 +1893,9 @@ textarea:focus {
     flex: 0 0 auto;
     padding: 3px 7px;
     border-radius: 999px;
-    background: var(--color-primary-soft);
-    color: var(--color-primary-dark);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-muted);
     font-size: 9px;
     text-transform: uppercase;
 }
@@ -1881,9 +1921,6 @@ textarea:focus {
         grid-template-columns: 1fr;
     }
 
-    .notifier-compose-panel {
-        position: static;
-    }
 }
 
 @media (max-width: 640px) {
@@ -1895,10 +1932,6 @@ textarea:focus {
     .notifier-recipient-tools > div,
     .notifier-recipient-tools .button {
         flex: 1 1 0;
-    }
-
-    .notifier-submit-summary {
-        grid-template-columns: 1fr;
     }
 
     .notifier-recipient-heading {
