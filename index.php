@@ -152,11 +152,16 @@ if (isset($_GET['fondeadora_mail']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-$catalogs = Catalogs::all();
+$canAccessCatalogs = Catalogs::isAllowed((string) (current_user()['type'] ?? ''));
+$catalogs = $canAccessCatalogs ? Catalogs::all() : [];
 $movements = Movements::allowedFor((string) (current_user()['type'] ?? ''));
 $reports = Reports::all();
 $statistics = Statistics::all();
 $key = (string) ($_GET['catalog'] ?? '');
+if ($key !== '' && !$canAccessCatalogs) {
+    flash('error', 'Solo un administrador puede acceder a Catálogos.');
+    redirect('./');
+}
 $catalog = $key !== '' ? Catalogs::get($key) : null;
 $reportKey = (string) ($_GET['report'] ?? '');
 $report = $reportKey !== '' ? Reports::get($reportKey) : null;
@@ -996,6 +1001,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8-1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 20a5 5 0 0 1 10 0m0-7a4 4 0 0 1 8 4v3"/></svg></span>
             Grupos de carteras
         </a>
+        <?php if ($canAccessCatalogs): ?>
         <details class="catalog-menu" <?= $catalog ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 12 2l8 3.5-8 3.5-8-3.5Zm0 6L12 15l8-3.5M4 17.5 12 21l8-3.5"/></svg></span> Catálogos</span>
@@ -1010,6 +1016,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <?php endforeach; ?>
             </div>
         </details>
+        <?php endif; ?>
         <details class="catalog-menu movement-menu" <?= $movement && !in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span> Movimientos</span>

@@ -6,6 +6,17 @@ namespace App;
 
 final class Catalogs
 {
+    public const ALLOWED_USER_TYPES = ['administrador'];
+
+    public static function isAllowed(string $userType): bool
+    {
+        return in_array(
+            mb_strtolower(trim($userType), 'UTF-8'),
+            self::ALLOWED_USER_TYPES,
+            true
+        );
+    }
+
     public static function all(): array
     {
         return [
