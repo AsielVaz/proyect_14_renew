@@ -3282,32 +3282,16 @@ tbody tr:hover {
     font-weight: 750;
 }
 
-.catalog-form-section {
-    padding-top: 10px;
-    border-top: 1px solid var(--color-border);
-}
-
-.catalog-form-section:first-of-type {
-    padding-top: 0;
-    border-top: 0;
-}
-
-.catalog-form-section h3 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: 16px;
-}
-
-.wallet-editor-form {
+.catalog-editor-form {
     display: grid;
 }
 
-.wallet-editor-sections {
+.catalog-editor-sections {
     display: grid;
     padding: 4px 24px 10px;
 }
 
-.wallet-editor-section {
+.catalog-editor-section {
     display: grid;
     grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
     gap: 32px;
@@ -3315,17 +3299,17 @@ tbody tr:hover {
     border-top: 1px solid var(--color-border);
 }
 
-.wallet-editor-section:first-child {
+.catalog-editor-section:first-child {
     border-top: 0;
 }
 
-.wallet-editor-section-heading {
+.catalog-editor-section-heading {
     position: relative;
     align-self: start;
     padding-left: 16px;
 }
 
-.wallet-editor-section-heading::before {
+.catalog-editor-section-heading::before {
     position: absolute;
     top: 2px;
     bottom: 2px;
@@ -3336,14 +3320,14 @@ tbody tr:hover {
     content: "";
 }
 
-.wallet-editor-section-heading h3 {
+.catalog-editor-section-heading h3 {
     margin: 0 0 7px;
     color: var(--color-text);
     font-size: 16px;
     line-height: 1.3;
 }
 
-.wallet-editor-section-heading p {
+.catalog-editor-section-heading p {
     max-width: 30ch;
     margin: 0;
     color: var(--color-text-secondary);
@@ -3351,32 +3335,32 @@ tbody tr:hover {
     line-height: 1.55;
 }
 
-.wallet-editor-section-fields.form-grid {
+.catalog-editor-section-fields.form-grid {
     padding: 0;
 }
 
-.wallet-editor-form > .form-actions {
+.catalog-editor-form > .form-actions {
     padding: 6px 24px 24px;
 }
 
 @media (max-width: 840px) {
-    .wallet-editor-section {
+    .catalog-editor-section {
         grid-template-columns: 1fr;
         gap: 20px;
     }
 
-    .wallet-editor-section-heading p {
+    .catalog-editor-section-heading p {
         max-width: 56ch;
     }
 }
 
 @media (max-width: 520px) {
-    .wallet-editor-sections {
+    .catalog-editor-sections {
         padding-right: 18px;
         padding-left: 18px;
     }
 
-    .wallet-editor-form > .form-actions {
+    .catalog-editor-form > .form-actions {
         padding-right: 18px;
         padding-left: 18px;
     }
@@ -3512,7 +3496,7 @@ tbody tr:hover {
 }
 
 .user-editor-data-grid {
-    padding-top: 28px;
+    padding-top: 0;
 }
 
 .user-editor-panel[data-user-panel="billing"] {

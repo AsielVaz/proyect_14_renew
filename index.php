@@ -2423,28 +2423,17 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </div>
             <?php
             $isUserEditor = $key === 'usuarios';
-            $isWalletEditor = $key === 'carteras';
-            $catalogFormGroups = [['title' => '', 'fields' => $catalog['fields']]];
-            $walletSectionDescriptions = [
-                'Datos generales' => 'Identidad, estado y apariencia de la cartera dentro del sistema.',
-                'Comisiones adicionales' => 'Distribuye comisiones adicionales entre otras carteras.',
-                'Correos de saldos' => 'Destinatarios de los avisos y resúmenes de movimientos y saldos.',
-                'Correos de facturación' => 'Direcciones que recibirán facturas y documentos fiscales.',
-                'Automatización y notificaciones' => 'Agrupación, facturación automática y reglas de notificación.',
-                'Datos fiscales' => 'Información utilizada para identificar fiscalmente a la cartera.',
-            ];
-            if ($isWalletEditor) {
-                $catalogFormGroups = [];
-                $currentGroup = 'Datos generales';
-                foreach ($catalog['fields'] as $fieldName => $fieldDefinition) {
-                    if (!empty($fieldDefinition['section'])) {
-                        $currentGroup = (string) $fieldDefinition['section'];
-                    }
-                    $catalogFormGroups[$currentGroup]['title'] = $currentGroup;
-                    $catalogFormGroups[$currentGroup]['fields'][$fieldName] = $fieldDefinition;
+            $catalogFormGroups = [];
+            $catalogSectionDescriptions = $catalog['sections'] ?? [];
+            $currentGroup = (string) (array_key_first($catalogSectionDescriptions) ?? 'Datos del registro');
+            foreach ($catalog['fields'] as $fieldName => $fieldDefinition) {
+                if (!empty($fieldDefinition['section'])) {
+                    $currentGroup = (string) $fieldDefinition['section'];
                 }
+                $catalogFormGroups[$currentGroup]['title'] = $currentGroup;
+                $catalogFormGroups[$currentGroup]['fields'][$fieldName] = $fieldDefinition;
             }
-            $catalogFormClass = $isUserEditor ? 'user-editor-form' : ($isWalletEditor ? 'wallet-editor-form' : 'form-grid');
+            $catalogFormClass = $isUserEditor ? 'user-editor-form' : 'catalog-editor-form';
             ?>
             <form method="post" class="<?= e($catalogFormClass) ?>" enctype="multipart/form-data"<?= $isUserEditor ? ' data-user-editor' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -2464,18 +2453,16 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </button>
                     </div>
                     <section class="user-editor-panel is-active" id="user-panel-data" role="tabpanel" aria-labelledby="user-tab-data" data-user-panel="data">
-                        <div class="form-grid user-editor-data-grid">
+                        <div class="user-editor-data-grid">
                 <?php endif; ?>
-                <?php if ($isWalletEditor): ?><div class="wallet-editor-sections"><?php endif; ?>
+                <div class="catalog-editor-sections">
                 <?php foreach ($catalogFormGroups as $formGroup): ?>
-                    <?php if ($isWalletEditor): ?>
-                        <section class="wallet-editor-section" aria-labelledby="wallet-section-<?= e(preg_replace('/[^a-zA-Z0-9_-]/', '-', mb_strtolower($formGroup['title']))) ?>">
-                            <header class="wallet-editor-section-heading">
-                                <h3 id="wallet-section-<?= e(preg_replace('/[^a-zA-Z0-9_-]/', '-', mb_strtolower($formGroup['title']))) ?>"><?= e($formGroup['title']) ?></h3>
-                                <p><?= e($walletSectionDescriptions[$formGroup['title']] ?? 'Configura los datos de esta sección.') ?></p>
+                        <section class="catalog-editor-section" aria-labelledby="catalog-section-<?= e($key) ?>-<?= e(preg_replace('/[^a-zA-Z0-9_-]/', '-', mb_strtolower($formGroup['title']))) ?>">
+                            <header class="catalog-editor-section-heading">
+                                <h3 id="catalog-section-<?= e($key) ?>-<?= e(preg_replace('/[^a-zA-Z0-9_-]/', '-', mb_strtolower($formGroup['title']))) ?>"><?= e($formGroup['title']) ?></h3>
+                                <p><?= e($catalogSectionDescriptions[$formGroup['title']] ?? 'Completa la información necesaria para este registro.') ?></p>
                             </header>
-                            <div class="form-grid wallet-editor-section-fields">
-                    <?php endif; ?>
+                            <div class="form-grid catalog-editor-section-fields">
                 <?php foreach ($formGroup['fields'] as $name => $field): ?>
                     <?php
                     $column = (string) ($field['column'] ?? $name);
@@ -2484,9 +2471,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     $wide = ($field['type'] ?? '') === 'textarea';
                     $inputId = 'catalog-field-' . preg_replace('/[^a-zA-Z0-9_-]/', '-', (string) $name);
                     ?>
-                    <?php if (!$isWalletEditor && !empty($field['section'])): ?>
-                        <div class="catalog-form-section wide"><h3><?= e($field['section']) ?></h3></div>
-                    <?php endif; ?>
                     <label class="field <?= $wide ? 'wide' : '' ?><?= ($field['type'] ?? '') === 'checkbox' ? ' checkbox-field' : '' ?>" for="<?= e($inputId) ?>">
                         <span><?= e($field['label']) ?><?= $required ? ' *' : '' ?></span>
                         <?php if ($field['type'] === 'textarea'): ?>
@@ -2526,12 +2510,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <?php endif; ?>
                     </label>
                 <?php endforeach; ?>
-                    <?php if ($isWalletEditor): ?>
                             </div>
                         </section>
-                    <?php endif; ?>
                 <?php endforeach; ?>
-                <?php if ($isWalletEditor): ?></div><?php endif; ?>
+                </div>
                 <?php if ($isUserEditor): ?>
                         </div>
                     </section>
