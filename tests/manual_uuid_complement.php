@@ -37,6 +37,11 @@ $checks['la excepción se activa con el evento pegar'] = is_string($interface)
 $checks['la consulta manual envía empresa y modo'] = is_string($interface)
     && str_contains($interface, "lookupUrl.searchParams.set('lookup_mode', 'manual')")
     && str_contains($interface, "lookupUrl.searchParams.set('company_id', complementCompany.value)");
+$repositorySource = file_get_contents(dirname(__DIR__) . '/src/PaymentComplementRepository.php');
+$checks['la relación no exige coincidencia de cliente o razón social'] = is_string($repositorySource)
+    && !str_contains($repositorySource, 'no corresponde al cliente y razón social seleccionados');
+$checks['la interfaz conserva el cliente al validar cualquier UUID'] = is_string($interface)
+    && !str_contains($interface, "String(invoice.client_id) !== complementClient.value");
 
 if ($previousUser === null) {
     unset($_SESSION['auth_user']);
@@ -50,4 +55,4 @@ foreach ($checks as $label => $passed) {
     }
 }
 
-echo count($checks) . " comprobaciones de UUID manual superadas.\n";
+echo count($checks) . " comprobaciones de relación flexible por UUID superadas.\n";

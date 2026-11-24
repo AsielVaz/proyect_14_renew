@@ -12,10 +12,10 @@ $checks = [
         'la razón social precargada desde un pago muestra el RFC',
     'option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver' =>
         'el catálogo dinámico de razones sociales conserva el RFC',
-    'option.disabled = !hasLiveDocuments;' =>
-        'el catálogo dinámico desactiva las razones sociales sin documentos vivos',
-    "unavailableReceiverGroup.label = 'Sin documentos vivos para esta empresa · No disponibles';" =>
-        'el catálogo dinámico separa visualmente las razones sociales no disponibles',
+    "unavailableReceiverGroup.label = 'Sin documentos propios · Permite relacionar otras carteras';" =>
+        'el catálogo dinámico conserva disponibles las razones sociales sin documentos propios',
+    'Sin documentos propios · Permite relacionar otras carteras' =>
+        'el formulario explica que se pueden relacionar documentos de otras carteras',
 ];
 
 foreach ($checks as $needle => $message) {

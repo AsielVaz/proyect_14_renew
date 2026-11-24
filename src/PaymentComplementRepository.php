@@ -213,10 +213,6 @@ final class PaymentComplementRepository
         if ($maximum <= 0) {
             throw new RuntimeException('El monto del movimiento ya fue aplicado por completo en otros complementos.');
         }
-        if ($this->pendingInvoiceCount($clientId) <= 0) {
-            throw new RuntimeException('El cliente no tiene facturas PPD pendientes (Sin documentos).');
-        }
-
         return [
             'id' => (int) $payment['id'],
             'client_id' => $clientId,
@@ -240,7 +236,7 @@ final class PaymentComplementRepository
 
         $payment = $this->paymentPrefill($paymentId);
         $this->assertReference('empresas', $companyId, 'empresa emisora');
-        $this->assertReceiverHasLiveDocuments((int) $payment['client_id'], $receiverId, $companyId);
+        $this->assertReceiverBelongsToClient((int) $payment['client_id'], $receiverId);
         $movementAmount = (float) $payment['movement_amount'];
 
         $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
@@ -260,7 +256,6 @@ final class PaymentComplementRepository
                 GROUP BY id_factura
             ) rel ON rel.id_factura = f.id
             WHERE f.razon = :company
-              AND f.id_clave_corta = :receiver
               AND f.metodo_pago = 2
               AND COALESCE(f.uuid, '') <> ''
               AND COALESCE(f.status, '') <> 'Cancelado'
@@ -269,7 +264,6 @@ final class PaymentComplementRepository
             ORDER BY f.fecha_timbrado ASC, f.id ASC");
         $query->execute([
             'company' => $companyId,
-            'receiver' => $receiverId,
             'movement_amount' => $movementAmount,
         ]);
         $invoices = $query->fetchAll();
@@ -358,7 +352,6 @@ final class PaymentComplementRepository
         $uuids = (array) ($input['invoice_uuid'] ?? []);
         $amounts = (array) ($input['amount'] ?? []);
         $installments = (array) ($input['installment'] ?? []);
-        $manualLookupTokens = (array) ($input['invoice_manual_token'] ?? []);
         $sourceInvoiceId = (int) ($input['source_invoice_id'] ?? 0);
 
         if ($clientId <= 0 || $receiverId <= 0 || $companyId <= 0 || $formId <= 0) {
@@ -377,10 +370,7 @@ final class PaymentComplementRepository
             $this->assertReference('clientes', $clientId, 'cliente');
             $this->assertReference('empresas', $companyId, 'empresa emisora');
             $this->assertReference('formas_pago', $formId, 'forma de pago');
-            if ($this->pendingInvoiceCount($clientId) <= 0) {
-                throw new RuntimeException('El cliente no tiene facturas PPD pendientes (Sin documentos).');
-            }
-            $this->assertReceiverHasLiveDocuments($clientId, $receiverId, $companyId);
+            $this->assertReceiverBelongsToClient($clientId, $receiverId);
             $paymentMaximum = null;
             if ($paymentId > 0) {
                 $payment = $this->pdo->prepare("SELECT p.id, p.tipo_movimiento, p.id_factura, p.id_factura_res,
@@ -455,15 +445,6 @@ final class PaymentComplementRepository
                         . self::TREATMENT_LABELS[$invoiceType] . '). Crea complementos separados.');
                 }
                 $inheritedType ??= $invoiceType;
-                $manualLookupAuthorized = $this->validManualLookupToken(
-                    (string) ($manualLookupTokens[$index] ?? ''),
-                    $invoice,
-                    $companyId
-                );
-                if (!$manualLookupAuthorized
-                    && ((int) $invoice['nombre'] !== $clientId || (int) $invoice['id_clave_corta'] !== $receiverId)) {
-                    throw new RuntimeException('La factura ' . $uuid . ' no corresponde al cliente y razón social seleccionados. Pega nuevamente el UUID para relacionarla sólo por empresa.');
-                }
                 $paidQuery->execute(['invoice' => $invoice['id']]);
                 $paid = round((float) $paidQuery->fetchColumn(), 2);
                 $balance = max(0, round((float) $invoice['total_iva'] - $paid, 2));
@@ -606,36 +587,13 @@ final class PaymentComplementRepository
         return $subtotal > 0 && $total > $subtotal + 0.005 ? 'T' : 'SV';
     }
 
-    private function assertReceiverHasLiveDocuments(int $clientId, int $receiverId, int $companyId): void
+    private function assertReceiverBelongsToClient(int $clientId, int $receiverId): void
     {
-        $query = $this->pdo->prepare(<<<'SQL'
-            SELECT cc.id, COALESCE(vivos.documentos_vivos, 0) AS documentos_vivos
-            FROM claves_cortas cc
-            LEFT JOIN (
-                SELECT TRIM(f.id_clave_corta) AS id_clave_corta, COUNT(*) AS documentos_vivos
-                FROM facturas f
-                LEFT JOIN (
-                    SELECT id_factura, SUM(monto) AS total_pagado
-                    FROM facturar_rel_complementos GROUP BY id_factura
-                ) pagos_factura ON pagos_factura.id_factura = f.id
-                WHERE f.razon = :company
-                  AND f.metodo_pago = 2
-                  AND COALESCE(f.uuid, '') <> ''
-                  AND COALESCE(f.status, '') <> 'Cancelado'
-                  AND TRIM(COALESCE(f.id_clave_corta, '')) <> ''
-                  AND f.total_iva - COALESCE(pagos_factura.total_pagado, 0) > 0.005
-                GROUP BY TRIM(f.id_clave_corta)
-            ) vivos ON vivos.id_clave_corta = CAST(cc.id AS CHAR)
-            WHERE cc.id = :id AND cc.id_cliente = :client
-            LIMIT 1
-            SQL);
-        $query->execute(['id' => $receiverId, 'client' => $clientId, 'company' => $companyId]);
-        $receiver = $query->fetch(PDO::FETCH_ASSOC);
-        if (!$receiver) {
+        $query = $this->pdo->prepare('SELECT id FROM claves_cortas
+            WHERE id = :id AND id_cliente = :client LIMIT 1');
+        $query->execute(['id' => $receiverId, 'client' => $clientId]);
+        if (!$query->fetchColumn()) {
             throw new RuntimeException('La razón social no pertenece al cliente seleccionado.');
-        }
-        if ((int) $receiver['documentos_vivos'] <= 0) {
-            throw new RuntimeException('La clave corta seleccionada no tiene documentos PPD vivos para la empresa emisora seleccionada (Sin documentos).');
         }
     }
 

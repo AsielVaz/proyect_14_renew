@@ -1572,18 +1572,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $paymentPrefillReceivers = $complementInitialClientId > 0
                 ? payment_complement_repository()->receivers($complementInitialClientId, $complementInitialCompanyId)
                 : [];
-            $paymentEligibleReceivers = array_values(array_filter(
+            $paymentReceiversWithDocuments = array_values(array_filter(
                 $paymentPrefillReceivers,
                 static fn (array $receiver): bool => (int) ($receiver['documentos_vivos'] ?? 0) > 0
             ));
-            $paymentDisabledReceivers = array_values(array_filter(
+            $paymentReceiversWithoutDocuments = array_values(array_filter(
                 $paymentPrefillReceivers,
                 static fn (array $receiver): bool => (int) ($receiver['documentos_vivos'] ?? 0) <= 0
             ));
             $paymentAutoReceiverId = $invoiceComplementContext
-                ? (in_array((int) $complementPrefill['receiver_id'], array_map(static fn (array $receiver): int => (int) $receiver['id'], $paymentEligibleReceivers), true)
+                ? (in_array((int) $complementPrefill['receiver_id'], array_map(static fn (array $receiver): int => (int) $receiver['id'], $paymentPrefillReceivers), true)
                     ? (int) $complementPrefill['receiver_id'] : 0)
-                : (count($paymentEligibleReceivers) === 1 ? (int) $paymentEligibleReceivers[0]['id'] : 0);
+                : (count($paymentPrefillReceivers) === 1 ? (int) $paymentPrefillReceivers[0]['id'] : 0);
             ?>
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $invoiceComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?><?= $paymentComplementContext ? ' data-prefill-payment-maximum="' . e($complementPaymentPrefill['maximum']) . '"' : '' ?>>
@@ -1597,9 +1597,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <label class="field"><span>Cliente *</span><select name="client_id" id="complementClient" required><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Razón social / clave corta *</span>
                             <select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>>
-                                <option value=""><?= $complementInitialClientId > 0 ? ($paymentEligibleReceivers !== [] ? 'Seleccionar…' : 'No hay claves cortas con documentos vivos') : 'Selecciona primero un cliente…' ?></option>
-                                <?php if ($paymentEligibleReceivers !== []): ?><optgroup label="Con documentos vivos para la empresa seleccionada"><?php foreach ($paymentEligibleReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="<?= e($item['documentos_vivos']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · ' . (int) $item['documentos_vivos'] . ' documento(s) vivo(s) para esta empresa') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
-                                <?php if ($paymentDisabledReceivers !== []): ?><optgroup label="Sin documentos vivos para esta empresa · No disponibles" disabled><?php foreach ($paymentDisabledReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" disabled><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos vivos para esta empresa' . ((int) ($item['documentos_vivos_totales'] ?? 0) > 0 ? ' · ' . (int) $item['documentos_vivos_totales'] . ' en otras empresas' : '')) ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                                <option value=""><?= $complementInitialClientId > 0 ? 'Seleccionar…' : 'Selecciona primero un cliente…' ?></option>
+                                <?php if ($paymentReceiversWithDocuments !== []): ?><optgroup label="Con documentos vivos propios"><?php foreach ($paymentReceiversWithDocuments as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="<?= e($item['documentos_vivos']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · ' . (int) $item['documentos_vivos'] . ' documento(s) propio(s)') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                                <?php if ($paymentReceiversWithoutDocuments !== []): ?><optgroup label="Sin documentos propios · Permite relacionar otras carteras"><?php foreach ($paymentReceiversWithoutDocuments as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos propios') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
                             </select>
                         </label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
@@ -1615,10 +1615,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren desde el movimiento, pero puedes cambiarlos. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas pendientes relacionadas con la clave corta seleccionada. Si pegas manualmente un UUID, puede pertenecer a otro cliente o razón social, pero siempre debe corresponder a la empresa emisora elegida.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas pendientes de la empresa emisora. La factura puede pertenecer a otro cliente o razón social; el complemento conserva la cartera seleccionada y hereda únicamente el tratamiento fiscal del documento.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
                     <?php if ($paymentComplementContext): ?>
                         <section class="pending-invoices-panel" id="pendingInvoicesPanel" aria-labelledby="pendingInvoicesTitle" tabindex="-1" hidden>
-                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes de la clave corta</h3><span id="pendingInvoicesSummary">Consulta las facturas PPD relacionadas con la clave seleccionada.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes de la empresa</h3><span id="pendingInvoicesSummary">Consulta las facturas PPD de la empresa emisora, sin restringir cliente o razón social.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
                             <div class="pending-invoices-status" id="pendingInvoicesStatus" role="status" aria-live="polite">Preparado para consultar.</div>
                             <div class="table-wrap"><table class="pending-invoices-table"><thead><tr><th>Factura</th><th>Fecha</th><th>Total</th><th>Pagado</th><th>Saldo pendiente</th><th><span class="sr-only">Acción</span></th></tr></thead><tbody id="pendingInvoicesBody"></tbody></table></div>
                         </section>
@@ -2128,7 +2128,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && abs((float) ($row['monto'] ?? 0)) > 0.005
                             && (int) ($row['client_id'] ?? 0) > 0
                             && (int) ($row['company_id'] ?? 0) > 0
-                             && $movementClientHasPendingInvoices
                             && !$hasStoredMovementDocument
                             && $matchedMovementInvoiceId <= 0; ?>
                         <?php $canCreateMovementInvoice = $hasMovementContextActions
@@ -3543,10 +3542,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             let unavailableReceiverGroup = null;
             if (isComplementReceiver) {
                 liveReceiverGroup = document.createElement('optgroup');
-                liveReceiverGroup.label = 'Con documentos vivos para la empresa seleccionada';
+                liveReceiverGroup.label = 'Con documentos vivos propios';
                 unavailableReceiverGroup = document.createElement('optgroup');
-                unavailableReceiverGroup.label = 'Sin documentos vivos para esta empresa · No disponibles';
-                unavailableReceiverGroup.disabled = true;
+                unavailableReceiverGroup.label = 'Sin documentos propios · Permite relacionar otras carteras';
             }
             result.data.forEach((item) => {
                 const option = document.createElement('option');
@@ -3554,11 +3552,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 if (type === 'receivers') {
                     const hasLiveDocuments = Number(item.documentos_vivos) > 0;
                     const liveTotal = Number(item.documentos_vivos_totales) || 0;
-                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver ? (hasLiveDocuments ? ` · ${Number(item.documentos_vivos)} documento(s) vivo(s) para esta empresa` : ` · Sin documentos vivos para esta empresa${liveTotal > 0 ? ` · ${liveTotal} en otras empresas` : ''}`) : ''}`;
+                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver ? (hasLiveDocuments ? ` · ${Number(item.documentos_vivos)} documento(s) propio(s)` : ` · Sin documentos propios${liveTotal > 0 ? ` · ${liveTotal} en otras empresas` : ''}`) : ''}`;
                     option.dataset.regime = item.regimen_fiscal || '';
                     if (isComplementReceiver) {
                         option.dataset.documentsLive = String(Math.max(0, Number(item.documentos_vivos) || 0));
-                        option.disabled = !hasLiveDocuments;
                         (hasLiveDocuments ? liveReceiverGroup : unavailableReceiverGroup).appendChild(option);
                         return;
                     }
@@ -3577,10 +3574,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 if (unavailableReceiverGroup.children.length > 0) select.appendChild(unavailableReceiverGroup);
             }
             select.disabled = result.data.length === 0;
-            if (isComplementReceiver && result.data.length > 0
-                && !result.data.some((item) => Number(item.documentos_vivos) > 0)) {
-                select.options[0].textContent = 'No hay claves cortas con documentos vivos para esta empresa';
-            }
             if (type === 'concepts') {
                 if (addInvoiceConcept) addInvoiceConcept.disabled = result.data.length === 0;
                 if (importInvoiceCapture) importInvoiceCapture.disabled = result.data.length === 0;
@@ -4152,9 +4145,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 throw new Error('La factura no corresponde a la empresa emisora seleccionada.');
             }
             const manualPaste = row.dataset.lookupMode === 'manual';
-            if (!manualPaste && (String(invoice.client_id) !== complementClient.value || String(invoice.receiver_id) !== complementReceiver.value)) {
-                throw new Error('La factura no corresponde al cliente y razón social seleccionados.');
-            }
             if (manualPaste && !invoice.manual_lookup_token) {
                 throw new Error('No fue posible autorizar la relación manual por UUID. Pégalo nuevamente.');
             }
@@ -4233,13 +4223,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (!pendingInvoicesBody || !pendingInvoicesSummary) return;
         pendingInvoicesBody.replaceChildren();
         const amountMatches = invoices.filter((invoice) => invoice.matches_movement_amount).length;
-        pendingInvoicesSummary.textContent = `${invoices.length} factura${invoices.length === 1 ? '' : 's'} encontrada${invoices.length === 1 ? '' : 's'} para la clave corta${amountMatches > 0 ? ` · ${amountMatches} coincide${amountMatches === 1 ? '' : 'n'} con el total del movimiento` : ''}.`;
+        pendingInvoicesSummary.textContent = `${invoices.length} factura${invoices.length === 1 ? '' : 's'} encontrada${invoices.length === 1 ? '' : 's'} para la empresa emisora${amountMatches > 0 ? ` · ${amountMatches} coincide${amountMatches === 1 ? '' : 'n'} con el total del movimiento` : ''}.`;
         if (invoices.length === 0) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
             cell.colSpan = 6;
             cell.className = 'pending-invoices-empty';
-            cell.textContent = 'No hay facturas PPD pendientes ni coincidencias por total para esta clave corta.';
+            cell.textContent = 'No hay facturas PPD pendientes ni coincidencias por total para esta empresa.';
             row.appendChild(cell);
             pendingInvoicesBody.appendChild(row);
             return;

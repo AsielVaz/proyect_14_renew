@@ -49,13 +49,14 @@ foreach ($receivers as $receiver) $receiversById[(int) $receiver['id']] = $recei
 assert(($receiversById[11]['has_live_documents'] ?? false) === true);
 assert(($receiversById[12]['has_live_documents'] ?? true) === false);
 
-$receiverValidation = (new ReflectionClass($repository))->getMethod('assertReceiverHasLiveDocuments');
-$receiverValidation->invoke($repository, 1, 11, 4);
+$receiverValidation = (new ReflectionClass($repository))->getMethod('assertReceiverBelongsToClient');
+$receiverValidation->invoke($repository, 1, 11);
+$receiverValidation->invoke($repository, 1, 12);
 $blocked = false;
 try {
-    $receiverValidation->invoke($repository, 1, 12, 4);
+    $receiverValidation->invoke($repository, 1, 21);
 } catch (RuntimeException $exception) {
-    $blocked = str_contains($exception->getMessage(), 'Sin documentos');
+    $blocked = str_contains($exception->getMessage(), 'no pertenece');
 }
 assert($blocked);
 
@@ -71,9 +72,8 @@ $indexSource = file_get_contents(dirname(__DIR__) . '/index.php');
 assert(is_string($movementSource) && str_contains($movementSource, 'client_balance.facturas_vivas AS pending_invoice_count'));
 assert(is_string($movementSource) && str_contains($movementSource, 'SUM(COALESCE(documentos_vivos, 0)) AS facturas_vivas'));
 assert(is_string($movementSource) && !str_contains($movementSource, 'FROM clientes_saldo_script balances'));
-assert(is_string($indexSource) && str_contains($indexSource, '$movementClientHasPendingInvoices'));
-assert(is_string($indexSource) && str_contains($indexSource, 'Hacer complemento (Sin documentos)'));
+assert(is_string($indexSource) && !str_contains($indexSource, '&& $movementClientHasPendingInvoices'));
 assert(is_string($indexSource) && str_contains($indexSource, 'data-action-disabled'));
-assert(is_string($indexSource) && str_contains($indexSource, 'Sin documentos vivos'));
+assert(is_string($indexSource) && str_contains($indexSource, 'Sin documentos propios'));
 
 echo "15 comprobaciones de disponibilidad documental para complementos superadas.\n";
