@@ -4034,7 +4034,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const complementTreatmentValue = document.getElementById('complementTreatmentValue');
     const complementTreatmentHelp = document.getElementById('complementTreatmentHelp');
     let complementPaymentMaximum = Number(complementForm?.dataset.prefillPaymentMaximum || 0);
-    let selectingPendingInvoiceHeader = false;
     const complementPaymentRemaining = document.querySelector('[data-complement-payment-remaining]');
     const complementPaymentMaximumValue = document.querySelector('[data-complement-payment-maximum-value]');
     const complementTreatmentLabels = {
@@ -4286,31 +4285,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             apply.dataset.pendingInvoiceComplete = String(Number(invoice.saldo) <= 0.005);
             apply.textContent = 'Aplicar';
             apply.addEventListener('click', async () => {
-                const targetClientId = String(invoice.client_id || '');
-                const targetReceiverId = String(invoice.receiver_id || '');
-                if (!targetClientId || !targetReceiverId) {
-                    showToast('La factura no tiene cliente o razón social válidos.');
+                if (!complementClient.value || !complementReceiver.value) {
+                    showToast('Conserva seleccionado el cliente y la clave corta del complemento.');
                     return;
                 }
-                if (!Array.from(complementClient.options).some((option) => option.value === targetClientId)) {
-                    const option = document.createElement('option');
-                    option.value = targetClientId;
-                    option.textContent = invoice.cliente || `Cliente #${targetClientId}`;
-                    complementClient.appendChild(option);
-                }
-                selectingPendingInvoiceHeader = true;
-                complementClient.value = targetClientId;
-                complementClient.dispatchEvent(new Event('change', {bubbles: true}));
-                await loadInvoiceCatalog('receivers', targetClientId, complementReceiver);
-                selectingPendingInvoiceHeader = false;
-                const receiverOption = Array.from(complementReceiver.options)
-                    .find((option) => option.value === targetReceiverId);
-                if (!receiverOption || receiverOption.disabled) {
-                    showToast('La razón social de la factura no tiene documentos vivos disponibles.');
-                    return;
-                }
-                complementReceiver.value = targetReceiverId;
-                complementReceiver.dispatchEvent(new Event('change', {bubbles: true}));
 
                 const normalizedUuid = String(invoice.uuid).trim().toUpperCase();
                 const existing = Array.from(complementLines.querySelectorAll('[name="invoice_uuid[]"]'))
@@ -4417,7 +4395,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     };
 
     complementClient?.addEventListener('change', async () => {
-        if (selectingPendingInvoiceHeader) return;
         if (!complementReceiver) return;
         releaseComplementSourceInvoice();
         await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);

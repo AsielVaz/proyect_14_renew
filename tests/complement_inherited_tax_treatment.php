@@ -37,5 +37,7 @@ $interface = file_get_contents(dirname(__DIR__) . '/index.php');
 assert(is_string($interface) && str_contains($interface, 'Tratamiento fiscal heredado'));
 assert(is_string($interface) && str_contains($interface, 'row.dataset.taxTreatment = taxTreatment'));
 assert(is_string($interface) && str_contains($interface, 'Crea complementos separados'));
+assert(is_string($interface) && !str_contains($interface, 'complementClient.value = targetClientId'));
+assert(is_string($interface) && !str_contains($interface, 'complementReceiver.value = targetReceiverId'));
 
-echo "11 comprobaciones de herencia fiscal en complementos superadas.\n";
+echo "13 comprobaciones de herencia fiscal en complementos superadas.\n";
