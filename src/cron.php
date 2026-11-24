@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\MovementNotificationService;
+use App\ShortKeyLiveDocumentService;
 
 function handle_cron_endpoint(string $endpoint): never
 {
@@ -10,7 +11,7 @@ function handle_cron_endpoint(string $endpoint): never
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('X-Robots-Tag: noindex, nofollow, noarchive');
 
-    if ($endpoint !== 'notificar-movimientos') {
+    if (!in_array($endpoint, ['notificar-movimientos', 'actualizar-documentos-vivos'], true)) {
         http_response_code(404);
         echo json_encode(['ok' => false, 'message' => 'Cron no disponible.'], JSON_UNESCAPED_UNICODE);
         exit;
@@ -22,7 +23,13 @@ function handle_cron_endpoint(string $endpoint): never
         exit;
     }
 
-    $configuredToken = trim(env_value('MOVEMENT_NOTIFICATION_CRON_TOKEN', ''));
+    $tokenVariable = $endpoint === 'actualizar-documentos-vivos'
+        ? 'SHORT_KEY_LIVE_DOCUMENTS_CRON_TOKEN'
+        : 'MOVEMENT_NOTIFICATION_CRON_TOKEN';
+    $configuredToken = trim(env_value(
+        $tokenVariable,
+        $endpoint === 'actualizar-documentos-vivos' ? env_value('MOVEMENT_NOTIFICATION_CRON_TOKEN', '') : ''
+    ));
     $providedToken = trim((string) ($_GET['token'] ?? ''));
     if ($configuredToken === '' || strlen($configuredToken) < 32 || str_starts_with($configuredToken, 'replace_with_')) {
         http_response_code(503);
@@ -44,14 +51,17 @@ function handle_cron_endpoint(string $endpoint): never
     }
 
     try {
-        $service = new MovementNotificationService(db());
-        $result = $service->run(new DateTimeImmutable('now'));
+        if ($endpoint === 'actualizar-documentos-vivos') {
+            $result = (new ShortKeyLiveDocumentService(db()))->run();
+        } else {
+            $result = (new MovementNotificationService(db()))->run(new DateTimeImmutable('now'));
+        }
         if (!$result['ok']) {
             http_response_code(500);
         }
         echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     } catch (Throwable $exception) {
-        error_log('Movement notification cron: ' . $exception->getMessage());
+        error_log('Cron ' . $endpoint . ': ' . $exception->getMessage());
         http_response_code(500);
         echo json_encode(['ok' => false, 'message' => 'No fue posible completar el cron. Revisa el log del servidor.'], JSON_UNESCAPED_UNICODE);
     }

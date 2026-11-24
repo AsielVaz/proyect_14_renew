@@ -89,6 +89,7 @@ try {
         && ($dailyResult['notifications'][0]['notification_type'] ?? '') === 'daily_summary'
         && ($dailyResult['notifications'][0]['movements'][0]['id'] ?? 0) === 900001
         && ($dailyResult['notifications'][0]['balance'] ?? null) === 300.0
+        && ($dailyResult['notifications'][0]['closing_balance'] ?? null) === 1550.50
         && ($dailyResult['notifications'][1]['notification_type'] ?? '') === 'daily_summary'
         && ($dailyResult['notifications'][1]['movements'][0]['id'] ?? 0) === 900002,
         'El resumen debe incluir movimientos ya notificados por movimiento y los configurados sólo al final del día.');
@@ -96,7 +97,10 @@ try {
         && str_contains($messages[1]['html'], 'Resumen diario de')
         && str_contains($messages[1]['html'], 'Saldo del día anterior')
         && str_contains($messages[1]['html'], '$300.00')
+        && str_contains($messages[1]['html'], 'Saldo de cierre del día')
+        && str_contains($messages[1]['html'], '$1,550.50')
         && str_contains($messages[1]['text'], 'Saldo del día anterior: $300.00')
+        && str_contains($messages[1]['text'], 'Saldo de cierre del día: $1,550.50')
         && str_contains($messages[1]['text'], 'Movimientos asignados durante el día: 1'),
         'El correo diario debe identificarse como resumen de todos los movimientos asignados.');
     $expect($pdo->query("SELECT COUNT(*) FROM s14_cartera_notificacion_diaria WHERE estado = 'enviado'")->fetchColumn() === 2,
