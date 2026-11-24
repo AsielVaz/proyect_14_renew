@@ -4328,14 +4328,26 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         syncPendingInvoiceButtons();
     };
 
+    let pendingInvoicesRequest = null;
+
+    const resetPendingInvoicesButton = () => {
+        viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
+        viewPendingInvoices.removeAttribute('aria-busy');
+        viewPendingInvoices.querySelector('span').textContent = 'Ver facturas pendientes';
+    };
+
     const hidePendingInvoices = (restoreFocus = false) => {
         if (!pendingInvoicesPanel || !viewPendingInvoices) return;
+        pendingInvoicesRequest?.abort();
+        pendingInvoicesRequest = null;
         pendingInvoicesPanel.hidden = true;
         viewPendingInvoices.setAttribute('aria-expanded', 'false');
+        resetPendingInvoicesButton();
+        pendingInvoicesBody?.replaceChildren();
         if (restoreFocus) viewPendingInvoices.focus();
     };
 
-    const loadPendingInvoices = async () => {
+    const loadPendingInvoices = async (focusResults = false) => {
         const paymentId = complementForm?.querySelector('[name="payment_id"]')?.value || '';
         const companyId = complementCompany?.value || '';
         const receiverId = complementReceiver?.value || '';
@@ -4344,6 +4356,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             return;
         }
 
+        pendingInvoicesRequest?.abort();
+        const request = new AbortController();
+        pendingInvoicesRequest = request;
         pendingInvoicesPanel.hidden = false;
         viewPendingInvoices.setAttribute('aria-expanded', 'true');
         viewPendingInvoices.disabled = true;
@@ -4359,26 +4374,29 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             url.searchParams.set('payment_id', paymentId);
             url.searchParams.set('company_id', companyId);
             url.searchParams.set('receiver_id', receiverId);
-            const response = await fetch(url, {headers: {'Accept': 'application/json'}, cache: 'no-store'});
+            const response = await fetch(url, {headers: {'Accept': 'application/json'}, cache: 'no-store', signal: request.signal});
             const result = await response.json().catch(() => null);
+            if (request.signal.aborted) return;
             if (!response.ok || !result?.ok) throw new Error(result?.message || 'No fue posible consultar las facturas pendientes.');
             complementPaymentMaximum = Number(result.data.maximum) || complementPaymentMaximum;
             if (complementPaymentMaximumValue) complementPaymentMaximumValue.value = invoiceMoney.format(complementPaymentMaximum);
             renderPendingInvoices(Array.isArray(result.data.invoices) ? result.data.invoices : []);
             recalculateComplement();
             pendingInvoicesStatus.textContent = 'Consulta actualizada.';
-            pendingInvoicesPanel.focus({preventScroll: true});
+            if (focusResults) pendingInvoicesPanel.focus({preventScroll: true});
         } catch (error) {
+            if (request.signal.aborted) return;
             pendingInvoicesStatus.textContent = error instanceof Error ? error.message : 'No fue posible consultar las facturas pendientes.';
             renderPendingInvoices([]);
         } finally {
-            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
-            viewPendingInvoices.removeAttribute('aria-busy');
-            viewPendingInvoices.querySelector('span').textContent = 'Ver facturas pendientes';
+            if (pendingInvoicesRequest === request) {
+                pendingInvoicesRequest = null;
+                resetPendingInvoicesButton();
+            }
         }
     };
 
-    viewPendingInvoices?.addEventListener('click', loadPendingInvoices);
+    viewPendingInvoices?.addEventListener('click', () => loadPendingInvoices(true));
     closePendingInvoices?.addEventListener('click', () => hidePendingInvoices(true));
     pendingInvoicesPanel?.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') hidePendingInvoices(true);
@@ -4397,36 +4415,28 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (lookup) lookup.hidden = false;
     };
 
-    complementClient?.addEventListener('change', async () => {
+    complementClient?.addEventListener('change', () => {
         if (!complementReceiver) return;
         releaseComplementSourceInvoice();
-        await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
+        void loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
+        hidePendingInvoices();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
-        if (viewPendingInvoices) {
-            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
-            hidePendingInvoices();
-            pendingInvoicesBody?.replaceChildren();
-        }
     });
-    complementCompany?.addEventListener('change', async () => {
+    complementCompany?.addEventListener('change', () => {
         releaseComplementSourceInvoice();
         if (complementReceiver && complementClient?.value) {
-            await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
+            void loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
         }
+        hidePendingInvoices();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
-        if (viewPendingInvoices) {
-            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
-            hidePendingInvoices();
-            pendingInvoicesBody?.replaceChildren();
-        }
     });
     complementReceiver?.addEventListener('change', () => {
         releaseComplementSourceInvoice();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
-        if (viewPendingInvoices) {
-            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
+        if (viewPendingInvoices && complementCompany.value && complementReceiver.value) {
+            void loadPendingInvoices();
+        } else {
             hidePendingInvoices();
-            pendingInvoicesBody?.replaceChildren();
         }
     });
     addComplementInvoice?.addEventListener('click', addComplementLine);
