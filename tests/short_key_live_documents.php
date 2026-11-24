@@ -16,7 +16,7 @@ try {
         id INT PRIMARY KEY, id_cliente INT, clave_corta VARCHAR(100), documentos_vivos INT NULL
     )');
     $pdo->exec('CREATE TEMPORARY TABLE facturas (
-        id INT PRIMARY KEY, id_clave_corta INT, metodo_pago INT, uuid VARCHAR(100),
+        id INT PRIMARY KEY, id_clave_corta VARCHAR(50), metodo_pago INT, uuid VARCHAR(100),
         status VARCHAR(50), total_iva DECIMAL(18,2)
     )');
     $pdo->exec('CREATE TEMPORARY TABLE facturar_rel_complementos (
@@ -32,7 +32,8 @@ try {
         (930003, 910002, 2, 'UUID-3', 'Timbrada', 300.00),
         (930004, 910002, 1, 'UUID-4', 'Timbrada', 400.00),
         (930005, 910002, 2, 'UUID-5', 'Cancelado', 500.00),
-        (930006, 910003, 2, '', 'Pendiente', 600.00)");
+        (930006, 910003, 2, '', 'Pendiente', 600.00),
+        (930007, '', 2, 'UUID-SIN-CLAVE', 'Timbrada', 700.00)");
     $pdo->exec("INSERT INTO facturar_rel_complementos (id_factura, monto) VALUES
         (930001, 40.00), (930002, 125.00), (930002, 75.00)");
 

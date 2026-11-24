@@ -28,7 +28,7 @@ final class ShortKeyLiveDocumentService
             $query = $this->pdo->prepare(<<<'SQL'
                 UPDATE claves_cortas cc
                 LEFT JOIN (
-                    SELECT f.id_clave_corta, COUNT(*) AS documentos_vivos
+                    SELECT TRIM(f.id_clave_corta) AS id_clave_corta, COUNT(*) AS documentos_vivos
                     FROM facturas f
                     LEFT JOIN (
                         SELECT id_factura, SUM(monto) AS total_pagado
@@ -38,11 +38,10 @@ final class ShortKeyLiveDocumentService
                     WHERE f.metodo_pago = 2
                       AND COALESCE(f.uuid, '') <> ''
                       AND COALESCE(f.status, '') <> 'Cancelado'
-                      AND f.id_clave_corta IS NOT NULL
-                      AND f.id_clave_corta > 0
+                      AND TRIM(COALESCE(f.id_clave_corta, '')) <> ''
                       AND f.total_iva - COALESCE(pagos_factura.total_pagado, 0) > 0.005
-                    GROUP BY f.id_clave_corta
-                ) vivos ON vivos.id_clave_corta = cc.id
+                    GROUP BY TRIM(f.id_clave_corta)
+                ) vivos ON vivos.id_clave_corta = CAST(cc.id AS CHAR)
                 SET cc.documentos_vivos = COALESCE(vivos.documentos_vivos, 0)
                 SQL);
             $query->execute();
