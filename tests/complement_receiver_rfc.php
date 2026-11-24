@@ -10,8 +10,10 @@ if ($source === false) {
 $checks = [
     "\$item['razon_social'] . ' · ' . (\$item['rfc'] ?: 'RFC no registrado')" =>
         'la razón social precargada desde un pago muestra el RFC',
-    'option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}`' =>
+    'option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver' =>
         'el catálogo dinámico de razones sociales conserva el RFC',
+    "if (isComplementReceiver && !hasLiveDocuments) option.disabled = true;" =>
+        'el catálogo dinámico desactiva las razones sociales sin documentos vivos',
 ];
 
 foreach ($checks as $needle => $message) {

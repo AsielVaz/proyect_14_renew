@@ -90,10 +90,17 @@ final class PaymentComplementRepository
 
     public function receivers(int $clientId): array
     {
-        $query = $this->pdo->prepare('SELECT id, clave_corta, razon_social, rfc, cp, regimen_fiscal
+        $query = $this->pdo->prepare('SELECT id, clave_corta, razon_social, rfc, cp, regimen_fiscal,
+                COALESCE(documentos_vivos, 0) AS documentos_vivos
             FROM claves_cortas WHERE id_cliente = :client ORDER BY razon_social');
         $query->execute(['client' => $clientId]);
-        return $query->fetchAll();
+        $receivers = $query->fetchAll();
+        foreach ($receivers as &$receiver) {
+            $receiver['documentos_vivos'] = max(0, (int) ($receiver['documentos_vivos'] ?? 0));
+            $receiver['has_live_documents'] = $receiver['documentos_vivos'] > 0;
+        }
+        unset($receiver);
+        return $receivers;
     }
 
     public function invoiceByUuid(string $uuid, int $manualCompanyId = 0): ?array
@@ -197,6 +204,7 @@ final class PaymentComplementRepository
 
         $payment = $this->paymentPrefill($paymentId);
         $this->assertReference('empresas', $companyId, 'empresa emisora');
+        $this->assertReceiverHasLiveDocuments((int) $payment['client_id'], $receiverId);
         $movementAmount = (float) $payment['movement_amount'];
 
         $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
@@ -335,11 +343,7 @@ final class PaymentComplementRepository
             if ($this->pendingInvoiceCount($clientId) <= 0) {
                 throw new RuntimeException('El cliente no tiene facturas PPD pendientes (Sin documentos).');
             }
-            $receiver = $this->pdo->prepare('SELECT id FROM claves_cortas WHERE id = :id AND id_cliente = :client');
-            $receiver->execute(['id' => $receiverId, 'client' => $clientId]);
-            if (!$receiver->fetchColumn()) {
-                throw new RuntimeException('La razón social no pertenece al cliente seleccionado.');
-            }
+            $this->assertReceiverHasLiveDocuments($clientId, $receiverId);
             $paymentMaximum = null;
             if ($paymentId > 0) {
                 $payment = $this->pdo->prepare("SELECT p.id, p.tipo_movimiento, p.id_factura, p.id_factura_res,
@@ -479,13 +483,25 @@ final class PaymentComplementRepository
     private function pendingInvoiceCount(int $clientId): int
     {
         if ($clientId <= 0) return 0;
-        $query = $this->pdo->prepare('SELECT facturas_vivas
-            FROM clientes_saldo_script
-            WHERE id_cliente = :client
-            ORDER BY id DESC LIMIT 1');
+        $query = $this->pdo->prepare('SELECT COALESCE(SUM(documentos_vivos), 0)
+            FROM claves_cortas WHERE id_cliente = :client');
         $query->execute(['client' => $clientId]);
         $value = $query->fetchColumn();
         return $value === false || $value === null ? 0 : max(0, (int) $value);
+    }
+
+    private function assertReceiverHasLiveDocuments(int $clientId, int $receiverId): void
+    {
+        $query = $this->pdo->prepare('SELECT COALESCE(documentos_vivos, 0)
+            FROM claves_cortas WHERE id = :id AND id_cliente = :client LIMIT 1');
+        $query->execute(['id' => $receiverId, 'client' => $clientId]);
+        $documents = $query->fetchColumn();
+        if ($documents === false) {
+            throw new RuntimeException('La razón social no pertenece al cliente seleccionado.');
+        }
+        if ((int) $documents <= 0) {
+            throw new RuntimeException('La clave corta seleccionada no tiene documentos PPD vivos (Sin documentos).');
+        }
     }
 
     public function deletePending(int $id): void

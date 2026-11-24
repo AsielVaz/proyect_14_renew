@@ -1569,9 +1569,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $paymentPrefillReceivers = $complementInitialClientId > 0
                 ? payment_complement_repository()->receivers($complementInitialClientId)
                 : [];
+            $paymentEligibleReceivers = array_values(array_filter(
+                $paymentPrefillReceivers,
+                static fn (array $receiver): bool => (int) ($receiver['documentos_vivos'] ?? 0) > 0
+            ));
             $paymentAutoReceiverId = $invoiceComplementContext
-                ? (int) $complementPrefill['receiver_id']
-                : (count($paymentPrefillReceivers) === 1 ? (int) $paymentPrefillReceivers[0]['id'] : 0);
+                ? (in_array((int) $complementPrefill['receiver_id'], array_map(static fn (array $receiver): int => (int) $receiver['id'], $paymentEligibleReceivers), true)
+                    ? (int) $complementPrefill['receiver_id'] : 0)
+                : (count($paymentEligibleReceivers) === 1 ? (int) $paymentEligibleReceivers[0]['id'] : 0);
             ?>
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $invoiceComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?><?= $paymentComplementContext ? ' data-prefill-payment-maximum="' . e($complementPaymentPrefill['maximum']) . '"' : '' ?>>
@@ -1583,7 +1588,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <div class="form-grid invoice-header-grid">
                         <label class="field"><span>Empresa emisora *</span><select name="company_id" id="complementCompany" required><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialCompanyId ? 'selected' : '' ?>><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Cliente *</span><select name="client_id" id="complementClient" required><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Razón social / clave corta *</span><select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>><option value=""><?= $complementInitialClientId > 0 ? 'Seleccionar…' : 'Selecciona primero un cliente…' ?></option><?php foreach ($paymentPrefillReceivers as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado')) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Razón social / clave corta *</span><select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>><option value=""><?= $complementInitialClientId > 0 ? 'Seleccionar…' : 'Selecciona primero un cliente…' ?></option><?php foreach ($paymentPrefillReceivers as $item): ?><?php $receiverHasLiveDocuments = (int) ($item['documentos_vivos'] ?? 0) > 0; ?><option value="<?= e($item['id']) ?>"<?= !$receiverHasLiveDocuments ? ' disabled' : '' ?> <?= $receiverHasLiveDocuments && (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . (!$receiverHasLiveDocuments ? ' · Sin documentos vivos' : '')) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e($paymentComplementContext ? $complementPaymentPrefill['payment_date'] : date('Y-m-d')) ?>" required></label>
                         <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
@@ -3498,6 +3503,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     };
 
     const loadInvoiceCatalog = async (type, id, select) => {
+        const isComplementReceiver = type === 'receivers' && select?.id === 'complementReceiver';
         select.disabled = true;
         if (type === 'concepts') {
             if (addInvoiceConcept) addInvoiceConcept.disabled = true;
@@ -3512,7 +3518,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         }
         try {
             const parameter = type === 'receivers' ? 'client' : 'company';
-            const response = await fetch(`?invoice=create&data=${type}&${parameter}=${encodeURIComponent(id)}`, {headers: {'Accept': 'application/json'}});
+            const moduleQuery = isComplementReceiver ? 'complement=create' : 'invoice=create';
+            const response = await fetch(`?${moduleQuery}&data=${type}&${parameter}=${encodeURIComponent(id)}`, {headers: {'Accept': 'application/json'}});
             const result = await response.json();
             if (!response.ok || !result.ok) throw new Error('No fue posible cargar el catálogo.');
             select.innerHTML = '<option value="">Seleccionar…</option>';
@@ -3520,8 +3527,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 const option = document.createElement('option');
                 option.value = item.id;
                 if (type === 'receivers') {
-                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}`;
+                    const hasLiveDocuments = Number(item.documentos_vivos) > 0;
+                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver && !hasLiveDocuments ? ' · Sin documentos vivos' : ''}`;
                     option.dataset.regime = item.regimen_fiscal || '';
+                    if (isComplementReceiver && !hasLiveDocuments) option.disabled = true;
                 } else {
                     option.textContent = `${item.clave_sat} · ${item.concepto}`;
                     option.dataset.description = item.concepto;
@@ -3533,6 +3542,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 select.appendChild(option);
             });
             select.disabled = result.data.length === 0;
+            if (isComplementReceiver && result.data.length > 0
+                && !result.data.some((item) => Number(item.documentos_vivos) > 0)) {
+                select.options[0].textContent = 'No hay claves cortas con documentos vivos';
+            }
             if (type === 'concepts') {
                 if (addInvoiceConcept) addInvoiceConcept.disabled = result.data.length === 0;
                 if (importInvoiceCapture) importInvoiceCapture.disabled = result.data.length === 0;
@@ -4213,9 +4226,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 complementClient.dispatchEvent(new Event('change', {bubbles: true}));
                 await loadInvoiceCatalog('receivers', targetClientId, complementReceiver);
                 selectingPendingInvoiceHeader = false;
-                const receiverExists = Array.from(complementReceiver.options).some((option) => option.value === targetReceiverId);
-                if (!receiverExists) {
-                    showToast('No fue posible seleccionar la razón social de la factura.');
+                const receiverOption = Array.from(complementReceiver.options)
+                    .find((option) => option.value === targetReceiverId);
+                if (!receiverOption || receiverOption.disabled) {
+                    showToast('La razón social de la factura no tiene documentos vivos disponibles.');
                     return;
                 }
                 complementReceiver.value = targetReceiverId;

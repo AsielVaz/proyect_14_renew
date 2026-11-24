@@ -1217,12 +1217,8 @@ final class MovementRepository
                  LEFT JOIN empresas e ON e.id = COALESCE(c.razon, p.empresa)
                  LEFT JOIN clientes cl ON cl.id = p.nombre
                  LEFT JOIN (
-                     SELECT balances.id_cliente, balances.facturas_vivas
-                     FROM clientes_saldo_script balances
-                     INNER JOIN (
-                         SELECT id_cliente, MAX(id) AS latest_id
-                         FROM clientes_saldo_script GROUP BY id_cliente
-                     ) latest_balance ON latest_balance.latest_id = balances.id
+                     SELECT id_cliente, SUM(COALESCE(documentos_vivos, 0)) AS facturas_vivas
+                     FROM claves_cortas GROUP BY id_cliente
                  ) client_balance ON client_balance.id_cliente = CAST(p.nombre AS UNSIGNED)
                  LEFT JOIN usuarios u ON u.id = p.usuario_asigna_fac{$accountStatementJoin}";
 
@@ -1271,12 +1267,8 @@ final class MovementRepository
                  LEFT JOIN empresas e ON e.id = COALESCE(c.razon, p.empresa)
                  LEFT JOIN clientes origin ON origin.id = p.cliente_origen_comision
                   LEFT JOIN (
-                      SELECT balances.id_cliente, balances.facturas_vivas
-                      FROM clientes_saldo_script balances
-                      INNER JOIN (
-                          SELECT id_cliente, MAX(id) AS latest_id
-                          FROM clientes_saldo_script GROUP BY id_cliente
-                      ) latest_balance ON latest_balance.latest_id = balances.id
+                       SELECT id_cliente, SUM(COALESCE(documentos_vivos, 0)) AS facturas_vivas
+                       FROM claves_cortas GROUP BY id_cliente
                   ) client_balance ON client_balance.id_cliente = CAST(p.nombre AS UNSIGNED)
                  WHERE COALESCE(p.saldo_acreditable, 0) <> 0
                    AND p.fecha_asignacion >= DATE_SUB(CURDATE(), INTERVAL 32 MONTH)
