@@ -1573,6 +1573,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 $paymentPrefillReceivers,
                 static fn (array $receiver): bool => (int) ($receiver['documentos_vivos'] ?? 0) > 0
             ));
+            $paymentDisabledReceivers = array_values(array_filter(
+                $paymentPrefillReceivers,
+                static fn (array $receiver): bool => (int) ($receiver['documentos_vivos'] ?? 0) <= 0
+            ));
             $paymentAutoReceiverId = $invoiceComplementContext
                 ? (in_array((int) $complementPrefill['receiver_id'], array_map(static fn (array $receiver): int => (int) $receiver['id'], $paymentEligibleReceivers), true)
                     ? (int) $complementPrefill['receiver_id'] : 0)
@@ -1588,7 +1592,13 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <div class="form-grid invoice-header-grid">
                         <label class="field"><span>Empresa emisora *</span><select name="company_id" id="complementCompany" required><option value="">Seleccionar…</option><?php foreach ($complementData['companies'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialCompanyId ? 'selected' : '' ?>><?= e($item['razon']) ?> · <?= e($item['rfc']) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Cliente *</span><select name="client_id" id="complementClient" required><option value="">Seleccionar…</option><?php foreach ($complementData['clients'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['id'] === $complementInitialClientId ? 'selected' : '' ?>><?= e($item['nombre']) ?></option><?php endforeach; ?></select></label>
-                        <label class="field"><span>Razón social / clave corta *</span><select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>><option value=""><?= $complementInitialClientId > 0 ? 'Seleccionar…' : 'Selecciona primero un cliente…' ?></option><?php foreach ($paymentPrefillReceivers as $item): ?><?php $receiverHasLiveDocuments = (int) ($item['documentos_vivos'] ?? 0) > 0; ?><option value="<?= e($item['id']) ?>"<?= !$receiverHasLiveDocuments ? ' disabled' : '' ?> <?= $receiverHasLiveDocuments && (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . (!$receiverHasLiveDocuments ? ' · Sin documentos vivos' : '')) ?></option><?php endforeach; ?></select></label>
+                        <label class="field"><span>Razón social / clave corta *</span>
+                            <select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>>
+                                <option value=""><?= $complementInitialClientId > 0 ? ($paymentEligibleReceivers !== [] ? 'Seleccionar…' : 'No hay claves cortas con documentos vivos') : 'Selecciona primero un cliente…' ?></option>
+                                <?php if ($paymentEligibleReceivers !== []): ?><optgroup label="Con documentos vivos"><?php foreach ($paymentEligibleReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="<?= e($item['documentos_vivos']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · ' . (int) $item['documentos_vivos'] . ' documento(s) vivo(s)') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                                <?php if ($paymentDisabledReceivers !== []): ?><optgroup label="Sin documentos vivos · No disponibles" disabled><?php foreach ($paymentDisabledReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" disabled><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos vivos') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                            </select>
+                        </label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e($paymentComplementContext ? $complementPaymentPrefill['payment_date'] : date('Y-m-d')) ?>" required></label>
                         <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
@@ -3523,14 +3533,28 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             const result = await response.json();
             if (!response.ok || !result.ok) throw new Error('No fue posible cargar el catálogo.');
             select.innerHTML = '<option value="">Seleccionar…</option>';
+            let liveReceiverGroup = null;
+            let unavailableReceiverGroup = null;
+            if (isComplementReceiver) {
+                liveReceiverGroup = document.createElement('optgroup');
+                liveReceiverGroup.label = 'Con documentos vivos';
+                unavailableReceiverGroup = document.createElement('optgroup');
+                unavailableReceiverGroup.label = 'Sin documentos vivos · No disponibles';
+                unavailableReceiverGroup.disabled = true;
+            }
             result.data.forEach((item) => {
                 const option = document.createElement('option');
                 option.value = item.id;
                 if (type === 'receivers') {
                     const hasLiveDocuments = Number(item.documentos_vivos) > 0;
-                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver && !hasLiveDocuments ? ' · Sin documentos vivos' : ''}`;
+                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver ? (hasLiveDocuments ? ` · ${Number(item.documentos_vivos)} documento(s) vivo(s)` : ' · Sin documentos vivos') : ''}`;
                     option.dataset.regime = item.regimen_fiscal || '';
-                    if (isComplementReceiver && !hasLiveDocuments) option.disabled = true;
+                    if (isComplementReceiver) {
+                        option.dataset.documentsLive = String(Math.max(0, Number(item.documentos_vivos) || 0));
+                        option.disabled = !hasLiveDocuments;
+                        (hasLiveDocuments ? liveReceiverGroup : unavailableReceiverGroup).appendChild(option);
+                        return;
+                    }
                 } else {
                     option.textContent = `${item.clave_sat} · ${item.concepto}`;
                     option.dataset.description = item.concepto;
@@ -3541,6 +3565,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 }
                 select.appendChild(option);
             });
+            if (isComplementReceiver) {
+                if (liveReceiverGroup.children.length > 0) select.appendChild(liveReceiverGroup);
+                if (unavailableReceiverGroup.children.length > 0) select.appendChild(unavailableReceiverGroup);
+            }
             select.disabled = result.data.length === 0;
             if (isComplementReceiver && result.data.length > 0
                 && !result.data.some((item) => Number(item.documentos_vivos) > 0)) {
