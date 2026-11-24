@@ -11,6 +11,12 @@ use Throwable;
 final class PaymentComplementRepository
 {
     private const ALLOWED_TYPES = ['T', 'T0', 'SV', '4'];
+    private const TREATMENT_LABELS = [
+        'T' => 'Típico · IVA 16%',
+        'T0' => 'Tasa 0%',
+        'SV' => 'Sin IVA',
+        '4' => 'Retención 4%',
+    ];
 
     public function __construct(private readonly PDO $pdo)
     {
@@ -238,6 +244,7 @@ final class PaymentComplementRepository
         $movementAmount = (float) $payment['movement_amount'];
 
         $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
+                f.xml_firmado, f.retencion_transporte, f.xml_total, f.xml_subtotal,
                 f.nombre AS client_id, f.id_clave_corta AS receiver_id,
                 c.nombre AS cliente, cc.razon_social AS receptor, cc.rfc,
                 DATE(f.fecha_timbrado) AS fecha_timbrado,
@@ -275,6 +282,7 @@ final class PaymentComplementRepository
             $invoice['client_id'] = (int) $invoice['client_id'];
             $invoice['receiver_id'] = (int) $invoice['receiver_id'];
             $invoice['matches_movement_amount'] = abs((float) $invoice['total_iva'] - $movementAmount) < 0.005;
+            $this->addTaxTreatment($invoice);
         }
         unset($invoice);
 
@@ -287,6 +295,7 @@ final class PaymentComplementRepository
     private function findInvoice(string $condition, string|int $value): ?array
     {
         $query = $this->pdo->prepare('SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
+            f.xml_firmado, f.retencion_transporte, f.xml_total, f.xml_subtotal,
             f.nombre AS client_id, f.razon AS company_id, f.id_clave_corta AS receiver_id,
             f.metodo_pago, c.nombre AS cliente, e.razon AS empresa, cc.clave_corta,
             cc.razon_social AS receptor,
@@ -306,6 +315,7 @@ final class PaymentComplementRepository
             return null;
         }
         $row['saldo'] = max(0, round((float) $row['total_iva'] - (float) $row['pagado'], 2));
+        $this->addTaxTreatment($row);
         return $row;
     }
 
@@ -344,7 +354,7 @@ final class PaymentComplementRepository
         $formId = (int) ($input['form_id'] ?? 0);
         $paymentId = (int) ($input['payment_id'] ?? 0);
         $paymentDate = trim((string) ($input['payment_date'] ?? ''));
-        $type = (string) ($input['complement_type'] ?? 'T');
+        $type = '';
         $uuids = (array) ($input['invoice_uuid'] ?? []);
         $amounts = (array) ($input['amount'] ?? []);
         $installments = (array) ($input['installment'] ?? []);
@@ -353,9 +363,6 @@ final class PaymentComplementRepository
 
         if ($clientId <= 0 || $receiverId <= 0 || $companyId <= 0 || $formId <= 0) {
             throw new RuntimeException('Selecciona cliente, razón social, empresa emisora y forma de pago.');
-        }
-        if (!in_array($type, self::ALLOWED_TYPES, true)) {
-            throw new RuntimeException('El tipo de complemento no es válido.');
         }
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $paymentDate);
         if (!$date || $date->format('Y-m-d') !== $paymentDate) {
@@ -411,13 +418,15 @@ final class PaymentComplementRepository
             }
 
             $invoiceQuery = $this->pdo->prepare('SELECT id, uuid, serie, folio, total_iva, nombre,
-                razon, id_clave_corta, metodo_pago FROM facturas WHERE UPPER(uuid) = :uuid
+                razon, id_clave_corta, metodo_pago, xml_firmado, retencion_transporte,
+                xml_total, xml_subtotal FROM facturas WHERE UPPER(uuid) = :uuid
                 ORDER BY id DESC LIMIT 1 FOR UPDATE');
             $paidQuery = $this->pdo->prepare('SELECT COALESCE(SUM(monto), 0) FROM facturar_rel_complementos WHERE id_factura = :invoice');
             $relations = [];
             $seen = [];
             $sourceInvoiceIncluded = $sourceInvoiceId <= 0;
             $total = 0.0;
+            $inheritedType = null;
             foreach ($uuids as $index => $rawUuid) {
                 $uuid = strtoupper(trim((string) $rawUuid));
                 $amount = round((float) str_replace([',', '$', ' '], '', (string) ($amounts[$index] ?? '0')), 2);
@@ -439,6 +448,13 @@ final class PaymentComplementRepository
                 if ((int) $invoice['razon'] !== $companyId) {
                     throw new RuntimeException('La factura ' . $uuid . ' no corresponde a la empresa emisora seleccionada.');
                 }
+                $invoiceType = $this->invoiceTaxTreatment($invoice);
+                if ($inheritedType !== null && $invoiceType !== $inheritedType) {
+                    throw new RuntimeException('Las facturas relacionadas tienen tratamientos fiscales distintos ('
+                        . self::TREATMENT_LABELS[$inheritedType] . ' y '
+                        . self::TREATMENT_LABELS[$invoiceType] . '). Crea complementos separados.');
+                }
+                $inheritedType ??= $invoiceType;
                 $manualLookupAuthorized = $this->validManualLookupToken(
                     (string) ($manualLookupTokens[$index] ?? ''),
                     $invoice,
@@ -463,6 +479,10 @@ final class PaymentComplementRepository
                 $seen[$uuid] = true;
                 $total += $amount;
             }
+            if ($inheritedType === null) {
+                throw new RuntimeException('No fue posible determinar el tratamiento fiscal de las facturas relacionadas.');
+            }
+            $type = $inheritedType;
             if (!$sourceInvoiceIncluded) {
                 throw new RuntimeException('La factura PPD que originó el complemento debe permanecer relacionada.');
             }
@@ -518,6 +538,72 @@ final class PaymentComplementRepository
         $query->execute(['client' => $clientId]);
         $value = $query->fetchColumn();
         return $value === false || $value === null ? 0 : max(0, (int) $value);
+    }
+
+    /** @param array<string, mixed> $invoice */
+    private function addTaxTreatment(array &$invoice): void
+    {
+        $treatment = $this->invoiceTaxTreatment($invoice);
+        $invoice['tax_treatment'] = $treatment;
+        $invoice['tax_treatment_label'] = self::TREATMENT_LABELS[$treatment];
+        unset($invoice['xml_firmado']);
+    }
+
+    /** @param array<string, mixed> $invoice */
+    private function invoiceTaxTreatment(array $invoice): string
+    {
+        if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0) {
+            return '4';
+        }
+
+        $xml = trim((string) ($invoice['xml_firmado'] ?? ''));
+        if ($xml !== '') {
+            $document = new \DOMDocument();
+            $previous = libxml_use_internal_errors(true);
+            $loaded = $document->loadXML($xml, LIBXML_NONET | LIBXML_NOBLANKS);
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+            if ($loaded) {
+                $xpath = new \DOMXPath($document);
+                $retentions = $xpath->query('//*[local-name()="Retencion" and @Impuesto="002"]');
+                if ($retentions !== false && $retentions->length > 0) {
+                    return '4';
+                }
+                $transfers = $xpath->query('//*[local-name()="Traslado" and @Impuesto="002"]');
+                $zeroRate = false;
+                if ($transfers !== false) {
+                    foreach ($transfers as $transfer) {
+                        if (!$transfer instanceof \DOMElement) continue;
+                        $rate = trim($transfer->getAttribute('TasaOCuota'));
+                        if ($rate !== '' && (float) $rate >= 0.159999) return 'T';
+                        if ($rate !== '' && abs((float) $rate) < 0.000001) $zeroRate = true;
+                    }
+                }
+                return $zeroRate ? 'T0' : 'SV';
+            }
+        }
+
+        $invoiceId = (int) ($invoice['id'] ?? 0);
+        if ($invoiceId > 0) {
+            $query = $this->pdo->prepare('SELECT d.iva, c.aplica_iva
+                FROM detalle_factura d LEFT JOIN conceptos c ON c.id = d.id_producto
+                WHERE d.id_factura = :invoice');
+            $query->execute(['invoice' => $invoiceId]);
+            $taxableZero = false;
+            foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $detail) {
+                if ((float) ($detail['iva'] ?? 0) >= 15.999) return 'T';
+                if ((float) ($detail['iva'] ?? 0) === 0.0
+                    && strcasecmp(trim((string) ($detail['aplica_iva'] ?? '')), 'no') !== 0
+                    && trim((string) ($detail['aplica_iva'] ?? '')) !== '') {
+                    $taxableZero = true;
+                }
+            }
+            if ($taxableZero) return 'T0';
+        }
+
+        $total = (float) ($invoice['xml_total'] ?? $invoice['total_iva'] ?? 0);
+        $subtotal = (float) ($invoice['xml_subtotal'] ?? 0);
+        return $subtotal > 0 && $total > $subtotal + 0.005 ? 'T' : 'SV';
     }
 
     private function assertReceiverHasLiveDocuments(int $clientId, int $receiverId, int $companyId): void

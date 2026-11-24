@@ -1604,7 +1604,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e($paymentComplementContext ? $complementPaymentPrefill['payment_date'] : date('Y-m-d')) ?>" required></label>
-                        <label class="field"><span>Tratamiento fiscal *</span><select name="complement_type" required><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select></label>
+                        <label class="field"><span>Tratamiento fiscal heredado *</span><select id="complementTreatment" disabled aria-describedby="complementTreatmentHelp"><option value="">Se definirá al relacionar una factura…</option><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select><input type="hidden" name="complement_type" id="complementTreatmentValue" value=""><small id="complementTreatmentHelp">Se obtiene del XML timbrado de la factura y no puede editarse.</small></label>
                         <?php if ($paymentComplementContext): ?>
                             <label class="field"><span>Movimiento de pago</span><input type="text" value="#<?= e($complementPaymentPrefill['id']) ?>" readonly aria-readonly="true"></label>
                             <label class="field"><span>Monto máximo disponible</span><input type="text" value="<?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?>" readonly aria-readonly="true" data-complement-payment-maximum-value></label>
@@ -4030,10 +4030,36 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const pendingInvoicesStatus = document.getElementById('pendingInvoicesStatus');
     const pendingInvoicesSummary = document.getElementById('pendingInvoicesSummary');
     const closePendingInvoices = document.getElementById('closePendingInvoices');
+    const complementTreatment = document.getElementById('complementTreatment');
+    const complementTreatmentValue = document.getElementById('complementTreatmentValue');
+    const complementTreatmentHelp = document.getElementById('complementTreatmentHelp');
     let complementPaymentMaximum = Number(complementForm?.dataset.prefillPaymentMaximum || 0);
     let selectingPendingInvoiceHeader = false;
     const complementPaymentRemaining = document.querySelector('[data-complement-payment-remaining]');
     const complementPaymentMaximumValue = document.querySelector('[data-complement-payment-maximum-value]');
+    const complementTreatmentLabels = {
+        T: 'Típico · IVA 16%',
+        T0: 'Tasa 0%',
+        SV: 'Sin IVA',
+        4: 'Retención 4%',
+    };
+
+    const syncComplementTreatment = () => {
+        if (!complementTreatment || !complementTreatmentValue) return;
+        const treatments = Array.from(complementLines?.querySelectorAll('tr[data-complement-line][data-validated="true"]') || [])
+            .map((row) => row.dataset.taxTreatment || '')
+            .filter(Boolean);
+        const inherited = treatments[0] || '';
+        complementTreatment.value = inherited;
+        complementTreatmentValue.value = inherited;
+        complementTreatment.disabled = true;
+        complementTreatment.dispatchEvent(new Event('change', {bubbles: true}));
+        if (complementTreatmentHelp) {
+            complementTreatmentHelp.textContent = inherited
+                ? `Heredado de la factura relacionada: ${complementTreatmentLabels[inherited] || inherited}. No puede editarse.`
+                : 'Se obtiene del XML timbrado de la factura y no puede editarse.';
+        }
+    };
 
     const complementTotalAmount = (excludedRow = null) => {
         if (!complementLines) return 0;
@@ -4077,6 +4103,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             const amount = Number(row.querySelector('[name="amount[]"]').value) || 0;
             row.querySelector('[data-complement-remaining]').textContent = invoiceMoney.format(Math.max(0, balance - amount));
         });
+        syncComplementTreatment();
         syncPendingInvoiceButtons();
     };
 
@@ -4084,6 +4111,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         row.dataset.validated = 'false';
         row.dataset.balance = '0';
         row.dataset.lookupMode = 'strict';
+        delete row.dataset.taxTreatment;
         const manualToken = row.querySelector('[name="invoice_manual_token[]"]');
         if (manualToken) manualToken.value = '';
         row.querySelector('[data-complement-invoice]').textContent = 'UUID pendiente de consulta';
@@ -4132,13 +4160,25 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 throw new Error('No fue posible autorizar la relación manual por UUID. Pégalo nuevamente.');
             }
             if (Number(invoice.saldo) <= 0) throw new Error('La factura ya no tiene saldo pendiente.');
+            const taxTreatment = String(invoice.tax_treatment || '');
+            if (!Object.hasOwn(complementTreatmentLabels, taxTreatment)) {
+                throw new Error('No fue posible determinar el tratamiento fiscal de la factura.');
+            }
+            const inheritedTreatment = Array.from(complementLines.querySelectorAll('tr[data-complement-line][data-validated="true"]'))
+                .filter((item) => item !== row)
+                .map((item) => item.dataset.taxTreatment || '')
+                .find(Boolean);
+            if (inheritedTreatment && inheritedTreatment !== taxTreatment) {
+                throw new Error(`La factura usa ${complementTreatmentLabels[taxTreatment]}, pero el complemento ya heredó ${complementTreatmentLabels[inheritedTreatment]}. Crea complementos separados.`);
+            }
             const duplicate = Array.from(complementLines.querySelectorAll('[name="invoice_uuid[]"]')).some((item) => item !== uuidInput && item.value.trim().toUpperCase() === String(invoice.uuid).toUpperCase());
             if (duplicate) throw new Error('Esta factura ya fue agregada al complemento.');
             uuidInput.value = invoice.uuid;
             manualToken.value = manualPaste ? invoice.manual_lookup_token : '';
             row.dataset.validated = 'true';
             row.dataset.balance = String(invoice.saldo);
-            row.querySelector('[data-complement-invoice]').textContent = `${manualPaste ? 'UUID pegado · empresa verificada · ' : ''}#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente}`;
+            row.dataset.taxTreatment = taxTreatment;
+            row.querySelector('[data-complement-invoice]').textContent = `${manualPaste ? 'UUID pegado · empresa verificada · ' : ''}#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente} · ${invoice.tax_treatment_label || complementTreatmentLabels[taxTreatment]}`;
             row.querySelector('[data-complement-balance]').textContent = invoiceMoney.format(Number(invoice.saldo));
             const amount = row.querySelector('[name="amount[]"]');
             amount.disabled = false;
@@ -4215,7 +4255,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             uuid.textContent = invoice.uuid;
             const party = document.createElement('small');
             party.textContent = `${invoice.cliente || 'Sin cliente'} · ${invoice.rfc || ''} · ${invoice.receptor || ''}`;
-            invoiceCell.append(title, uuid, party);
+            const treatment = document.createElement('small');
+            treatment.textContent = `Tratamiento fiscal: ${invoice.tax_treatment_label || complementTreatmentLabels[invoice.tax_treatment] || 'No identificado'}`;
+            invoiceCell.append(title, uuid, party, treatment);
             if (invoice.matches_movement_amount) {
                 const match = document.createElement('small');
                 match.className = 'pending-invoice-amount-match';
