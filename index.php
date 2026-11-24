@@ -1581,9 +1581,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 static fn (array $receiver): bool => (int) ($receiver['documentos_vivos'] ?? 0) <= 0
             ));
             $paymentAutoReceiverId = $invoiceComplementContext
-                ? (in_array((int) $complementPrefill['receiver_id'], array_map(static fn (array $receiver): int => (int) $receiver['id'], $paymentPrefillReceivers), true)
+                ? (in_array((int) $complementPrefill['receiver_id'], array_map(static fn (array $receiver): int => (int) $receiver['id'], $paymentReceiversWithDocuments), true)
                     ? (int) $complementPrefill['receiver_id'] : 0)
-                : (count($paymentPrefillReceivers) === 1 ? (int) $paymentPrefillReceivers[0]['id'] : 0);
+                : (count($paymentReceiversWithDocuments) === 1 ? (int) $paymentReceiversWithDocuments[0]['id'] : 0);
             ?>
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $invoiceComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?><?= $paymentComplementContext ? ' data-prefill-payment-maximum="' . e($complementPaymentPrefill['maximum']) . '"' : '' ?>>
@@ -1599,7 +1599,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             <select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>>
                                 <option value=""><?= $complementInitialClientId > 0 ? 'Seleccionar…' : 'Selecciona primero un cliente…' ?></option>
                                 <?php if ($paymentReceiversWithDocuments !== []): ?><optgroup label="Con documentos vivos para el RFC"><?php foreach ($paymentReceiversWithDocuments as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="<?= e($item['documentos_vivos']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · ' . (int) $item['documentos_vivos'] . ' documento(s) del RFC') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
-                                <?php if ($paymentReceiversWithoutDocuments !== []): ?><optgroup label="Sin documentos vivos para el RFC"><?php foreach ($paymentReceiversWithoutDocuments as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos para este RFC') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                                <?php if ($paymentReceiversWithoutDocuments !== []): ?><optgroup label="Sin documentos vivos para el RFC" disabled><?php foreach ($paymentReceiversWithoutDocuments as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" disabled><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos para este RFC') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
                             </select>
                         </label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
@@ -3545,6 +3545,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 liveReceiverGroup.label = 'Con documentos vivos para el RFC';
                 unavailableReceiverGroup = document.createElement('optgroup');
                 unavailableReceiverGroup.label = 'Sin documentos vivos para el RFC';
+                unavailableReceiverGroup.disabled = true;
             }
             result.data.forEach((item) => {
                 const option = document.createElement('option');
@@ -3554,6 +3555,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver ? (hasLiveDocuments ? ` · ${Number(item.documentos_vivos)} documento(s) del RFC` : ' · Sin documentos para este RFC') : ''}`;
                     option.dataset.regime = item.regimen_fiscal || '';
                     if (isComplementReceiver) {
+                        option.disabled = !hasLiveDocuments;
                         option.dataset.documentsLive = String(Math.max(0, Number(item.documentos_vivos) || 0));
                         (hasLiveDocuments ? liveReceiverGroup : unavailableReceiverGroup).appendChild(option);
                         return;
@@ -4443,7 +4445,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     if (complementLines) {
         addComplementLine();
         const prefillUuid = complementForm?.dataset.prefillInvoiceUuid;
-        if (prefillUuid) {
+        if (prefillUuid && complementReceiver?.value) {
             const row = complementLines.querySelector('tr[data-complement-line]');
             const uuid = row.querySelector('[name="invoice_uuid[]"]');
             uuid.value = prefillUuid;
