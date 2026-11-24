@@ -1604,7 +1604,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
                         <label class="field"><span>Fecha del pago *</span><input type="date" name="payment_date" value="<?= e($paymentComplementContext ? $complementPaymentPrefill['payment_date'] : date('Y-m-d')) ?>" required></label>
-                        <label class="field"><span>Tratamiento fiscal heredado *</span><select id="complementTreatment" disabled aria-describedby="complementTreatmentHelp"><option value="">Se definirá al relacionar una factura…</option><option value="T">Típico · IVA 16%</option><option value="T0">Tasa 0%</option><option value="SV">Sin IVA</option><option value="4">Retención 4%</option></select><input type="hidden" name="complement_type" id="complementTreatmentValue" value=""><small id="complementTreatmentHelp">Se obtiene del XML timbrado de la factura y no puede editarse.</small></label>
                         <?php if ($paymentComplementContext): ?>
                             <label class="field"><span>Movimiento de pago</span><input type="text" value="#<?= e($complementPaymentPrefill['id']) ?>" readonly aria-readonly="true"></label>
                             <label class="field"><span>Monto máximo disponible</span><input type="text" value="<?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?>" readonly aria-readonly="true" data-complement-payment-maximum-value></label>
@@ -1615,15 +1614,15 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <?php if ($paymentComplementContext): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($complementPaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren desde el movimiento, pero puedes cambiarlos. Disponible para aplicar: <b data-complement-payment-remaining><?= e(report_value($complementPaymentPrefill['maximum'], 'money')) ?></b>.</p></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID o consulta las facturas pendientes que correspondan al RFC de la clave corta seleccionada. La factura puede estar registrada en otra cartera, pero debe pertenecer a la misma empresa emisora.</p></div><div class="panel-actions"><?php if ($paymentComplementContext): ?><button type="button" class="button complement-pending-trigger" id="viewPendingInvoices" aria-expanded="false" aria-controls="pendingInvoicesPanel"<?= $paymentAutoReceiverId <= 0 ? ' disabled' : '' ?>><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6"/></svg><span>Ver facturas pendientes</span></button><?php endif; ?><button type="button" class="button" id="addComplementInvoice">+ Agregar factura</button></div></div>
+                    <div class="panel-heading"><div><p class="eyebrow">Documentos relacionados</p><h2>Facturas PPD</h2><p class="panel-copy">Captura el UUID de la factura.<?php if ($paymentComplementContext): ?> Al seleccionar una clave corta, se muestran las facturas pendientes de su RFC y de la empresa emisora.<?php endif; ?></p></div></div>
                     <?php if ($paymentComplementContext): ?>
-                        <section class="pending-invoices-panel" id="pendingInvoicesPanel" aria-labelledby="pendingInvoicesTitle" tabindex="-1" hidden>
-                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes del RFC</h3><span id="pendingInvoicesSummary">Consulta las facturas PPD del mismo RFC, aunque estén registradas en otra cartera.</span></div><button type="button" class="pending-invoices-close" id="closePendingInvoices" aria-label="Cerrar facturas pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+                        <section class="pending-invoices-panel" id="pendingInvoicesPanel" aria-labelledby="pendingInvoicesTitle" hidden>
+                            <header><div><p class="eyebrow">Saldo por aplicar</p><h3 id="pendingInvoicesTitle">Facturas pendientes del RFC</h3><span id="pendingInvoicesSummary">Consulta las facturas PPD del mismo RFC, aunque estén registradas en otra cartera.</span></div></header>
                             <div class="pending-invoices-status" id="pendingInvoicesStatus" role="status" aria-live="polite">Preparado para consultar.</div>
                             <div class="table-wrap"><table class="pending-invoices-table"><thead><tr><th>Factura</th><th>Fecha</th><th>Total</th><th>Pagado</th><th>Saldo pendiente</th><th><span class="sr-only">Acción</span></th></tr></thead><tbody id="pendingInvoicesBody"></tbody></table></div>
                         </section>
                     <?php endif; ?>
-                    <div class="table-wrap"><table class="invoice-lines complement-lines"><thead><tr><th>UUID / factura</th><th>Saldo anterior</th><th>Monto pagado</th><th>Parcialidad</th><th>Saldo restante</th><th></th></tr></thead><tbody id="complementLines"></tbody></table></div>
+                    <div class="table-wrap"><table class="invoice-lines complement-lines"><thead><tr><th>UUID / factura</th><th>Saldo anterior</th><th>Monto pagado</th><th>Parcialidad</th><th>Saldo restante</th><th>Tratamiento fiscal</th><th></th></tr></thead><tbody id="complementLines"></tbody></table></div>
                     <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar complemento</button></div>
                 </section>
             </form>
@@ -4017,16 +4016,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const complementReceiver = document.getElementById('complementReceiver');
     const complementLines = document.getElementById('complementLines');
     const complementForm = document.getElementById('complementForm');
-    const addComplementInvoice = document.getElementById('addComplementInvoice');
-    const viewPendingInvoices = document.getElementById('viewPendingInvoices');
     const pendingInvoicesPanel = document.getElementById('pendingInvoicesPanel');
     const pendingInvoicesBody = document.getElementById('pendingInvoicesBody');
     const pendingInvoicesStatus = document.getElementById('pendingInvoicesStatus');
     const pendingInvoicesSummary = document.getElementById('pendingInvoicesSummary');
-    const closePendingInvoices = document.getElementById('closePendingInvoices');
-    const complementTreatment = document.getElementById('complementTreatment');
-    const complementTreatmentValue = document.getElementById('complementTreatmentValue');
-    const complementTreatmentHelp = document.getElementById('complementTreatmentHelp');
     const complementFromPayment = complementForm?.hasAttribute('data-prefill-payment-maximum') ?? false;
     let complementPaymentMaximum = Number(complementForm?.dataset.prefillPaymentMaximum || 0);
     const complementPaymentRemaining = document.querySelector('[data-complement-payment-remaining]');
@@ -4036,23 +4029,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         T0: 'Tasa 0%',
         SV: 'Sin IVA',
         4: 'Retención 4%',
-    };
-
-    const syncComplementTreatment = () => {
-        if (!complementTreatment || !complementTreatmentValue) return;
-        const treatments = Array.from(complementLines?.querySelectorAll('tr[data-complement-line][data-validated="true"]') || [])
-            .map((row) => row.dataset.taxTreatment || '')
-            .filter(Boolean);
-        const inherited = treatments[0] || '';
-        complementTreatment.value = inherited;
-        complementTreatmentValue.value = inherited;
-        complementTreatment.disabled = true;
-        complementTreatment.dispatchEvent(new Event('change', {bubbles: true}));
-        if (complementTreatmentHelp) {
-            complementTreatmentHelp.textContent = inherited
-                ? `Heredado de la factura relacionada: ${complementTreatmentLabels[inherited] || inherited}. No puede editarse.`
-                : 'Se obtiene del XML timbrado de la factura y no puede editarse.';
-        }
     };
 
     const complementAmountFormat = new Intl.NumberFormat('es-MX', {
@@ -4152,7 +4128,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             complementPaymentRemaining.textContent = invoiceMoney.format(remaining);
             complementPaymentRemaining.classList.toggle('is-exceeded', total > complementPaymentMaximum + 0.001);
         }
-        syncComplementTreatment();
         syncPendingInvoiceButtons();
     };
 
@@ -4165,6 +4140,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (manualToken) manualToken.value = '';
         row.querySelector('[data-complement-invoice]').textContent = 'UUID pendiente de consulta';
         row.querySelector('[data-complement-balance]').textContent = '—';
+        row.querySelector('[data-complement-tax-treatment]').textContent = '—';
         row.querySelector('[data-complement-remaining]').textContent = '—';
         const amount = row.querySelector('[name="amount[]"]');
         amount.value = '';
@@ -4225,7 +4201,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             row.dataset.validated = 'true';
             row.dataset.balance = String(invoice.saldo);
             row.dataset.taxTreatment = taxTreatment;
-            row.querySelector('[data-complement-invoice]').textContent = `${manualPaste ? 'UUID pegado · empresa verificada · ' : ''}#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente} · ${invoice.tax_treatment_label || complementTreatmentLabels[taxTreatment]}`;
+            row.querySelector('[data-complement-invoice]').textContent = `${manualPaste ? 'UUID pegado · empresa verificada · ' : ''}#${invoice.id} · ${(invoice.serie || '')}${invoice.folio || ''} · ${invoice.cliente}`;
             row.querySelector('[data-complement-balance]').textContent = invoiceMoney.format(Number(invoice.saldo));
             const amount = row.querySelector('[name="amount[]"]');
             amount.disabled = false;
@@ -4233,7 +4209,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             if (maximumForLine <= 0) throw new Error('El monto máximo del movimiento ya fue aplicado en otras facturas.');
             amount.value = complementAmountFormat.format(maximumForLine);
             row.querySelector('[data-complement-installment]').value = String(invoice.siguiente_parcialidad || 1);
-            recalculateComplement();
+            row.querySelector('[data-complement-tax-treatment]').textContent = invoice.tax_treatment_label || complementTreatmentLabels[taxTreatment];
+            if (complementLines.querySelector('tr[data-complement-line][data-validated="false"]')) {
+                recalculateComplement();
+            } else {
+                addComplementLine();
+            }
             return true;
         } catch (error) {
             resetComplementLine(row);
@@ -4252,7 +4233,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         row.dataset.validated = 'false';
         row.dataset.balance = '0';
         row.dataset.lookupMode = 'strict';
-        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal" required><input type="hidden" name="invoice_manual_token[]" value=""><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="text" inputmode="decimal" name="amount[]" aria-label="Monto pagado" required disabled></td><td><input type="text" data-complement-installment aria-label="Parcialidad calculada" placeholder="—" readonly></td><td data-complement-remaining>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
+        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal"><input type="hidden" name="invoice_manual_token[]" value=""><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="text" inputmode="decimal" name="amount[]" aria-label="Monto pagado" required disabled></td><td><input type="text" data-complement-installment aria-label="Parcialidad calculada" placeholder="—" readonly></td><td data-complement-remaining>—</td><td data-complement-tax-treatment>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
         const uuid = row.querySelector('[name="invoice_uuid[]"]');
         uuid.addEventListener('paste', () => { row.dataset.pendingManualPaste = 'true'; });
         uuid.addEventListener('input', (event) => {
@@ -4381,40 +4362,26 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     let pendingInvoicesRequest = null;
 
-    const resetPendingInvoicesButton = () => {
-        viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
-        viewPendingInvoices.removeAttribute('aria-busy');
-        viewPendingInvoices.querySelector('span').textContent = 'Ver facturas pendientes';
-    };
-
-    const hidePendingInvoices = (restoreFocus = false) => {
-        if (!pendingInvoicesPanel || !viewPendingInvoices) return;
+    const hidePendingInvoices = () => {
+        if (!pendingInvoicesPanel) return;
         pendingInvoicesRequest?.abort();
         pendingInvoicesRequest = null;
         pendingInvoicesPanel.hidden = true;
-        viewPendingInvoices.setAttribute('aria-expanded', 'false');
-        resetPendingInvoicesButton();
+        pendingInvoicesPanel.removeAttribute('aria-busy');
         pendingInvoicesBody?.replaceChildren();
-        if (restoreFocus) viewPendingInvoices.focus();
     };
 
-    const loadPendingInvoices = async (focusResults = false) => {
+    const loadPendingInvoices = async () => {
         const paymentId = complementForm?.querySelector('[name="payment_id"]')?.value || '';
         const companyId = complementCompany?.value || '';
         const receiverId = complementReceiver?.value || '';
-        if (!paymentId || !companyId || !receiverId || !pendingInvoicesPanel || !pendingInvoicesBody) {
-            showToast('Selecciona una empresa emisora y una clave corta para consultar sus facturas pendientes.');
-            return;
-        }
+        if (!paymentId || !companyId || !receiverId || !pendingInvoicesPanel || !pendingInvoicesBody) return;
 
         pendingInvoicesRequest?.abort();
         const request = new AbortController();
         pendingInvoicesRequest = request;
         pendingInvoicesPanel.hidden = false;
-        viewPendingInvoices.setAttribute('aria-expanded', 'true');
-        viewPendingInvoices.disabled = true;
-        viewPendingInvoices.setAttribute('aria-busy', 'true');
-        viewPendingInvoices.querySelector('span').textContent = 'Consultando…';
+        pendingInvoicesPanel.setAttribute('aria-busy', 'true');
         pendingInvoicesStatus.textContent = 'Consultando facturas pendientes…';
         pendingInvoicesBody.replaceChildren();
         try {
@@ -4435,7 +4402,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             renderPendingInvoices(Array.isArray(result.data.invoices) ? result.data.invoices : []);
             recalculateComplement();
             pendingInvoicesStatus.textContent = 'Consulta actualizada.';
-            if (focusResults) pendingInvoicesPanel.focus({preventScroll: true});
         } catch (error) {
             if (request.signal.aborted) return;
             pendingInvoicesStatus.textContent = error instanceof Error ? error.message : 'No fue posible consultar las facturas pendientes.';
@@ -4443,16 +4409,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         } finally {
             if (pendingInvoicesRequest === request) {
                 pendingInvoicesRequest = null;
-                resetPendingInvoicesButton();
+                pendingInvoicesPanel.removeAttribute('aria-busy');
             }
         }
     };
-
-    viewPendingInvoices?.addEventListener('click', () => loadPendingInvoices(true));
-    closePendingInvoices?.addEventListener('click', () => hidePendingInvoices(true));
-    pendingInvoicesPanel?.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') hidePendingInvoices(true);
-    });
 
     const releaseComplementSourceInvoice = () => {
         const sourceInvoice = complementForm?.querySelector('[name="source_invoice_id"]');
@@ -4485,15 +4445,15 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     complementReceiver?.addEventListener('change', () => {
         releaseComplementSourceInvoice();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
-        if (viewPendingInvoices && complementCompany.value && complementReceiver.value) {
+        if (pendingInvoicesPanel && complementCompany.value && complementReceiver.value) {
             void loadPendingInvoices();
         } else {
             hidePendingInvoices();
         }
     });
-    addComplementInvoice?.addEventListener('click', addComplementLine);
     if (complementLines) {
         addComplementLine();
+        void loadPendingInvoices();
         const prefillUuid = complementForm?.dataset.prefillInvoiceUuid;
         if (prefillUuid && complementReceiver?.value) {
             const row = complementLines.querySelector('tr[data-complement-line]');
@@ -4509,12 +4469,18 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         }
     }
     complementForm?.addEventListener('formdata', ({formData}) => {
-        const amounts = formData.getAll('amount[]');
-        formData.delete('amount[]');
-        amounts.forEach((value) => formData.append('amount[]', readComplementAmount(value).toFixed(2)));
+        const fields = ['invoice_uuid[]', 'invoice_manual_token[]', 'amount[]'];
+        fields.forEach((name) => formData.delete(name));
+        complementLines.querySelectorAll('tr[data-complement-line][data-validated="true"]').forEach((row) => {
+            fields.forEach((name) => {
+                const value = row.querySelector(`[name="${name}"]`).value;
+                formData.append(name, name === 'amount[]' ? readComplementAmount(value).toFixed(2) : value);
+            });
+        });
     });
     complementForm?.addEventListener('submit', (event) => {
-        const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
+        const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'))
+            .filter((row) => row.querySelector('[name="invoice_uuid[]"]').value.trim() !== '');
         if (rows.length === 0 || rows.some((row) => row.dataset.validated !== 'true')) {
             event.preventDefault();
             event.stopImmediatePropagation();

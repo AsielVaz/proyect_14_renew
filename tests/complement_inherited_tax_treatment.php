@@ -29,15 +29,21 @@ assert($method->invoke($repository, ['xml_firmado' => $xml('', '01')]) === 'SV')
 assert($method->invoke($repository, ['xml_firmado' => $xml($transfer('0.160000')
     . '<cfdi:Retenciones><cfdi:Retencion Impuesto="002" Importe="4.00"/></cfdi:Retenciones>')]) === '4');
 assert($method->invoke($repository, ['retencion_transporte' => 'Si']) === '4');
+assert($method->invoke($repository, [
+    'retencion_transporte' => 'Si',
+    'xml_firmado' => $xml($transfer('0.160000')),
+]) === 'T');
 assert($method->invoke($repository, ['id' => 101]) === 'T0');
 assert($method->invoke($repository, ['id' => 102]) === 'SV');
 assert($method->invoke($repository, ['id' => 103]) === 'T');
 
 $interface = file_get_contents(dirname(__DIR__) . '/index.php');
-assert(is_string($interface) && str_contains($interface, 'Tratamiento fiscal heredado'));
+assert(is_string($interface) && str_contains($interface, '<th>Saldo restante</th><th>Tratamiento fiscal</th>'));
+assert(!str_contains($interface, 'id="complementTreatment"'));
+assert(!str_contains($interface, 'id="viewPendingInvoices"') && !str_contains($interface, 'id="addComplementInvoice"'));
 assert(is_string($interface) && str_contains($interface, 'row.dataset.taxTreatment = taxTreatment'));
 assert(is_string($interface) && str_contains($interface, 'Crea complementos separados'));
 assert(is_string($interface) && !str_contains($interface, 'complementClient.value = targetClientId'));
 assert(is_string($interface) && !str_contains($interface, 'complementReceiver.value = targetReceiverId'));
 
-echo "13 comprobaciones de herencia fiscal en complementos superadas.\n";
+echo "16 comprobaciones de herencia fiscal en complementos superadas.\n";

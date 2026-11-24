@@ -540,10 +540,6 @@ final class PaymentComplementRepository
     /** @param array<string, mixed> $invoice */
     private function invoiceTaxTreatment(array $invoice): string
     {
-        if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0) {
-            return '4';
-        }
-
         $xml = trim((string) ($invoice['xml_firmado'] ?? ''));
         if ($xml !== '') {
             $document = new \DOMDocument();
@@ -569,6 +565,10 @@ final class PaymentComplementRepository
                 }
                 return $zeroRate ? 'T0' : 'SV';
             }
+        }
+
+        if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0) {
+            return '4';
         }
 
         $invoiceId = (int) ($invoice['id'] ?? 0);
