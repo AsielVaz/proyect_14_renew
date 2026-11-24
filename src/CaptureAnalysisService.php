@@ -898,7 +898,11 @@ final class CaptureAnalysisService
         $aliases = [
             'date' => ['fecha', 'fecha operacion', 'fecha de operacion', 'fecha movimiento', 'dia'],
             'time' => ['hora', 'hora operacion', 'hora de operacion'],
-            'description' => ['descripcion', 'concepto', 'movimiento', 'tipo', 'operacion'],
+            'description' => ['descripcion', 'movimiento', 'tipo', 'operacion'],
+            // ASP entrega la clave corta en una columna Concepto separada de
+            // Tipo Operación. Se conserva como campo independiente para no
+            // perderla cuando ambas columnas están presentes.
+            'concept' => ['concepto'],
             'detail' => ['detalle', 'concepto spei', 'spei concepto', 'comentario', 'leyenda'],
             'reference' => ['referencia', 'clave rastreo', 'clave de rastreo', 'spei clave rastreo', 'spei referencia'],
             'origin_name' => ['spei cuenta origen nombre', 'cuenta origen nombre', 'nombre ordenante', 'ordenante'],
@@ -945,6 +949,10 @@ final class CaptureAnalysisService
         }
         if ($credit == 0.0 && $debit == 0.0) return null;
         $type = $credit != 0.0 ? 'Deposito' : 'Retiro';
+        $descriptionParts = array_values(array_unique(array_filter(array_map('trim', [
+            (string) ($row[$columns['description'] ?? -1] ?? ''),
+            (string) ($row[$columns['concept'] ?? -1] ?? ''),
+        ]), static fn (string $value): bool => $value !== '')));
         $detailParts = array_values(array_unique(array_filter(array_map('trim', [
             (string) ($row[$columns['detail'] ?? -1] ?? ''),
             (string) ($row[$columns['origin_name'] ?? -1] ?? ''),
@@ -953,7 +961,7 @@ final class CaptureAnalysisService
         return [
             'date' => $date,
             'time' => trim((string) ($row[$columns['time'] ?? -1] ?? '')),
-            'description' => trim((string) ($row[$columns['description'] ?? -1] ?? '')),
+            'description' => implode(' · ', $descriptionParts),
             'detail' => implode(' · ', $detailParts),
             'reference' => trim((string) ($row[$columns['reference'] ?? -1] ?? '')),
             'type' => $type, 'amount' => abs($type === 'Deposito' ? $credit : $debit),
