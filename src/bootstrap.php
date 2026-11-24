@@ -18,6 +18,7 @@ use App\ManualEmailService;
 use App\PdfDocumentService;
 use App\InvoiceEmailService;
 use App\ComplementEmailService;
+use App\LocalComplementStampService;
 use App\XlsxExportService;
 use App\FondeadoraMailboxService;
 use App\GroupRepository;
@@ -341,6 +342,16 @@ function complement_email_service(): ComplementEmailService
 {
     static $service;
     return $service ??= new ComplementEmailService(db(), pdf_document_service());
+}
+
+function local_complement_stamp_service(): LocalComplementStampService
+{
+    static $service;
+    return $service ??= new LocalComplementStampService(
+        db(),
+        pdf_document_service(),
+        APP_ROOT . '/storage/fiscal/complements'
+    );
 }
 
 function dashboard_repository(): DashboardRepository

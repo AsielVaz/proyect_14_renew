@@ -185,6 +185,8 @@ final class ComplementEmailService
         $id = (int) ($complement['id'] ?? 0);
         $uuid = trim((string) ($complement['uuid'] ?? ''));
         if ($id <= 0 || $uuid === '') return null;
+        $stored = (string) ($complement['xml_firmado'] ?? '');
+        if ($this->isXml($stored, $uuid)) return $stored;
         $url = self::XML_BASE_URL . 'XML-complemento-' . rawurlencode((string) $id) . '-' . rawurlencode($uuid) . '.xml';
         if (function_exists('curl_init')) {
             $handle = curl_init($url);
@@ -201,7 +203,6 @@ final class ComplementEmailService
             if (is_string($body) && $status >= 200 && $status < 300 && $this->isXml($body, $uuid)) return $body;
             if ($error !== '') error_log('ComplementEmail XML download: ' . $error);
         }
-        $stored = (string) ($complement['xml_firmado'] ?? '');
         return $this->isXml($stored, $uuid) ? $stored : null;
     }
 

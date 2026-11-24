@@ -2975,47 +2975,6 @@ tbody tr:hover {
     background: var(--color-danger-bg);
 }
 
-.fiscal-treatment-modal {
-    width: min(620px, calc(100vw - 32px));
-}
-
-.fiscal-treatment-options {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    padding: 0 24px 22px;
-}
-
-.fiscal-treatment-options button {
-    display: grid;
-    gap: 3px;
-    padding: 15px;
-    border: 1px solid var(--color-border-control);
-    border-radius: 11px;
-    background: var(--color-surface-subtle);
-    color: var(--color-text);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.fiscal-treatment-options button:hover:not(:disabled),
-.fiscal-treatment-options button:focus:not(:disabled) {
-    border-color: var(--color-primary);
-    outline: 0;
-    background: var(--color-primary-soft);
-}
-
-.fiscal-treatment-options button span {
-    color: var(--color-muted);
-    font-size: 12px;
-}
-
-.fiscal-treatment-options button:disabled {
-    opacity: 0.48;
-    cursor: not-allowed;
-}
-
 .movement-table select {
     min-width: 0;
     padding: 8px 9px;

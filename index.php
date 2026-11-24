@@ -79,12 +79,14 @@ if (isset($_GET['document']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
         if (!$documentId) {
             throw new RuntimeException('El documento solicitado no es válido.');
         }
-        $document = match ((string) $_GET['document']) {
+        $documentType = (string) $_GET['document'];
+        $document = match ($documentType) {
             'invoice_pdf' => pdf_document_service()->invoice((int) $documentId),
             'complement_pdf' => pdf_document_service()->complement((int) $documentId),
+            'complement_xml' => local_complement_stamp_service()->xmlDocument((int) $documentId),
             default => throw new RuntimeException('Tipo de documento no disponible.'),
         };
-        header('Content-Type: application/pdf');
+        header('Content-Type: ' . ($documentType === 'complement_xml' ? 'application/xml; charset=UTF-8' : 'application/pdf'));
         header('Content-Disposition: inline; filename="' . $document['filename'] . '"');
         header('Content-Length: ' . strlen($document['bytes']));
         header('Cache-Control: private, max-age=0, must-revalidate');
@@ -649,7 +651,10 @@ try {
             } elseif ($postAction === 'complement_stamp') {
                 $complementId = (int) ($_POST['id'] ?? 0);
                 $operatorId = current_operator_id();
-                $message = fiscal_document_service()->stampComplement($complementId, (string) ($_POST['treatment'] ?? ''));
+                ignore_user_abort(true);
+                @set_time_limit(0);
+                $stampResult = local_complement_stamp_service()->stamp($complementId, $operatorId);
+                $message = (string) $stampResult['message'];
                 try {
                     $emailResult = complement_email_service()->sendToComplementContact($complementId, $operatorId, true, true);
                     $message .= ' ' . ($emailResult['status'] === 'skipped'
@@ -1611,8 +1616,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php else: ?>
                 <section class="report-intro"><p>Relación fiscal y aplicación del pago a sus facturas PPD.</p><span class="operation-badge"><?= e(trim((string) ($complement['uuid'] ?? '')) !== '' ? 'Timbrado' : 'Pendiente de timbrado') ?></span></section>
                 <section class="panel">
-                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><div class="panel-actions"><?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><button type="button" class="button primary" data-complement-stamp-trigger data-complement-id="<?= e($complement['id']) ?>">Timbrar complemento</button><?php else: ?><button type="button" class="button primary" data-complement-email-trigger data-complement-id="<?= e($complement['id']) ?>" data-complement-folio="<?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?>" data-complement-email="<?= e($complement['cliente_correo'] ?? '') ?>">Enviar a otro correo</button><?php endif; ?><a class="button" href="?complement=list">Volver</a></div></div>
-                    <?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><form method="post" id="complementStamp<?= e($complement['id']) ?>" class="complement-stamp-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($complement['id']) ?>"><input type="hidden" name="treatment" value="<?= e(in_array($complement['cadena'], ['T','T0','SV'], true) ? $complement['cadena'] : 'T') ?>"></form><?php endif; ?>
+                    <div class="panel-heading"><div><p class="eyebrow">Complemento #<?= e($complement['id']) ?></p><h2><?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?></h2><p class="panel-copy"><?= e($complement['uuid'] ?: 'Aún no tiene UUID fiscal') ?></p></div><div class="panel-actions"><?php if (trim((string) ($complement['uuid'] ?? '')) === ''): ?><form method="post" data-confirm="¿Timbrar este complemento con el tratamiento fiscal definido al crearlo?" data-confirm-title="Timbrar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($complement['id']) ?>"><button type="submit" class="button primary">Timbrar complemento</button></form><?php else: ?><button type="button" class="button primary" data-complement-email-trigger data-complement-id="<?= e($complement['id']) ?>" data-complement-folio="<?= e(($complement['serie'] ?? 'P') . ($complement['folio'] ?? '')) ?>" data-complement-email="<?= e($complement['cliente_correo'] ?? '') ?>">Enviar a otro correo</button><?php endif; ?><a class="button" href="?complement=list">Volver</a></div></div>
                     <dl class="complement-detail-grid">
                         <div><dt>Empresa emisora</dt><dd><?= e($complement['empresa'] ?: '—') ?></dd></div><div><dt>Cliente</dt><dd><?= e($complement['cliente'] ?: '—') ?></dd></div>
                         <div><dt>Receptor</dt><dd><?= e($complement['receptor'] ?: '—') ?><small><?= e($complement['rfc'] ?: '') ?></small></dd></div><div><dt>Forma de pago</dt><dd><?= e(trim((string) ($complement['forma_pago'] ?? '—'))) ?></dd></div>
@@ -1636,14 +1640,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <td><span class="movement-cell-main"><?= e($row['cliente'] ?: '—') ?></span><span class="movement-cell-secondary"><?= e($row['rfc'] ?: '') ?> · <?= e($row['receptor'] ?: '') ?></span></td>
                     <td><span class="movement-cell-main"><?= e(trim((string) ($row['forma_pago'] ?? '—'))) ?></span><span class="movement-cell-secondary">Tratamiento <?= e($row['tipo_complemento'] ?: 'T') ?></span></td>
                     <td><?= e(report_value($row['total_factura'], 'money')) ?></td>
-                    <td class="document-stamp-cell"><?php if (!$complementStamped): ?><button type="button" class="button primary compact" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>" aria-label="Timbrar complemento #<?= e($row['id']) ?>">Timbrar</button><?php else: ?><span aria-label="Complemento ya timbrado">—</span><?php endif; ?></td>
+                    <td class="document-stamp-cell"><?php if (!$complementStamped): ?><form method="post" data-confirm="¿Timbrar este complemento con el tratamiento fiscal definido al crearlo?" data-confirm-title="Timbrar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" class="button primary compact" aria-label="Timbrar complemento #<?= e($row['id']) ?>">Timbrar</button></form><?php else: ?><span aria-label="Complemento ya timbrado">—</span><?php endif; ?></td>
                     <td><span class="movement-cell-main"><?= e($complementStamped ? 'Timbrado' : ($row['status'] ?: 'Pendiente')) ?></span><span class="movement-cell-secondary"><?= e($row['uuid'] ?: ($row['status_error'] ?: 'Sin UUID')) ?></span>
                         <div class="record-action-controls">
                             <button type="button" class="record-menu-trigger" data-record-menu-trigger aria-label="Abrir acciones del complemento #<?= e($row['id']) ?>">•••</button>
                             <div class="record-action-source" hidden>
                                 <a data-record-action data-action-label="Ver facturas asociadas" data-action-icon="⌕" href="?complement=detail&amp;id=<?= e($row['id']) ?>">Ver facturas asociadas</a>
                                 <?php if (!$complementStamped): ?>
-                                    <button type="button" data-record-action data-action-label="Timbrar complemento" data-action-icon="✓" data-complement-stamp-trigger data-complement-id="<?= e($row['id']) ?>">Timbrar</button>
+                                    <form method="post" data-confirm="¿Timbrar este complemento con el tratamiento fiscal definido al crearlo?" data-confirm-title="Timbrar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Timbrar complemento" data-action-icon="✓">Timbrar</button></form>
                                     <a data-record-action data-action-label="Vista PDF" data-action-icon="▧" href="?document=complement_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
                                     <form method="post" data-confirm="¿Eliminar este complemento pendiente y todas sus relaciones?" data-confirm-title="Eliminar complemento"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_delete"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><button type="submit" data-record-action data-action-label="Eliminar pendiente" data-action-icon="×" data-action-danger>Eliminar</button></form>
                                 <?php else: ?>
@@ -1651,10 +1655,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                     <button type="button" data-record-action data-action-label="Enviar a otro correo" data-action-icon="mail" data-complement-email-trigger data-complement-id="<?= e($row['id']) ?>" data-complement-folio="<?= e(($row['serie'] ?? 'P') . ($row['folio_interno'] ?? $row['folio'] ?? '')) ?>" data-complement-email="<?= e($row['cliente_correo'] ?? '') ?>">Enviar a otro correo</button>
                                     <button type="button" data-record-action data-action-label="Copiar UUID" data-action-icon="⧉" data-copy-uuid="<?= e($row['uuid']) ?>">Copiar UUID</button>
                                     <a data-record-action data-action-label="Descargar PDF" data-action-icon="▧" href="?document=complement_pdf&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">PDF</a>
-                                    <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="https://ultra.sistema14.com/api/xml/firmados-comp/XML-complemento-<?= e($row['id']) ?>-<?= e(rawurlencode((string) $row['uuid'])) ?>.xml" target="_blank" rel="noopener">XML</a>
+                                    <a data-record-action data-action-label="Descargar XML" data-action-icon="&lt;/&gt;" href="?document=complement_xml&amp;id=<?= e($row['id']) ?>" target="_blank" rel="noopener">XML</a>
                                 <?php endif; ?>
                             </div>
-                            <?php if (!$complementStamped): ?><form method="post" id="complementStamp<?= e($row['id']) ?>" class="complement-stamp-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_stamp"><input type="hidden" name="id" value="<?= e($row['id']) ?>"><input type="hidden" name="treatment" value="<?= e(in_array($row['tipo_complemento'], ['T','T0','SV'], true) ? $row['tipo_complemento'] : 'T') ?>"></form><?php endif; ?>
                         </div>
                     </td>
                 </tr><?php endforeach; ?><?php if ($complementResult['rows'] === []): ?><tr><td colspan="7" class="empty">No hay complementos para mostrar.</td></tr><?php endif; ?></tbody></table></div>
@@ -2802,20 +2805,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
 <div class="record-context-menu" id="recordContextMenu" role="menu" aria-label="Acciones del registro" hidden></div>
 
-<div class="glass-modal-backdrop" id="complementStampModal" hidden>
-    <section class="glass-modal fiscal-treatment-modal" role="dialog" aria-modal="true" aria-labelledby="complementStampTitle">
-        <div class="glass-modal-icon">✓</div>
-        <div class="glass-modal-copy"><p class="eyebrow">Emisión fiscal</p><h2 id="complementStampTitle">Timbrar complemento</h2><p>Selecciona el tratamiento con el que se emitirá el CFDI de pago.</p></div>
-        <div class="fiscal-treatment-options">
-            <button type="button" data-stamp-treatment="T"><strong>Típico</strong><span>IVA 16%</span></button>
-            <button type="button" data-stamp-treatment="T0"><strong>Tasa 0</strong><span>IVA 0%</span></button>
-            <button type="button" data-stamp-treatment="SV"><strong>Sin IVA</strong><span>Operación no gravada</span></button>
-            <button type="button" disabled title="Este tratamiento fiscal no está disponible para timbrado"><strong>Retención 4%</strong><span>No disponible</span></button>
-        </div>
-        <div class="glass-modal-actions"><button type="button" class="button" id="complementStampCancel">Cancelar</button></div>
-    </section>
-</div>
-
 <div class="glass-modal-backdrop invoice-email-modal" id="invoiceEmailModal" hidden>
     <section class="glass-modal invoice-email-dialog" role="dialog" aria-modal="true" aria-labelledby="invoiceEmailTitle" aria-describedby="invoiceEmailDescription">
         <div class="glass-modal-icon invoice-email-icon" aria-hidden="true">@</div>
@@ -2910,7 +2899,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const thirdPartyOperations = {
         invoice_stamp: ['Timbrando factura', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
         invoice_resend: ['Reenviando factura', 'Obteniendo el PDF y el XML para enviarlos al correo del cliente…'],
-        complement_stamp: ['Timbrando complemento', 'Conectando con Ultra Sistema 14. Esto puede tardar unos segundos…'],
+        complement_stamp: ['Timbrando complemento', 'Construyendo el CFDI, conectando con Iofacturo y guardando PDF/XML localmente…'],
         complement_resend: ['Reenviando complemento', 'Generando el PDF, adjuntando el XML y esperando la respuesta de Mailchimp…'],
     };
 
@@ -3247,38 +3236,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && complementEmailModal && !complementEmailModal.hidden) closeComplementEmailModal();
     });
-
-    const stampModal = document.getElementById('complementStampModal');
-    const stampCancel = document.getElementById('complementStampCancel');
-    let pendingComplementStamp = null;
-    const closeStampModal = () => {
-        stampModal.classList.remove('is-visible');
-        window.setTimeout(() => { stampModal.hidden = true; }, 220);
-        pendingComplementStamp = null;
-    };
-    document.querySelectorAll('[data-complement-stamp-trigger]').forEach((button) => {
-        button.addEventListener('click', () => {
-            const form = document.getElementById(`complementStamp${button.dataset.complementId}`);
-            if (!form) return;
-            pendingComplementStamp = form;
-            stampModal.hidden = false;
-            window.requestAnimationFrame(() => stampModal.classList.add('is-visible'));
-            stampModal.querySelector(`[data-stamp-treatment="${form.querySelector('[name="treatment"]').value}"]`)?.focus();
-        });
-    });
-    stampModal.querySelectorAll('[data-stamp-treatment]').forEach((button) => {
-        button.addEventListener('click', () => {
-            if (!pendingComplementStamp) return;
-            const form = pendingComplementStamp;
-            form.querySelector('[name="treatment"]').value = button.dataset.stampTreatment;
-            pendingComplementStamp = null;
-            stampModal.classList.remove('is-visible');
-            stampModal.hidden = true;
-            form.requestSubmit();
-        });
-    });
-    stampCancel.addEventListener('click', closeStampModal);
-    stampModal.addEventListener('click', (event) => { if (event.target === stampModal) closeStampModal(); });
 
     const invoiceCompany = document.getElementById('invoiceCompany');
     const invoiceClient = document.getElementById('invoiceClient');
