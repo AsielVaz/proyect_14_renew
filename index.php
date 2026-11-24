@@ -1627,7 +1627,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <div class="complement-uuid-control"><input type="text" id="complementManualUuid" maxlength="50" placeholder="UUID fiscal" aria-label="UUID fiscal"><button type="button" class="button" id="complementLookupUuid">Consultar</button></div>
                     </details>
                     <div class="table-wrap"><table class="invoice-lines complement-lines"><thead><tr><th>UUID / factura</th><th>Saldo anterior</th><th>Monto pagado</th><th>Parcialidad</th><th>Saldo restante</th><th>Tratamiento fiscal</th><th></th></tr></thead><tbody id="complementLines"></tbody></table></div>
-                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar complemento</button></div>
+                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary" id="saveComplement"<?= $paymentComplementContext ? ' disabled' : '' ?>>Guardar complemento</button></div>
                 </section>
             </form>
         <?php elseif ($complementView === 'detail'): ?>
@@ -4020,6 +4020,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const complementReceiver = document.getElementById('complementReceiver');
     const complementLines = document.getElementById('complementLines');
     const complementForm = document.getElementById('complementForm');
+    const saveComplement = document.getElementById('saveComplement');
     const pendingInvoicesPanel = document.getElementById('pendingInvoicesPanel');
     const pendingInvoicesBody = document.getElementById('pendingInvoicesBody');
     const pendingInvoicesStatus = document.getElementById('pendingInvoicesStatus');
@@ -4080,6 +4081,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             .reduce((sum, row) => sum + complementAmountCents(row.querySelector('[name="amount[]"]')), 0);
     };
 
+    const complementCoversPayment = (appliedCents) =>
+        appliedCents > 0 && appliedCents === Math.round(complementPaymentMaximum * 100);
+
     const complementLineLimitCents = (row, appliedElsewhere) => {
         const balance = Math.round((Number(row.dataset.balance) || 0) * 100);
         if (!complementFromPayment) return Math.max(0, balance);
@@ -4127,6 +4131,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const total = appliedCents / 100;
         document.getElementById('complementCount').textContent = String(rows.filter((row) => row.dataset.validated === 'true').length);
         document.getElementById('complementTotal').textContent = invoiceMoney.format(total);
+        if (complementFromPayment && saveComplement) {
+            saveComplement.disabled = !complementCoversPayment(appliedCents);
+        }
         if (complementPaymentRemaining && complementFromPayment) {
             const remaining = Math.max(0, complementPaymentMaximum - total);
             complementPaymentRemaining.textContent = invoiceMoney.format(remaining);
@@ -4469,10 +4476,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             showToast(`Captura un monto válido entre 0.01 y ${complementAmountFormat.format(balance)}.`);
             return;
         }
-        if (complementFromPayment && complementTotalCents() > Math.round(complementPaymentMaximum * 100)) {
+        if (complementFromPayment && !complementCoversPayment(complementTotalCents())) {
             event.preventDefault();
             event.stopImmediatePropagation();
-            showToast(`El total excede el máximo disponible de ${invoiceMoney.format(complementPaymentMaximum)}.`);
+            showToast(`Aplica el monto completo del pago, ${invoiceMoney.format(complementPaymentMaximum)}, para guardar el complemento.`);
         }
     });
 
