@@ -21,7 +21,8 @@ $pdo->exec('CREATE TABLE claves_cortas (
 $pdo->exec("INSERT INTO claves_cortas VALUES
     (11, 1, 'VIVA', 'Razón con documentos', 'RFC010101AAA', '01000', '601', 5),
     (12, 1, 'CERO', 'Razón sin documentos', 'RFC010101AAB', '01000', '601', 0),
-    (21, 2, 'NULL', 'Razón sin cálculo', 'RFC010101AAC', '01000', '601', NULL)");
+    (21, 2, 'NULL', 'Razón sin cálculo', 'RFC010101AAC', '01000', '601', NULL),
+    (31, 3, 'MISMO-RFC', 'Mismo RFC en otra cartera', 'RFC010101AAA', '01000', '601', 1)");
 $pdo->exec('CREATE TABLE facturas (
     id INTEGER PRIMARY KEY, id_clave_corta TEXT, razon INTEGER, metodo_pago INTEGER,
     uuid TEXT, status TEXT, total_iva REAL
@@ -32,14 +33,15 @@ $pdo->exec('CREATE TABLE facturar_rel_complementos (
 $pdo->exec("INSERT INTO facturas VALUES
     (101, '11', 4, 2, 'UUID-VIVO', 'Timbrada', 100.00),
     (102, '11', 5, 2, 'UUID-OTRA-EMPRESA', 'Timbrada', 200.00),
-    (103, '12', 4, 2, 'UUID-LIQUIDADO', 'Timbrada', 50.00)");
+    (103, '12', 4, 2, 'UUID-LIQUIDADO', 'Timbrada', 50.00),
+    (104, '31', 4, 2, 'UUID-MISMO-RFC-OTRA-CARTERA', 'Timbrada', 75.00)");
 $pdo->exec('INSERT INTO facturar_rel_complementos (id_factura, monto) VALUES (103, 50.00)');
 
 $repository = new PaymentComplementRepository($pdo);
 $method = (new ReflectionClass($repository))->getMethod('pendingInvoiceCount');
 assert($method->invoke($repository, 1) === 5);
 assert($method->invoke($repository, 2) === 0);
-assert($method->invoke($repository, 3) === 0);
+assert($method->invoke($repository, 3) === 1);
 assert($method->invoke($repository, 999) === 0);
 
 $receivers = $repository->receivers(1);
@@ -49,9 +51,9 @@ foreach ($receivers as $receiver) $receiversById[(int) $receiver['id']] = $recei
 assert(($receiversById[11]['has_live_documents'] ?? false) === true);
 assert(($receiversById[12]['has_live_documents'] ?? true) === false);
 
-$receiverValidation = (new ReflectionClass($repository))->getMethod('assertReceiverBelongsToClient');
-$receiverValidation->invoke($repository, 1, 11);
-$receiverValidation->invoke($repository, 1, 12);
+$receiverValidation = (new ReflectionClass($repository))->getMethod('receiverRfcForClient');
+assert($receiverValidation->invoke($repository, 1, 11) === 'RFC010101AAA');
+assert($receiverValidation->invoke($repository, 1, 12) === 'RFC010101AAB');
 $blocked = false;
 try {
     $receiverValidation->invoke($repository, 1, 21);
@@ -63,9 +65,11 @@ assert($blocked);
 $companyReceivers = $repository->receivers(1, 4);
 $companyReceiversById = [];
 foreach ($companyReceivers as $receiver) $companyReceiversById[(int) $receiver['id']] = $receiver;
-assert(($companyReceiversById[11]['documentos_vivos'] ?? 0) === 1);
+assert(($companyReceiversById[11]['documentos_vivos'] ?? 0) === 2);
 assert(($companyReceiversById[11]['documentos_vivos_totales'] ?? 0) === 5);
 assert(($companyReceiversById[12]['documentos_vivos'] ?? -1) === 0);
+$repositorySource = file_get_contents(dirname(__DIR__) . '/src/PaymentComplementRepository.php');
+assert(is_string($repositorySource) && str_contains($repositorySource, 'UPPER(TRIM(cc.rfc)) = :receiver_rfc'));
 
 $movementSource = file_get_contents(dirname(__DIR__) . '/src/MovementRepository.php');
 $indexSource = file_get_contents(dirname(__DIR__) . '/index.php');
@@ -74,6 +78,6 @@ assert(is_string($movementSource) && str_contains($movementSource, 'SUM(COALESCE
 assert(is_string($movementSource) && !str_contains($movementSource, 'FROM clientes_saldo_script balances'));
 assert(is_string($indexSource) && !str_contains($indexSource, '&& $movementClientHasPendingInvoices'));
 assert(is_string($indexSource) && str_contains($indexSource, 'data-action-disabled'));
-assert(is_string($indexSource) && str_contains($indexSource, 'Sin documentos propios'));
+assert(is_string($indexSource) && str_contains($indexSource, 'Sin documentos para este RFC'));
 
-echo "15 comprobaciones de disponibilidad documental para complementos superadas.\n";
+echo "17 comprobaciones de disponibilidad documental para complementos superadas.\n";

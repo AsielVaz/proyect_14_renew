@@ -103,8 +103,10 @@ final class PaymentComplementRepository
                        COALESCE(cc.documentos_vivos, 0) AS documentos_vivos_totales
                 FROM claves_cortas cc
                 LEFT JOIN (
-                    SELECT TRIM(f.id_clave_corta) AS id_clave_corta, COUNT(*) AS documentos_vivos
+                    SELECT UPPER(TRIM(invoice_cc.rfc)) AS receiver_rfc, COUNT(*) AS documentos_vivos
                     FROM facturas f
+                    INNER JOIN claves_cortas invoice_cc
+                        ON CAST(invoice_cc.id AS CHAR) = TRIM(f.id_clave_corta)
                     LEFT JOIN (
                         SELECT id_factura, SUM(monto) AS total_pagado
                         FROM facturar_rel_complementos GROUP BY id_factura
@@ -114,9 +116,10 @@ final class PaymentComplementRepository
                       AND COALESCE(f.uuid, '') <> ''
                       AND COALESCE(f.status, '') <> 'Cancelado'
                       AND TRIM(COALESCE(f.id_clave_corta, '')) <> ''
+                      AND TRIM(COALESCE(invoice_cc.rfc, '')) <> ''
                       AND f.total_iva - COALESCE(pagos_factura.total_pagado, 0) > 0.005
-                    GROUP BY TRIM(f.id_clave_corta)
-                ) vivos ON vivos.id_clave_corta = CAST(cc.id AS CHAR)
+                    GROUP BY UPPER(TRIM(invoice_cc.rfc))
+                ) vivos ON vivos.receiver_rfc = UPPER(TRIM(cc.rfc))
                 WHERE cc.id_cliente = :client
                 ORDER BY cc.razon_social
                 SQL);
@@ -133,7 +136,7 @@ final class PaymentComplementRepository
             $receiver['documentos_vivos'] = max(0, (int) ($receiver['documentos_vivos'] ?? 0));
             $receiver['documentos_vivos_totales'] = max(0, (int) ($receiver['documentos_vivos_totales'] ?? 0));
             $receiver['has_live_documents'] = $receiver['documentos_vivos'] > 0;
-            $receiver['documents_scope'] = $companyId > 0 ? 'company' : 'all_companies';
+            $receiver['documents_scope'] = $companyId > 0 ? 'company_rfc' : 'all_companies';
         }
         unset($receiver);
         return $receivers;
@@ -236,7 +239,7 @@ final class PaymentComplementRepository
 
         $payment = $this->paymentPrefill($paymentId);
         $this->assertReference('empresas', $companyId, 'empresa emisora');
-        $this->assertReceiverBelongsToClient((int) $payment['client_id'], $receiverId);
+        $receiverRfc = $this->receiverRfcForClient((int) $payment['client_id'], $receiverId);
         $movementAmount = (float) $payment['movement_amount'];
 
         $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
@@ -249,13 +252,14 @@ final class PaymentComplementRepository
                 COALESCE(rel.ultima_parcialidad, 0) + 1 AS siguiente_parcialidad
             FROM facturas f
             INNER JOIN clientes c ON c.id = f.nombre
-            INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta
+            INNER JOIN claves_cortas cc ON CAST(cc.id AS CHAR) = TRIM(f.id_clave_corta)
             LEFT JOIN (
                 SELECT id_factura, SUM(monto) AS pagado, MAX(num_pago) AS ultima_parcialidad
                 FROM facturar_rel_complementos
                 GROUP BY id_factura
             ) rel ON rel.id_factura = f.id
             WHERE f.razon = :company
+              AND UPPER(TRIM(cc.rfc)) = :receiver_rfc
               AND f.metodo_pago = 2
               AND COALESCE(f.uuid, '') <> ''
               AND COALESCE(f.status, '') <> 'Cancelado'
@@ -264,6 +268,7 @@ final class PaymentComplementRepository
             ORDER BY f.fecha_timbrado ASC, f.id ASC");
         $query->execute([
             'company' => $companyId,
+            'receiver_rfc' => $receiverRfc,
             'movement_amount' => $movementAmount,
         ]);
         $invoices = $query->fetchAll();
@@ -370,7 +375,7 @@ final class PaymentComplementRepository
             $this->assertReference('clientes', $clientId, 'cliente');
             $this->assertReference('empresas', $companyId, 'empresa emisora');
             $this->assertReference('formas_pago', $formId, 'forma de pago');
-            $this->assertReceiverBelongsToClient($clientId, $receiverId);
+            $this->receiverRfcForClient($clientId, $receiverId);
             $paymentMaximum = null;
             if ($paymentId > 0) {
                 $payment = $this->pdo->prepare("SELECT p.id, p.tipo_movimiento, p.id_factura, p.id_factura_res,
@@ -587,14 +592,20 @@ final class PaymentComplementRepository
         return $subtotal > 0 && $total > $subtotal + 0.005 ? 'T' : 'SV';
     }
 
-    private function assertReceiverBelongsToClient(int $clientId, int $receiverId): void
+    private function receiverRfcForClient(int $clientId, int $receiverId): string
     {
-        $query = $this->pdo->prepare('SELECT id FROM claves_cortas
+        $query = $this->pdo->prepare('SELECT rfc FROM claves_cortas
             WHERE id = :id AND id_cliente = :client LIMIT 1');
         $query->execute(['id' => $receiverId, 'client' => $clientId]);
-        if (!$query->fetchColumn()) {
+        $rfc = $query->fetchColumn();
+        if ($rfc === false) {
             throw new RuntimeException('La razón social no pertenece al cliente seleccionado.');
         }
+        $rfc = strtoupper(trim((string) $rfc));
+        if ($rfc === '') {
+            throw new RuntimeException('La clave corta seleccionada no tiene un RFC válido para buscar sus facturas.');
+        }
+        return $rfc;
     }
 
     public function deletePending(int $id): void
