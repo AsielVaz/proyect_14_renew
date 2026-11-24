@@ -3121,32 +3121,56 @@ tbody tr:hover {
 
 .search-select-options {
     display: grid;
+    grid-auto-rows: max-content;
+    align-content: start;
+    gap: 3px;
     max-height: 260px;
+    padding: 2px 3px;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
 
+.search-select-group {
+    margin: 8px 7px 3px;
+    padding: 7px 8px 6px;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-muted);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.35;
+    letter-spacing: 0.055em;
+    overflow-wrap: anywhere;
+    text-transform: uppercase;
+}
+
+.search-select-group:first-child {
+    margin-top: 2px;
+}
+
 .search-select-option {
     display: grid;
-    gap: 2px;
-    min-height: 40px;
-    padding: 9px 10px;
+    align-content: start;
+    width: 100%;
+    min-height: 44px;
+    height: auto;
+    padding: 10px 11px;
     border: 0;
     border-radius: 8px;
     background: transparent;
     color: var(--color-text-secondary);
     font: inherit;
     font-size: 13px;
+    line-height: 1.4;
     text-align: left;
+    white-space: normal;
     cursor: pointer;
 }
 
-.search-select-option small {
-    color: var(--color-muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+.search-select-option > span {
+    display: block;
+    min-width: 0;
+    line-height: inherit;
+    overflow-wrap: anywhere;
 }
 
 .search-select-option:hover,
@@ -3159,6 +3183,14 @@ tbody tr:hover {
 
 .search-select-option[aria-selected="true"] {
     font-weight: 750;
+}
+
+.search-select-option:disabled,
+.search-select-option[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.58;
+    background: #f5f3f1;
+    color: var(--color-muted);
 }
 
 .search-select-status {

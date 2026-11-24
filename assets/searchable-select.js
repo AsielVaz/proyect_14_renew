@@ -124,34 +124,41 @@
 
             const render = () => {
                 const term = normalize(search.value);
-                const options = optionData(select).filter((option) => !option.disabled && option.search.includes(term));
+                const options = optionData(select).filter((option) => option.search.includes(term));
                 list.replaceChildren();
+                let currentGroup = null;
                 options.slice(0, limit).forEach((option) => {
+                    if (option.group && option.group !== currentGroup) {
+                        const group = document.createElement('div');
+                        group.className = 'search-select-group';
+                        group.textContent = option.group;
+                        list.appendChild(group);
+                    }
+                    currentGroup = option.group;
                     const item = document.createElement('button');
                     item.type = 'button';
                     item.className = 'search-select-option';
                     item.setAttribute('role', 'option');
                     item.setAttribute('aria-selected', String(select.selectedIndex === option.index));
-                    if (option.group) {
-                        const group = document.createElement('small');
-                        group.textContent = option.group;
-                        const label = document.createElement('span');
-                        label.textContent = option.label;
-                        item.append(group, label);
-                    } else {
-                        item.textContent = option.label;
+                    item.disabled = option.disabled;
+                    item.setAttribute('aria-disabled', String(option.disabled));
+                    const label = document.createElement('span');
+                    label.textContent = option.label;
+                    item.appendChild(label);
+                    if (!option.disabled) {
+                        item.addEventListener('click', () => {
+                            select.selectedIndex = option.index;
+                            select.dispatchEvent(new Event('change', {bubbles: true}));
+                            sync();
+                            close({restoreFocus: true});
+                        });
                     }
-                    item.addEventListener('click', () => {
-                        select.selectedIndex = option.index;
-                        select.dispatchEvent(new Event('change', {bubbles: true}));
-                        sync();
-                        close({restoreFocus: true});
-                    });
                     list.appendChild(item);
                 });
+                const available = options.filter((option) => !option.disabled).length;
                 status.textContent = options.length === 0
                     ? 'No se encontraron opciones con ese criterio.'
-                    : `${options.length} opción${options.length === 1 ? '' : 'es'} encontrada${options.length === 1 ? '' : 's'}${options.length > limit ? ` · mostrando las primeras ${limit}` : ''}`;
+                    : `${options.length} opción${options.length === 1 ? '' : 'es'} encontrada${options.length === 1 ? '' : 's'} · ${available} disponible${available === 1 ? '' : 's'}${options.length > limit ? ` · mostrando las primeras ${limit}` : ''}`;
                 if (term === '') list.querySelector('[aria-selected="true"]')?.scrollIntoView({block: 'nearest'});
             };
 
@@ -160,15 +167,15 @@
                 if (event.key === 'Escape') close({restoreFocus: true});
                 if (event.key === 'Enter') {
                     event.preventDefault();
-                    list.querySelector('.search-select-option')?.click();
+                    list.querySelector('.search-select-option:not(:disabled)')?.click();
                 }
                 if (event.key === 'ArrowDown') {
                     event.preventDefault();
-                    list.querySelector('.search-select-option')?.focus();
+                    list.querySelector('.search-select-option:not(:disabled)')?.focus();
                 }
             });
             list.addEventListener('keydown', (event) => {
-                const items = Array.from(list.querySelectorAll('.search-select-option'));
+                const items = Array.from(list.querySelectorAll('.search-select-option:not(:disabled)'));
                 const current = items.indexOf(document.activeElement);
                 if (event.key === 'ArrowDown') {
                     event.preventDefault();
