@@ -4027,6 +4027,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const complementTreatment = document.getElementById('complementTreatment');
     const complementTreatmentValue = document.getElementById('complementTreatmentValue');
     const complementTreatmentHelp = document.getElementById('complementTreatmentHelp');
+    const complementFromPayment = complementForm?.hasAttribute('data-prefill-payment-maximum') ?? false;
     let complementPaymentMaximum = Number(complementForm?.dataset.prefillPaymentMaximum || 0);
     const complementPaymentRemaining = document.querySelector('[data-complement-payment-remaining]');
     const complementPaymentMaximumValue = document.querySelector('[data-complement-payment-maximum-value]');
@@ -4060,14 +4061,57 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 
     const readComplementAmount = (value) => {
         const decimal = value.trim().replaceAll(',', '');
-        return /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(decimal) ? Number(decimal) : NaN;
+        return /^-?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(decimal) ? Number(decimal) : NaN;
     };
 
-    const complementTotalAmount = (excludedRow = null) => {
+    const formatComplementAmountInput = (event) => {
+        const input = event.currentTarget;
+        const {value, selectionStart} = input;
+        const decimal = value.replaceAll(',', '');
+        if (event.isComposing || !/^-?\d*(?:\.\d*)?$/.test(decimal)) return;
+
+        const [integer, fraction] = decimal.split('.');
+        const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        const formatted = fraction === undefined ? grouped : `${grouped}.${fraction.slice(0, 2)}`;
+        if (formatted === value) return;
+
+        const beforeCaret = value.slice(0, selectionStart);
+        let remaining = beforeCaret.replaceAll(',', '').length;
+        let caret = 0;
+        while (remaining > 0 && caret < formatted.length) {
+            if (formatted[caret++] !== ',') remaining--;
+        }
+        if (formatted[caret] === ',' && (beforeCaret.endsWith(',') || event.inputType === 'deleteContentForward')) {
+            caret++;
+        }
+        input.value = formatted;
+        input.setSelectionRange(caret, caret);
+    };
+
+    const complementAmountCents = (input) => {
+        const amount = readComplementAmount(input.value);
+        return Number.isNaN(amount) ? 0 : Math.round(amount * 100);
+    };
+
+    const complementTotalCents = (excludedRow = null) => {
         if (!complementLines) return 0;
         return Array.from(complementLines.querySelectorAll('tr[data-complement-line]'))
             .filter((row) => row !== excludedRow)
-            .reduce((sum, row) => sum + (readComplementAmount(row.querySelector('[name="amount[]"]').value) || 0), 0);
+            .reduce((sum, row) => sum + complementAmountCents(row.querySelector('[name="amount[]"]')), 0);
+    };
+
+    const complementLineLimitCents = (row, appliedElsewhere) => {
+        const balance = Math.round((Number(row.dataset.balance) || 0) * 100);
+        if (!complementFromPayment) return Math.max(0, balance);
+        const available = Math.round(complementPaymentMaximum * 100) - appliedElsewhere;
+        return Math.max(0, Math.min(balance, available));
+    };
+
+    const limitComplementAmount = (row, input, appliedElsewhere) => {
+        const amount = complementAmountCents(input);
+        const limited = Math.max(0, Math.min(amount, complementLineLimitCents(row, appliedElsewhere)));
+        if (limited !== amount) input.value = complementAmountFormat.format(limited / 100);
+        return limited;
     };
 
     const syncPendingInvoiceButtons = () => {
@@ -4075,8 +4119,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const selected = new Set(Array.from(complementLines.querySelectorAll('tr[data-complement-line]'))
             .filter((row) => row.dataset.validated === 'true')
             .map((row) => row.querySelector('[name="invoice_uuid[]"]').value.trim().toUpperCase()).filter(Boolean));
-        const noCapacity = complementPaymentMaximum > 0
-            && complementTotalAmount() >= complementPaymentMaximum - 0.001;
+        const noCapacity = complementFromPayment
+            && complementTotalCents() >= Math.round(complementPaymentMaximum * 100);
         pendingInvoicesBody.querySelectorAll('[data-pending-invoice-add]').forEach((button) => {
             const added = selected.has((button.dataset.pendingInvoiceUuid || '').toUpperCase());
             const applying = button.dataset.applying === 'true';
@@ -4092,19 +4136,22 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const recalculateComplement = () => {
         if (!complementLines) return;
         const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
-        const total = complementTotalAmount();
+        let appliedCents = 0;
+        rows.forEach((row) => {
+            const input = row.querySelector('[name="amount[]"]');
+            const amount = limitComplementAmount(row, input, appliedCents);
+            appliedCents += amount;
+            const balance = Math.round((Number(row.dataset.balance) || 0) * 100);
+            row.querySelector('[data-complement-remaining]').textContent = invoiceMoney.format((balance - amount) / 100);
+        });
+        const total = appliedCents / 100;
         document.getElementById('complementCount').textContent = String(rows.filter((row) => row.dataset.validated === 'true').length);
         document.getElementById('complementTotal').textContent = invoiceMoney.format(total);
-        if (complementPaymentRemaining && complementPaymentMaximum > 0) {
+        if (complementPaymentRemaining && complementFromPayment) {
             const remaining = Math.max(0, complementPaymentMaximum - total);
             complementPaymentRemaining.textContent = invoiceMoney.format(remaining);
             complementPaymentRemaining.classList.toggle('is-exceeded', total > complementPaymentMaximum + 0.001);
         }
-        rows.forEach((row) => {
-            const balance = Number(row.dataset.balance) || 0;
-            const amount = readComplementAmount(row.querySelector('[name="amount[]"]').value) || 0;
-            row.querySelector('[data-complement-remaining]').textContent = invoiceMoney.format(Math.max(0, balance - amount));
-        });
         syncComplementTreatment();
         syncPendingInvoiceButtons();
     };
@@ -4182,10 +4229,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             row.querySelector('[data-complement-balance]').textContent = invoiceMoney.format(Number(invoice.saldo));
             const amount = row.querySelector('[name="amount[]"]');
             amount.disabled = false;
-            const movementCapacity = complementPaymentMaximum > 0
-                ? Math.max(0, complementPaymentMaximum - complementTotalAmount(row))
-                : Number(invoice.saldo);
-            const maximumForLine = Math.min(Number(invoice.saldo), movementCapacity);
+            const maximumForLine = complementLineLimitCents(row, complementTotalCents(row)) / 100;
             if (maximumForLine <= 0) throw new Error('El monto máximo del movimiento ya fue aplicado en otras facturas.');
             amount.value = complementAmountFormat.format(maximumForLine);
             row.querySelector('[data-complement-installment]').value = String(invoice.siguiente_parcialidad || 1);
@@ -4219,7 +4263,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         });
         row.querySelector('[data-complement-lookup]').addEventListener('click', () => lookupComplementInvoice(row));
         const amount = row.querySelector('[name="amount[]"]');
-        amount.addEventListener('input', recalculateComplement);
+        amount.addEventListener('input', (event) => {
+            if (event.isComposing) return;
+            formatComplementAmountInput(event);
+            limitComplementAmount(row, amount, complementTotalCents(row));
+            recalculateComplement();
+        });
         amount.addEventListener('blur', () => {
             const value = readComplementAmount(amount.value);
             if (Number.isFinite(value)) amount.value = complementAmountFormat.format(value);
@@ -4380,7 +4429,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             const result = await response.json().catch(() => null);
             if (request.signal.aborted) return;
             if (!response.ok || !result?.ok) throw new Error(result?.message || 'No fue posible consultar las facturas pendientes.');
-            complementPaymentMaximum = Number(result.data.maximum) || complementPaymentMaximum;
+            const updatedMaximum = Number(result.data.maximum);
+            if (Number.isFinite(updatedMaximum)) complementPaymentMaximum = Math.max(0, updatedMaximum);
             if (complementPaymentMaximumValue) complementPaymentMaximumValue.value = invoiceMoney.format(complementPaymentMaximum);
             renderPendingInvoices(Array.isArray(result.data.invoices) ? result.data.invoices : []);
             recalculateComplement();
@@ -4482,7 +4532,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             showToast(`Captura un monto válido entre 0.01 y ${complementAmountFormat.format(balance)}.`);
             return;
         }
-        if (complementPaymentMaximum > 0 && complementTotalAmount() > complementPaymentMaximum + 0.001) {
+        if (complementFromPayment && complementTotalCents() > Math.round(complementPaymentMaximum * 100)) {
             event.preventDefault();
             event.stopImmediatePropagation();
             showToast(`El total excede el máximo disponible de ${invoiceMoney.format(complementPaymentMaximum)}.`);
