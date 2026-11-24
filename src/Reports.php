@@ -105,7 +105,7 @@ final class Reports
             ],
             'banking' => [
                 'label' => 'Banking',
-                'description' => 'Distribución real del periodo contra el porcentaje sugerido por proveedor.',
+                'description' => 'Registros del periodo con un porcentaje real fuera del rango aceptable por proveedor.',
                 'dateFilter' => true,
                 'columns' => [
                     'empresa_origen' => 'Empresa', 'proveedor' => 'Proveedor',

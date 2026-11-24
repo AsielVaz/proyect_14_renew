@@ -264,8 +264,7 @@ final class ReportRepository
                        ROUND(banking_rows.porcentaje_real, 2) AS porcentaje_real,
                        banking_rows.porcentaje_sugerido,
                        CONCAT(ROUND(banking_rows.rango_inferior, 2), '% - ', ROUND(banking_rows.rango_superior, 2), '%') AS rango,
-                       CASE WHEN banking_rows.porcentaje_real BETWEEN banking_rows.rango_inferior AND banking_rows.rango_superior
-                            THEN 'Dentro de rango' ELSE 'Fuera de rango' END AS estado
+                       'Fuera de rango' AS estado
                 FROM (
                     SELECT daily.empresa_origen, daily.proveedor, daily.total, daily.porcentaje_sugerido,
                            daily.total / NULLIF(SUM(daily.total) OVER (PARTITION BY daily.empresa_origen), 0) * 100 AS porcentaje_real,
@@ -283,7 +282,8 @@ final class ReportRepository
                           AND f.razon <> 132 AND provider.comodin = 0 AND origin.id <> 132
                         GROUP BY origin.razon, provider.razon, p14.porcentaje_sugerido
                     ) daily
-                ) banking_rows";
+                ) banking_rows
+                WHERE (banking_rows.porcentaje_real BETWEEN banking_rows.rango_inferior AND banking_rows.rango_superior) IS NOT TRUE";
     }
 
     private function transform(string $key, array $rows): array
