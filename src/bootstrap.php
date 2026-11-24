@@ -341,7 +341,11 @@ function invoice_email_service(): InvoiceEmailService
 function complement_email_service(): ComplementEmailService
 {
     static $service;
-    return $service ??= new ComplementEmailService(db(), pdf_document_service());
+    return $service ??= new ComplementEmailService(
+        db(),
+        pdf_document_service(),
+        APP_ROOT . '/storage/fiscal/complements'
+    );
 }
 
 function local_complement_stamp_service(): LocalComplementStampService

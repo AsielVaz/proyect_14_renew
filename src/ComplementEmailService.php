@@ -18,6 +18,7 @@ final class ComplementEmailService
     public function __construct(
         private readonly PDO $pdo,
         private readonly PdfDocumentService $documents,
+        private readonly ?string $xmlStorageRoot = null,
     ) {
     }
 
@@ -185,6 +186,14 @@ final class ComplementEmailService
         $id = (int) ($complement['id'] ?? 0);
         $uuid = trim((string) ($complement['uuid'] ?? ''));
         if ($id <= 0 || $uuid === '') return null;
+        $storageRoot = $this->xmlStorageRoot ?? dirname(__DIR__) . '/storage/fiscal/complements';
+        $localPath = rtrim(str_replace('\\', '/', $storageRoot), '/') . '/' . $id
+            . '/XML-complemento-' . $id . '-' . $this->safeName($uuid) . '.xml';
+        if (is_file($localPath) && is_readable($localPath)) {
+            $local = file_get_contents($localPath);
+            if (is_string($local) && $this->isXml($local, $uuid)) return $local;
+            error_log('ComplementEmail local XML is invalid: ' . $localPath);
+        }
         $stored = (string) ($complement['xml_firmado'] ?? '');
         if ($this->isXml($stored, $uuid)) return $stored;
         $url = self::XML_BASE_URL . 'XML-complemento-' . rawurlencode((string) $id) . '-' . rawurlencode($uuid) . '.xml';

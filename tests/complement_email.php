@@ -8,7 +8,8 @@ use App\ComplementEmailService;
 use App\PdfDocumentService;
 
 $pdo = new PDO('sqlite::memory:');
-$service = new ComplementEmailService($pdo, new PdfDocumentService($pdo));
+$storageRoot = sys_get_temp_dir() . '/s14-complement-email-' . bin2hex(random_bytes(5));
+$service = new ComplementEmailService($pdo, new PdfDocumentService($pdo), $storageRoot);
 $reflection = new ReflectionClass($service);
 
 $htmlMethod = $reflection->getMethod('html');
@@ -31,4 +32,15 @@ assert($xmlMethod->invoke($service, '<cfdi:Comprobante UUID="' . $uuid . '"></cf
 assert($xmlMethod->invoke($service, '<html>error</html>', $uuid) === false);
 assert($reflection->getConstant('FROM_EMAIL') === 'no-reply@sistema14.org');
 
-echo "8 comprobaciones del correo de complementos superadas.\n";
+$localUuid = '04B8F924-ECD7-4A9E-A899-9265B23036D4';
+$localDirectory = $storageRoot . '/123';
+assert(mkdir($localDirectory, 0770, true));
+$localXml = '<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4"><tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" UUID="' . $localUuid . '"/></cfdi:Comprobante>';
+assert(file_put_contents($localDirectory . '/XML-complemento-123-' . $localUuid . '.xml', $localXml) !== false);
+$systemXmlMethod = $reflection->getMethod('system14Xml');
+assert($systemXmlMethod->invoke($service, ['id' => 123, 'uuid' => $localUuid, 'xml_firmado' => '<html>inválido</html>']) === $localXml);
+unlink($localDirectory . '/XML-complemento-123-' . $localUuid . '.xml');
+rmdir($localDirectory);
+rmdir($storageRoot);
+
+echo "11 comprobaciones del correo de complementos superadas.\n";
