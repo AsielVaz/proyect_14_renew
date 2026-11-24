@@ -4052,11 +4052,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         }
     };
 
+    const complementAmountFormat = new Intl.NumberFormat('es-MX', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+    });
+
+    const readComplementAmount = (value) => {
+        const decimal = value.trim().replaceAll(',', '');
+        return /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(decimal) ? Number(decimal) : NaN;
+    };
+
     const complementTotalAmount = (excludedRow = null) => {
         if (!complementLines) return 0;
         return Array.from(complementLines.querySelectorAll('tr[data-complement-line]'))
             .filter((row) => row !== excludedRow)
-            .reduce((sum, row) => sum + (Number(row.querySelector('[name="amount[]"]').value) || 0), 0);
+            .reduce((sum, row) => sum + (readComplementAmount(row.querySelector('[name="amount[]"]').value) || 0), 0);
     };
 
     const syncPendingInvoiceButtons = () => {
@@ -4091,7 +4100,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         }
         rows.forEach((row) => {
             const balance = Number(row.dataset.balance) || 0;
-            const amount = Number(row.querySelector('[name="amount[]"]').value) || 0;
+            const amount = readComplementAmount(row.querySelector('[name="amount[]"]').value) || 0;
             row.querySelector('[data-complement-remaining]').textContent = invoiceMoney.format(Math.max(0, balance - amount));
         });
         syncComplementTreatment();
@@ -4111,6 +4120,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const amount = row.querySelector('[name="amount[]"]');
         amount.value = '';
         amount.disabled = true;
+        row.querySelector('[data-complement-installment]').value = '';
         recalculateComplement();
     };
 
@@ -4175,9 +4185,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 : Number(invoice.saldo);
             const maximumForLine = Math.min(Number(invoice.saldo), movementCapacity);
             if (maximumForLine <= 0) throw new Error('El monto máximo del movimiento ya fue aplicado en otras facturas.');
-            amount.max = String(maximumForLine);
-            amount.value = String(maximumForLine);
-            row.querySelector('[name="installment[]"]').value = String(invoice.siguiente_parcialidad || 1);
+            amount.value = complementAmountFormat.format(maximumForLine);
+            row.querySelector('[data-complement-installment]').value = String(invoice.siguiente_parcialidad || 1);
             recalculateComplement();
             return true;
         } catch (error) {
@@ -4197,7 +4206,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         row.dataset.validated = 'false';
         row.dataset.balance = '0';
         row.dataset.lookupMode = 'strict';
-        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal" required><input type="hidden" name="invoice_manual_token[]" value=""><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="number" name="amount[]" min="0.01" step="0.01" required disabled></td><td><input type="number" name="installment[]" min="1" step="1" value="1" required></td><td data-complement-remaining>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
+        row.innerHTML = '<td><div class="complement-uuid-control"><input type="text" name="invoice_uuid[]" maxlength="50" placeholder="UUID fiscal" required><input type="hidden" name="invoice_manual_token[]" value=""><button type="button" class="button" data-complement-lookup>Consultar</button></div><small data-complement-invoice>UUID pendiente de consulta</small></td><td data-complement-balance>—</td><td><input type="text" inputmode="decimal" name="amount[]" aria-label="Monto pagado" required disabled></td><td><input type="text" data-complement-installment aria-label="Parcialidad calculada" placeholder="—" readonly></td><td data-complement-remaining>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
         const uuid = row.querySelector('[name="invoice_uuid[]"]');
         uuid.addEventListener('paste', () => { row.dataset.pendingManualPaste = 'true'; });
         uuid.addEventListener('input', (event) => {
@@ -4207,7 +4216,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             row.dataset.lookupMode = pasted ? 'manual' : 'strict';
         });
         row.querySelector('[data-complement-lookup]').addEventListener('click', () => lookupComplementInvoice(row));
-        row.querySelector('[name="amount[]"]').addEventListener('input', recalculateComplement);
+        const amount = row.querySelector('[name="amount[]"]');
+        amount.addEventListener('input', recalculateComplement);
+        amount.addEventListener('blur', () => {
+            const value = readComplementAmount(amount.value);
+            if (Number.isFinite(value)) amount.value = complementAmountFormat.format(value);
+        });
         row.querySelector('[data-complement-remove]').addEventListener('click', () => {
             row.remove();
             if (!complementLines.querySelector('tr[data-complement-line]')) addComplementLine();
@@ -4432,12 +4446,28 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             });
         }
     }
+    complementForm?.addEventListener('formdata', ({formData}) => {
+        const amounts = formData.getAll('amount[]');
+        formData.delete('amount[]');
+        amounts.forEach((value) => formData.append('amount[]', readComplementAmount(value).toFixed(2)));
+    });
     complementForm?.addEventListener('submit', (event) => {
         const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'));
         if (rows.length === 0 || rows.some((row) => row.dataset.validated !== 'true')) {
             event.preventDefault();
             event.stopImmediatePropagation();
             showToast('Consulta y valida todas las facturas antes de guardar el complemento.');
+            return;
+        }
+        for (const row of rows) {
+            const input = row.querySelector('[name="amount[]"]');
+            const amount = readComplementAmount(input.value);
+            const balance = Number(row.dataset.balance);
+            if (Number.isFinite(amount) && amount >= 0.01 && amount <= balance + 0.001) continue;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            input.focus();
+            showToast(`Captura un monto válido entre 0.01 y ${complementAmountFormat.format(balance)}.`);
             return;
         }
         if (complementPaymentMaximum > 0 && complementTotalAmount() > complementPaymentMaximum + 0.001) {

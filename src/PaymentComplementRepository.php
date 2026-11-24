@@ -356,7 +356,6 @@ final class PaymentComplementRepository
         $type = '';
         $uuids = (array) ($input['invoice_uuid'] ?? []);
         $amounts = (array) ($input['amount'] ?? []);
-        $installments = (array) ($input['installment'] ?? []);
         $sourceInvoiceId = (int) ($input['source_invoice_id'] ?? 0);
 
         if ($clientId <= 0 || $receiverId <= 0 || $companyId <= 0 || $formId <= 0) {
@@ -416,7 +415,9 @@ final class PaymentComplementRepository
                 razon, id_clave_corta, metodo_pago, xml_firmado, retencion_transporte,
                 xml_total, xml_subtotal FROM facturas WHERE UPPER(uuid) = :uuid
                 ORDER BY id DESC LIMIT 1 FOR UPDATE');
-            $paidQuery = $this->pdo->prepare('SELECT COALESCE(SUM(monto), 0) FROM facturar_rel_complementos WHERE id_factura = :invoice');
+            $paidQuery = $this->pdo->prepare('SELECT COALESCE(SUM(monto), 0) AS paid,
+                GREATEST(COALESCE(MAX(num_pago), 0), 0) + 1 AS next_installment
+                FROM facturar_rel_complementos WHERE id_factura = :invoice FOR UPDATE');
             $relations = [];
             $seen = [];
             $sourceInvoiceIncluded = $sourceInvoiceId <= 0;
@@ -425,12 +426,11 @@ final class PaymentComplementRepository
             foreach ($uuids as $index => $rawUuid) {
                 $uuid = strtoupper(trim((string) $rawUuid));
                 $amount = round((float) str_replace([',', '$', ' '], '', (string) ($amounts[$index] ?? '0')), 2);
-                $installment = (int) ($installments[$index] ?? 0);
                 if ($uuid === '' || isset($seen[$uuid])) {
                     throw new RuntimeException('Cada factura debe tener un UUID único y válido.');
                 }
-                if ($amount <= 0 || $installment <= 0) {
-                    throw new RuntimeException('El monto y número de parcialidad deben ser mayores a cero.');
+                if ($amount <= 0) {
+                    throw new RuntimeException('El monto debe ser mayor a cero.');
                 }
                 $invoiceQuery->execute(['uuid' => $uuid]);
                 $invoice = $invoiceQuery->fetch();
@@ -451,7 +451,9 @@ final class PaymentComplementRepository
                 }
                 $inheritedType ??= $invoiceType;
                 $paidQuery->execute(['invoice' => $invoice['id']]);
-                $paid = round((float) $paidQuery->fetchColumn(), 2);
+                $paymentHistory = $paidQuery->fetch(PDO::FETCH_ASSOC);
+                $paid = round((float) $paymentHistory['paid'], 2);
+                $installment = (int) $paymentHistory['next_installment'];
                 $balance = max(0, round((float) $invoice['total_iva'] - $paid, 2));
                 if ($amount > $balance + 0.001) {
                     throw new RuntimeException('El monto para ' . $uuid . ' excede el saldo de $' . number_format($balance, 2) . '.');
