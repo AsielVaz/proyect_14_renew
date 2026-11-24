@@ -88,16 +88,46 @@ final class PaymentComplementRepository
         ];
     }
 
-    public function receivers(int $clientId): array
+    public function receivers(int $clientId, int $companyId = 0): array
     {
-        $query = $this->pdo->prepare('SELECT id, clave_corta, razon_social, rfc, cp, regimen_fiscal,
-                COALESCE(documentos_vivos, 0) AS documentos_vivos
-            FROM claves_cortas WHERE id_cliente = :client ORDER BY razon_social');
-        $query->execute(['client' => $clientId]);
+        if ($companyId > 0) {
+            $query = $this->pdo->prepare(<<<'SQL'
+                SELECT cc.id, cc.clave_corta, cc.razon_social, cc.rfc, cc.cp, cc.regimen_fiscal,
+                       COALESCE(vivos.documentos_vivos, 0) AS documentos_vivos,
+                       COALESCE(cc.documentos_vivos, 0) AS documentos_vivos_totales
+                FROM claves_cortas cc
+                LEFT JOIN (
+                    SELECT TRIM(f.id_clave_corta) AS id_clave_corta, COUNT(*) AS documentos_vivos
+                    FROM facturas f
+                    LEFT JOIN (
+                        SELECT id_factura, SUM(monto) AS total_pagado
+                        FROM facturar_rel_complementos GROUP BY id_factura
+                    ) pagos_factura ON pagos_factura.id_factura = f.id
+                    WHERE f.razon = :company
+                      AND f.metodo_pago = 2
+                      AND COALESCE(f.uuid, '') <> ''
+                      AND COALESCE(f.status, '') <> 'Cancelado'
+                      AND TRIM(COALESCE(f.id_clave_corta, '')) <> ''
+                      AND f.total_iva - COALESCE(pagos_factura.total_pagado, 0) > 0.005
+                    GROUP BY TRIM(f.id_clave_corta)
+                ) vivos ON vivos.id_clave_corta = CAST(cc.id AS CHAR)
+                WHERE cc.id_cliente = :client
+                ORDER BY cc.razon_social
+                SQL);
+            $query->execute(['client' => $clientId, 'company' => $companyId]);
+        } else {
+            $query = $this->pdo->prepare('SELECT id, clave_corta, razon_social, rfc, cp, regimen_fiscal,
+                    COALESCE(documentos_vivos, 0) AS documentos_vivos,
+                    COALESCE(documentos_vivos, 0) AS documentos_vivos_totales
+                FROM claves_cortas WHERE id_cliente = :client ORDER BY razon_social');
+            $query->execute(['client' => $clientId]);
+        }
         $receivers = $query->fetchAll();
         foreach ($receivers as &$receiver) {
             $receiver['documentos_vivos'] = max(0, (int) ($receiver['documentos_vivos'] ?? 0));
+            $receiver['documentos_vivos_totales'] = max(0, (int) ($receiver['documentos_vivos_totales'] ?? 0));
             $receiver['has_live_documents'] = $receiver['documentos_vivos'] > 0;
+            $receiver['documents_scope'] = $companyId > 0 ? 'company' : 'all_companies';
         }
         unset($receiver);
         return $receivers;
@@ -204,7 +234,7 @@ final class PaymentComplementRepository
 
         $payment = $this->paymentPrefill($paymentId);
         $this->assertReference('empresas', $companyId, 'empresa emisora');
-        $this->assertReceiverHasLiveDocuments((int) $payment['client_id'], $receiverId);
+        $this->assertReceiverHasLiveDocuments((int) $payment['client_id'], $receiverId, $companyId);
         $movementAmount = (float) $payment['movement_amount'];
 
         $query = $this->pdo->prepare("SELECT f.id, f.uuid, f.serie, f.folio, f.total_iva,
@@ -343,7 +373,7 @@ final class PaymentComplementRepository
             if ($this->pendingInvoiceCount($clientId) <= 0) {
                 throw new RuntimeException('El cliente no tiene facturas PPD pendientes (Sin documentos).');
             }
-            $this->assertReceiverHasLiveDocuments($clientId, $receiverId);
+            $this->assertReceiverHasLiveDocuments($clientId, $receiverId, $companyId);
             $paymentMaximum = null;
             if ($paymentId > 0) {
                 $payment = $this->pdo->prepare("SELECT p.id, p.tipo_movimiento, p.id_factura, p.id_factura_res,
@@ -490,17 +520,36 @@ final class PaymentComplementRepository
         return $value === false || $value === null ? 0 : max(0, (int) $value);
     }
 
-    private function assertReceiverHasLiveDocuments(int $clientId, int $receiverId): void
+    private function assertReceiverHasLiveDocuments(int $clientId, int $receiverId, int $companyId): void
     {
-        $query = $this->pdo->prepare('SELECT COALESCE(documentos_vivos, 0)
-            FROM claves_cortas WHERE id = :id AND id_cliente = :client LIMIT 1');
-        $query->execute(['id' => $receiverId, 'client' => $clientId]);
-        $documents = $query->fetchColumn();
-        if ($documents === false) {
+        $query = $this->pdo->prepare(<<<'SQL'
+            SELECT cc.id, COALESCE(vivos.documentos_vivos, 0) AS documentos_vivos
+            FROM claves_cortas cc
+            LEFT JOIN (
+                SELECT TRIM(f.id_clave_corta) AS id_clave_corta, COUNT(*) AS documentos_vivos
+                FROM facturas f
+                LEFT JOIN (
+                    SELECT id_factura, SUM(monto) AS total_pagado
+                    FROM facturar_rel_complementos GROUP BY id_factura
+                ) pagos_factura ON pagos_factura.id_factura = f.id
+                WHERE f.razon = :company
+                  AND f.metodo_pago = 2
+                  AND COALESCE(f.uuid, '') <> ''
+                  AND COALESCE(f.status, '') <> 'Cancelado'
+                  AND TRIM(COALESCE(f.id_clave_corta, '')) <> ''
+                  AND f.total_iva - COALESCE(pagos_factura.total_pagado, 0) > 0.005
+                GROUP BY TRIM(f.id_clave_corta)
+            ) vivos ON vivos.id_clave_corta = CAST(cc.id AS CHAR)
+            WHERE cc.id = :id AND cc.id_cliente = :client
+            LIMIT 1
+            SQL);
+        $query->execute(['id' => $receiverId, 'client' => $clientId, 'company' => $companyId]);
+        $receiver = $query->fetch(PDO::FETCH_ASSOC);
+        if (!$receiver) {
             throw new RuntimeException('La razón social no pertenece al cliente seleccionado.');
         }
-        if ((int) $documents <= 0) {
-            throw new RuntimeException('La clave corta seleccionada no tiene documentos PPD vivos (Sin documentos).');
+        if ((int) $receiver['documentos_vivos'] <= 0) {
+            throw new RuntimeException('La clave corta seleccionada no tiene documentos PPD vivos para la empresa emisora seleccionada (Sin documentos).');
         }
     }
 

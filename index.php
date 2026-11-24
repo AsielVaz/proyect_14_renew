@@ -595,7 +595,10 @@ if ($complementModule && isset($_GET['data'])) {
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     try {
         $data = match ((string) $_GET['data']) {
-            'receivers' => payment_complement_repository()->receivers((int) ($_GET['client'] ?? 0)),
+            'receivers' => payment_complement_repository()->receivers(
+                (int) ($_GET['client'] ?? 0),
+                (int) ($_GET['company_id'] ?? 0)
+            ),
             'invoice' => payment_complement_repository()->invoiceByUuid(
                 (string) ($_GET['uuid'] ?? ''),
                 (string) ($_GET['lookup_mode'] ?? '') === 'manual' ? (int) ($_GET['company_id'] ?? 0) : 0
@@ -1567,7 +1570,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             $complementInitialClientId = (int) ($complementHeaderPrefill['client_id'] ?? 0);
             $complementInitialCompanyId = (int) ($complementHeaderPrefill['company_id'] ?? 0);
             $paymentPrefillReceivers = $complementInitialClientId > 0
-                ? payment_complement_repository()->receivers($complementInitialClientId)
+                ? payment_complement_repository()->receivers($complementInitialClientId, $complementInitialCompanyId)
                 : [];
             $paymentEligibleReceivers = array_values(array_filter(
                 $paymentPrefillReceivers,
@@ -1595,8 +1598,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <label class="field"><span>Razón social / clave corta *</span>
                             <select name="receiver_id" id="complementReceiver" required<?= $complementInitialClientId <= 0 ? ' disabled' : '' ?>>
                                 <option value=""><?= $complementInitialClientId > 0 ? ($paymentEligibleReceivers !== [] ? 'Seleccionar…' : 'No hay claves cortas con documentos vivos') : 'Selecciona primero un cliente…' ?></option>
-                                <?php if ($paymentEligibleReceivers !== []): ?><optgroup label="Con documentos vivos"><?php foreach ($paymentEligibleReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="<?= e($item['documentos_vivos']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · ' . (int) $item['documentos_vivos'] . ' documento(s) vivo(s)') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
-                                <?php if ($paymentDisabledReceivers !== []): ?><optgroup label="Sin documentos vivos · No disponibles" disabled><?php foreach ($paymentDisabledReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" disabled><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos vivos') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                                <?php if ($paymentEligibleReceivers !== []): ?><optgroup label="Con documentos vivos para la empresa seleccionada"><?php foreach ($paymentEligibleReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="<?= e($item['documentos_vivos']) ?>" <?= (int) $item['id'] === $paymentAutoReceiverId ? 'selected' : '' ?>><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · ' . (int) $item['documentos_vivos'] . ' documento(s) vivo(s) para esta empresa') ?></option><?php endforeach; ?></optgroup><?php endif; ?>
+                                <?php if ($paymentDisabledReceivers !== []): ?><optgroup label="Sin documentos vivos para esta empresa · No disponibles" disabled><?php foreach ($paymentDisabledReceivers as $item): ?><option value="<?= e($item['id']) ?>" data-documents-live="0" disabled><?= e(($item['clave_corta'] ?: 'Sin clave') . ' · ' . $item['razon_social'] . ' · ' . ($item['rfc'] ?: 'RFC no registrado') . ' · Sin documentos vivos para esta empresa' . ((int) ($item['documentos_vivos_totales'] ?? 0) > 0 ? ' · ' . (int) $item['documentos_vivos_totales'] . ' en otras empresas' : '')) ?></option><?php endforeach; ?></optgroup><?php endif; ?>
                             </select>
                         </label>
                         <label class="field"><span>Forma en que se recibió el pago *</span><select name="form_id" required><option value="">Seleccionar…</option><?php foreach ($complementData['forms'] as $item): ?><option value="<?= e($item['id']) ?>" <?= (int) $item['clave'] === 3 ? 'selected' : '' ?>><?= e(str_pad((string) $item['clave'], 2, '0', STR_PAD_LEFT)) ?> · <?= e(trim((string) $item['forma_pago'])) ?></option><?php endforeach; ?></select></label>
@@ -3529,7 +3532,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         try {
             const parameter = type === 'receivers' ? 'client' : 'company';
             const moduleQuery = isComplementReceiver ? 'complement=create' : 'invoice=create';
-            const response = await fetch(`?${moduleQuery}&data=${type}&${parameter}=${encodeURIComponent(id)}`, {headers: {'Accept': 'application/json'}});
+            const companyQuery = isComplementReceiver
+                ? `&company_id=${encodeURIComponent(document.getElementById('complementCompany')?.value || '')}`
+                : '';
+            const response = await fetch(`?${moduleQuery}&data=${type}&${parameter}=${encodeURIComponent(id)}${companyQuery}`, {headers: {'Accept': 'application/json'}});
             const result = await response.json();
             if (!response.ok || !result.ok) throw new Error('No fue posible cargar el catálogo.');
             select.innerHTML = '<option value="">Seleccionar…</option>';
@@ -3537,9 +3543,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             let unavailableReceiverGroup = null;
             if (isComplementReceiver) {
                 liveReceiverGroup = document.createElement('optgroup');
-                liveReceiverGroup.label = 'Con documentos vivos';
+                liveReceiverGroup.label = 'Con documentos vivos para la empresa seleccionada';
                 unavailableReceiverGroup = document.createElement('optgroup');
-                unavailableReceiverGroup.label = 'Sin documentos vivos · No disponibles';
+                unavailableReceiverGroup.label = 'Sin documentos vivos para esta empresa · No disponibles';
                 unavailableReceiverGroup.disabled = true;
             }
             result.data.forEach((item) => {
@@ -3547,7 +3553,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 option.value = item.id;
                 if (type === 'receivers') {
                     const hasLiveDocuments = Number(item.documentos_vivos) > 0;
-                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver ? (hasLiveDocuments ? ` · ${Number(item.documentos_vivos)} documento(s) vivo(s)` : ' · Sin documentos vivos') : ''}`;
+                    const liveTotal = Number(item.documentos_vivos_totales) || 0;
+                    option.textContent = `${item.rfc} · ${item.razon_social} · ${item.clave_corta}${isComplementReceiver ? (hasLiveDocuments ? ` · ${Number(item.documentos_vivos)} documento(s) vivo(s) para esta empresa` : ` · Sin documentos vivos para esta empresa${liveTotal > 0 ? ` · ${liveTotal} en otras empresas` : ''}`) : ''}`;
                     option.dataset.regime = item.regimen_fiscal || '';
                     if (isComplementReceiver) {
                         option.dataset.documentsLive = String(Math.max(0, Number(item.documentos_vivos) || 0));
@@ -3572,7 +3579,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             select.disabled = result.data.length === 0;
             if (isComplementReceiver && result.data.length > 0
                 && !result.data.some((item) => Number(item.documentos_vivos) > 0)) {
-                select.options[0].textContent = 'No hay claves cortas con documentos vivos';
+                select.options[0].textContent = 'No hay claves cortas con documentos vivos para esta empresa';
             }
             if (type === 'concepts') {
                 if (addInvoiceConcept) addInvoiceConcept.disabled = result.data.length === 0;
@@ -4379,7 +4386,19 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             pendingInvoicesBody?.replaceChildren();
         }
     });
-    [complementCompany, complementReceiver].forEach((control) => control?.addEventListener('change', () => {
+    complementCompany?.addEventListener('change', async () => {
+        releaseComplementSourceInvoice();
+        if (complementReceiver && complementClient?.value) {
+            await loadInvoiceCatalog('receivers', complementClient.value, complementReceiver);
+        }
+        complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
+        if (viewPendingInvoices) {
+            viewPendingInvoices.disabled = !complementCompany.value || !complementReceiver.value;
+            hidePendingInvoices();
+            pendingInvoicesBody?.replaceChildren();
+        }
+    });
+    complementReceiver?.addEventListener('change', () => {
         releaseComplementSourceInvoice();
         complementLines?.querySelectorAll('tr[data-complement-line]').forEach(resetComplementLine);
         if (viewPendingInvoices) {
@@ -4387,7 +4406,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             hidePendingInvoices();
             pendingInvoicesBody?.replaceChildren();
         }
-    }));
+    });
     addComplementInvoice?.addEventListener('click', addComplementLine);
     if (complementLines) {
         addComplementLine();

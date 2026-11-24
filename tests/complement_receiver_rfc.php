@@ -14,7 +14,7 @@ $checks = [
         'el catálogo dinámico de razones sociales conserva el RFC',
     'option.disabled = !hasLiveDocuments;' =>
         'el catálogo dinámico desactiva las razones sociales sin documentos vivos',
-    "unavailableReceiverGroup.label = 'Sin documentos vivos · No disponibles';" =>
+    "unavailableReceiverGroup.label = 'Sin documentos vivos para esta empresa · No disponibles';" =>
         'el catálogo dinámico separa visualmente las razones sociales no disponibles',
 ];
 

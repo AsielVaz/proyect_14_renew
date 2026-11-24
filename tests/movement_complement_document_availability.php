@@ -22,6 +22,18 @@ $pdo->exec("INSERT INTO claves_cortas VALUES
     (11, 1, 'VIVA', 'Razón con documentos', 'RFC010101AAA', '01000', '601', 5),
     (12, 1, 'CERO', 'Razón sin documentos', 'RFC010101AAB', '01000', '601', 0),
     (21, 2, 'NULL', 'Razón sin cálculo', 'RFC010101AAC', '01000', '601', NULL)");
+$pdo->exec('CREATE TABLE facturas (
+    id INTEGER PRIMARY KEY, id_clave_corta TEXT, razon INTEGER, metodo_pago INTEGER,
+    uuid TEXT, status TEXT, total_iva REAL
+)');
+$pdo->exec('CREATE TABLE facturar_rel_complementos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, id_factura INTEGER, monto REAL
+)');
+$pdo->exec("INSERT INTO facturas VALUES
+    (101, '11', 4, 2, 'UUID-VIVO', 'Timbrada', 100.00),
+    (102, '11', 5, 2, 'UUID-OTRA-EMPRESA', 'Timbrada', 200.00),
+    (103, '12', 4, 2, 'UUID-LIQUIDADO', 'Timbrada', 50.00)");
+$pdo->exec('INSERT INTO facturar_rel_complementos (id_factura, monto) VALUES (103, 50.00)');
 
 $repository = new PaymentComplementRepository($pdo);
 $method = (new ReflectionClass($repository))->getMethod('pendingInvoiceCount');
@@ -38,14 +50,21 @@ assert(($receiversById[11]['has_live_documents'] ?? false) === true);
 assert(($receiversById[12]['has_live_documents'] ?? true) === false);
 
 $receiverValidation = (new ReflectionClass($repository))->getMethod('assertReceiverHasLiveDocuments');
-$receiverValidation->invoke($repository, 1, 11);
+$receiverValidation->invoke($repository, 1, 11, 4);
 $blocked = false;
 try {
-    $receiverValidation->invoke($repository, 1, 12);
+    $receiverValidation->invoke($repository, 1, 12, 4);
 } catch (RuntimeException $exception) {
     $blocked = str_contains($exception->getMessage(), 'Sin documentos');
 }
 assert($blocked);
+
+$companyReceivers = $repository->receivers(1, 4);
+$companyReceiversById = [];
+foreach ($companyReceivers as $receiver) $companyReceiversById[(int) $receiver['id']] = $receiver;
+assert(($companyReceiversById[11]['documentos_vivos'] ?? 0) === 1);
+assert(($companyReceiversById[11]['documentos_vivos_totales'] ?? 0) === 5);
+assert(($companyReceiversById[12]['documentos_vivos'] ?? -1) === 0);
 
 $movementSource = file_get_contents(dirname(__DIR__) . '/src/MovementRepository.php');
 $indexSource = file_get_contents(dirname(__DIR__) . '/index.php');
