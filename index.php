@@ -1627,7 +1627,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <div class="complement-uuid-control"><input type="text" id="complementManualUuid" maxlength="50" placeholder="UUID fiscal" aria-label="UUID fiscal"><button type="button" class="button" id="complementLookupUuid">Consultar</button></div>
                     </details>
                     <div class="table-wrap"><table class="invoice-lines complement-lines"><thead><tr><th>UUID / factura</th><th>Saldo anterior</th><th>Monto pagado</th><th>Parcialidad</th><th>Saldo restante</th><th>Tratamiento fiscal</th><th></th></tr></thead><tbody id="complementLines"></tbody></table></div>
-                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary" id="saveComplement"<?= $paymentComplementContext ? ' disabled' : '' ?>>Guardar complemento</button></div>
+                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar complemento</button></div>
                 </section>
             </form>
         <?php elseif ($complementView === 'detail'): ?>
@@ -4020,7 +4020,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const complementReceiver = document.getElementById('complementReceiver');
     const complementLines = document.getElementById('complementLines');
     const complementForm = document.getElementById('complementForm');
-    const saveComplement = document.getElementById('saveComplement');
     const pendingInvoicesPanel = document.getElementById('pendingInvoicesPanel');
     const pendingInvoicesBody = document.getElementById('pendingInvoicesBody');
     const pendingInvoicesStatus = document.getElementById('pendingInvoicesStatus');
@@ -4131,9 +4130,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const total = appliedCents / 100;
         document.getElementById('complementCount').textContent = String(rows.filter((row) => row.dataset.validated === 'true').length);
         document.getElementById('complementTotal').textContent = invoiceMoney.format(total);
-        if (complementFromPayment && saveComplement) {
-            saveComplement.disabled = !complementCoversPayment(appliedCents);
-        }
         if (complementPaymentRemaining && complementFromPayment) {
             const remaining = Math.max(0, complementPaymentMaximum - total);
             complementPaymentRemaining.textContent = invoiceMoney.format(remaining);
@@ -4222,7 +4218,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         row.dataset.validated = 'false';
         row.dataset.balance = '0';
         row.hidden = true;
-        row.innerHTML = '<td><input type="hidden" name="invoice_uuid[]"><input type="hidden" name="invoice_manual_token[]"><strong data-complement-uuid></strong><small data-complement-invoice></small></td><td data-complement-balance>—</td><td><input type="text" inputmode="decimal" name="amount[]" aria-label="Monto pagado" required disabled></td><td><input type="text" data-complement-installment aria-label="Parcialidad calculada" readonly></td><td data-complement-remaining>—</td><td data-complement-tax-treatment>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
+        row.innerHTML = '<td><input type="hidden" name="invoice_uuid[]"><input type="hidden" name="invoice_manual_token[]"><strong data-complement-uuid></strong><small data-complement-invoice></small></td><td data-complement-balance>—</td><td><input type="text" inputmode="decimal" name="amount[]" aria-label="Monto pagado" disabled></td><td><input type="text" data-complement-installment aria-label="Parcialidad calculada" readonly></td><td data-complement-remaining>—</td><td data-complement-tax-treatment>—</td><td><button type="button" class="button danger invoice-remove-line" data-complement-remove>×</button></td>';
         row.querySelector('[name="invoice_uuid[]"]').value = uuid;
         const amount = row.querySelector('[name="amount[]"]');
         amount.addEventListener('input', (event) => {
@@ -4457,6 +4453,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         });
     });
     complementForm?.addEventListener('submit', (event) => {
+        if (complementFromPayment && !complementCoversPayment(complementTotalCents())) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            showToast('Para guardar el complemento, aplica la totalidad del saldo disponible del movimiento.');
+            return;
+        }
         const rows = Array.from(complementLines.querySelectorAll('tr[data-complement-line]'))
             .filter((row) => row.querySelector('[name="invoice_uuid[]"]').value.trim() !== '');
         if (rows.length === 0 || rows.some((row) => row.dataset.validated !== 'true')) {
@@ -4475,11 +4477,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             input.focus();
             showToast(`Captura un monto válido entre 0.01 y ${complementAmountFormat.format(balance)}.`);
             return;
-        }
-        if (complementFromPayment && !complementCoversPayment(complementTotalCents())) {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            showToast(`Aplica el monto completo del pago, ${invoiceMoney.format(complementPaymentMaximum)}, para guardar el complemento.`);
         }
     });
 
