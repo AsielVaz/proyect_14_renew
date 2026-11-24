@@ -1196,6 +1196,14 @@ textarea:focus {
     font-size: 21px;
 }
 
+#saveComplement:disabled {
+    border-color: var(--color-border-control);
+    background: var(--color-page);
+    color: var(--color-muted);
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
 .invoice-table {
     table-layout: fixed;
     white-space: normal;
