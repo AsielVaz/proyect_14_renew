@@ -84,9 +84,18 @@ final class CatalogRepository
             }
             if ($type === 'select' && $value !== '') {
                 $allowedOptions = array_map('strval', array_keys((array) ($field['options'] ?? [])));
-                $validOption = ($field['caseInsensitiveOptions'] ?? false)
-                    ? array_filter($allowedOptions, static fn (string $option): bool => strcasecmp($option, $value) === 0) !== []
-                    : in_array($value, $allowedOptions, true);
+                $validOption = false;
+                if ($field['caseInsensitiveOptions'] ?? false) {
+                    foreach ($allowedOptions as $option) {
+                        if (strcasecmp($option, $value) !== 0) continue;
+                        // Persiste siempre la grafía canónica declarada por el catálogo.
+                        $value = $option;
+                        $validOption = true;
+                        break;
+                    }
+                } else {
+                    $validOption = in_array($value, $allowedOptions, true);
+                }
                 if (!$validOption) {
                     throw new RuntimeException('Selecciona un valor válido para “' . $field['label'] . '”.');
                 }

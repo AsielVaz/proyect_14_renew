@@ -2690,6 +2690,20 @@ tbody tr:hover {
     stroke-width: 1.8;
 }
 
+.record-context-item.is-disabled,
+.record-context-item:disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+}
+
+.record-context-item.is-disabled:hover,
+.record-context-item.is-disabled:focus,
+.record-context-item:disabled:hover,
+.record-context-item:disabled:focus {
+    background: transparent;
+    color: var(--color-text-secondary);
+}
+
 .movement-record-actions {
     display: flex;
     align-items: center;

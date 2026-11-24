@@ -1200,6 +1200,7 @@ final class MovementRepository
             ? ' AND COALESCE(p.id_factura, 0) <> 2'
             : '';
         $base = "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
+                        client_balance.facturas_vivas AS pending_invoice_count,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa, cl.nombre AS cliente,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.banco, p.monto,
@@ -1215,6 +1216,14 @@ final class MovementRepository
                  LEFT JOIN bancos b ON b.id = c.nombre_corto
                  LEFT JOIN empresas e ON e.id = COALESCE(c.razon, p.empresa)
                  LEFT JOIN clientes cl ON cl.id = p.nombre
+                 LEFT JOIN (
+                     SELECT balances.id_cliente, balances.facturas_vivas
+                     FROM clientes_saldo_script balances
+                     INNER JOIN (
+                         SELECT id_cliente, MAX(id) AS latest_id
+                         FROM clientes_saldo_script GROUP BY id_cliente
+                     ) latest_balance ON latest_balance.latest_id = balances.id
+                 ) client_balance ON client_balance.id_cliente = CAST(p.nombre AS UNSIGNED)
                  LEFT JOIN usuarios u ON u.id = p.usuario_asigna_fac{$accountStatementJoin}";
 
         return match ($view) {
@@ -1246,6 +1255,7 @@ final class MovementRepository
             ],
             'cartera' => [
                 "SELECT p.id, p.nombre AS client_id, p.status, p.id_factura, p.id_factura_res,
+                         client_balance.facturas_vivas AS pending_invoice_count,
                         CAST(COALESCE(c.razon, p.empresa) AS UNSIGNED) AS company_id,
                         COALESCE(e.razon, p.empresa) AS empresa,
                         COALESCE(b.nombre_corto, p.nombre_corto) AS cuenta, p.monto,
@@ -1260,6 +1270,14 @@ final class MovementRepository
                  LEFT JOIN bancos b ON b.id = c.nombre_corto
                  LEFT JOIN empresas e ON e.id = COALESCE(c.razon, p.empresa)
                  LEFT JOIN clientes origin ON origin.id = p.cliente_origen_comision
+                  LEFT JOIN (
+                      SELECT balances.id_cliente, balances.facturas_vivas
+                      FROM clientes_saldo_script balances
+                      INNER JOIN (
+                          SELECT id_cliente, MAX(id) AS latest_id
+                          FROM clientes_saldo_script GROUP BY id_cliente
+                      ) latest_balance ON latest_balance.latest_id = balances.id
+                  ) client_balance ON client_balance.id_cliente = CAST(p.nombre AS UNSIGNED)
                  WHERE COALESCE(p.saldo_acreditable, 0) <> 0
                    AND p.fecha_asignacion >= DATE_SUB(CURDATE(), INTERVAL 32 MONTH)
                    AND p.fecha_asignacion <= CURDATE()" . ($filterByClient ? '' : ' ORDER BY p.id DESC LIMIT 500'),

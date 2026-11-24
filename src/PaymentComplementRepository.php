@@ -170,6 +170,9 @@ final class PaymentComplementRepository
         if ($maximum <= 0) {
             throw new RuntimeException('El monto del movimiento ya fue aplicado por completo en otros complementos.');
         }
+        if ($this->pendingInvoiceCount($clientId) <= 0) {
+            throw new RuntimeException('El cliente no tiene facturas PPD pendientes (Sin documentos).');
+        }
 
         return [
             'id' => (int) $payment['id'],
@@ -329,6 +332,9 @@ final class PaymentComplementRepository
             $this->assertReference('clientes', $clientId, 'cliente');
             $this->assertReference('empresas', $companyId, 'empresa emisora');
             $this->assertReference('formas_pago', $formId, 'forma de pago');
+            if ($this->pendingInvoiceCount($clientId) <= 0) {
+                throw new RuntimeException('El cliente no tiene facturas PPD pendientes (Sin documentos).');
+            }
             $receiver = $this->pdo->prepare('SELECT id FROM claves_cortas WHERE id = :id AND id_cliente = :client');
             $receiver->execute(['id' => $receiverId, 'client' => $clientId]);
             if (!$receiver->fetchColumn()) {
@@ -468,6 +474,18 @@ final class PaymentComplementRepository
             }
             throw $exception;
         }
+    }
+
+    private function pendingInvoiceCount(int $clientId): int
+    {
+        if ($clientId <= 0) return 0;
+        $query = $this->pdo->prepare('SELECT facturas_vivas
+            FROM clientes_saldo_script
+            WHERE id_cliente = :client
+            ORDER BY id DESC LIMIT 1');
+        $query->execute(['client' => $clientId]);
+        $value = $query->fetchColumn();
+        return $value === false || $value === null ? 0 : max(0, (int) $value);
     }
 
     public function deletePending(int $id): void

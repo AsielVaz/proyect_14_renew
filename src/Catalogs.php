@@ -193,7 +193,8 @@ final class Catalogs
                     'domicilio' => self::textarea('Domicilio', true) + ['section' => 'Datos fiscales'],
                     'cp' => self::text('Código postal', false, 6),
                     'regimen_fiscal' => self::number('Régimen fiscal'),
-                    'facturacion_automatica' => self::select('Facturación automática', ['si' => 'Sí', 'no' => 'No'], true) + ['section' => 'Automatización'],
+                    'facturacion_automatica' => self::select('Facturación automática', ['Si' => 'Sí', 'No' => 'No'], true)
+                        + ['section' => 'Automatización', 'caseInsensitiveOptions' => true],
                 ],
                 'defaults' => ['usuario_crea' => 0],
             ],
