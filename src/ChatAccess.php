@@ -85,17 +85,22 @@ final class ChatAccess
             'consultar_pagos', 'detalle_movimiento', 'consultar_banco' => isset($movements['totales']),
             'consultar_stp' => isset($movements['stp']),
             'consultar_saldos_carteras' => true,
+            'consultar_catalogos' => Catalogs::isAllowed($this->role),
             'consultar_traspasos' => isset($movements['traspasos']),
             'generar_reporte', 'consultar_correos' => in_array($this->role, self::REPORT_ROLES, true),
             default => false,
         };
     }
 
-    public function walletConditions(array &$params): string
+    public function walletConditions(array &$params, bool $panel = true): string
     {
-        $params['operator_one'] = $this->operator;
-        $params['operator_restricted'] = $this->operator;
-        $conditions = [DashboardRepository::ACTIVE_WALLET_SCOPE, $this->optionalCompany('c.empresa', $params)];
+        $scope = 'c.activo = 1';
+        if ($panel) {
+            $params['operator_one'] = $this->operator;
+            $params['operator_restricted'] = $this->operator;
+            $scope = DashboardRepository::ACTIVE_WALLET_SCOPE;
+        }
+        $conditions = [$scope, $this->optionalCompany('c.empresa', $params)];
         if ($this->client !== null) {
             $conditions[] = 'c.id = ' . self::bind($params, $this->client);
         } elseif ($this->role !== 'administrador') {

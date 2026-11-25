@@ -18,7 +18,7 @@ final class ChatCollection
     ];
 
     public static function request(
-        string $text, array $previous, ?string $lastTool = null, ?array $pendingStp = null, ?int $recentInvoice = null
+        string $text, array $previous, ?string $lastTool = null, ?array $pendingStp = null, ?int $recentInvoice = null, array $reference = []
     ): ?array
     {
         $text = preg_replace('/^\h*\d+[.)]\h*/m', '', $text) ?? $text;
@@ -34,6 +34,11 @@ final class ChatCollection
         if (isset($pendingStp['herramienta']) && preg_match('/^(?:si[, ]+)?(?:el pago (?:de |por )?|la transferencia (?:de |por )?)?stp$/', $text)) {
             return $pendingStp;
         }
+        if ($lastTool === 'consultar_catalogos' && ($previous['herramienta'] ?? null) === $lastTool
+            && preg_match('/^(?:y )?(?:cuant[oa]s? (?:hay|son|existen)(?: en total)?|cuent[aa](?:las|los))$/', $text)) {
+            $filters = array_diff_key($previous['filtros'], ['pagina'=>true,'limite'=>true]);
+            return self::make($lastTool, ['contar'=>true] + $filters, 'catalogo');
+        }
         if (isset($previous['herramienta'])) {
             $page = null;
             if (in_array($text, ['siguiente pagina', 'muestra la siguiente pagina', 'pagina siguiente', 'siguiente',
@@ -48,6 +53,11 @@ final class ChatCollection
                 $filters['pagina'] = $page;
                 return self::make($previous['herramienta'], $filters, 'pagina');
             }
+        }
+
+        $catalog = ChatCatalogs::request($text, $reference);
+        if ($catalog !== null) {
+            return $catalog;
         }
 
         $period = [];
@@ -205,6 +215,9 @@ final class ChatCollection
         }
 
         $sum = "(?:suma(?:me|r)?|totaliza|calcula|{$balance})(?: el saldo de)?";
+        if (preg_match("~^{$sum} (?:todas )?(?:las )?carteras activas(?: ((?:del|en el|visibles en el) panel(?: principal)?))?$~iu", $text, $active)) {
+            return self::make('consultar_saldos_carteras', ['todas_activas' => true, 'panel' => !empty($active[1])], 'saldo_carteras');
+        }
         if (preg_match("~^{$sum} (?:todas )?(?:las )?car(?:teras|teas) (?:que (?:tengan|tienen|contengan|contienen)|con) (.+?)(?: en (?:su|el) nombre)?$~iu", $text, $wallet)) {
             return self::make('consultar_saldos_carteras', ['cartera_nombre' => preg_replace('/^[\s"\'«]+|[\s"\'»]+$/u', '', $wallet[1])], 'saldo_carteras');
         }
@@ -377,6 +390,9 @@ final class ChatCollection
             return $result['error'];
         }
         $tool = $request['herramienta'];
+        if ($tool === 'consultar_catalogos') {
+            return ChatCatalogs::reply($request, $result);
+        }
         if ($tool === 'consultar_estatus_sat') {
             return self::invoiceSatReply($result);
         }
@@ -594,7 +610,8 @@ final class ChatCollection
         $wallets = number_format($count) . ($count === 1 ? ' cartera activa' : ' carteras activas');
         $selection = isset($result['grupo'])
             ? 'Grupo ' . $result['grupo']['nombre'] . ' (#' . $result['grupo']['id'] . ')'
-            : 'Carteras con «' . $filters['cartera_nombre'] . '» en el nombre';
+            : (isset($filters['cartera_nombre']) ? 'Carteras con «' . $filters['cartera_nombre'] . '» en el nombre'
+                : 'Carteras activas' . (!empty($filters['panel']) ? ' visibles en el panel' : ''));
         return $selection . ' · Saldo acreditable total de ' . $wallets . ' en tu alcance: '
             . number_format($totals['saldo_acreditable'], 2, '.', ',') . ' ' . $totals['moneda'] . '.';
     }

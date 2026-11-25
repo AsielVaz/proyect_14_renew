@@ -85,10 +85,14 @@ final class ChatQueries
                 'pendientes_documento' => ['type' => 'boolean', 'description' => 'Depósitos asignados o sin asignar que siguen sin documento relacionado'],
                 'tipo' => ['type' => 'string', 'enum' => ['deposito', 'retiro', 'comision']],
             ] + $noFolio + $amount + $listing + $text, []],
-            'consultar_saldos_carteras' => ['Suma el saldo acreditable actual de todas las carteras activas autorizadas de un grupo o con texto en el nombre. Si hay varios grupos con el mismo criterio, devuelve candidatos para elegir.', [
+            'consultar_catalogos' => ['Busca, enumera o cuenta registros autorizados de los catálogos del Sistema 14. Para miembros o líderes de un grupo, usa carteras con grupo_id o grupo. Para claves de una cartera, usa cartera_id o cartera. Código SAT y código de clave corta son distintos del ID interno. Para carteras visibles en el panel usa panel=true.', ChatCatalogs::properties()
+                + array_intersect_key($listing, array_flip(['limite','pagina','contar'])), ['catalogo']],
+            'consultar_saldos_carteras' => ['Suma el saldo acreditable actual de todas las carteras activas autorizadas por grupo, por texto en el nombre o de todas las carteras activas. Si hay varios grupos con el mismo criterio, devuelve candidatos para elegir.', [
                 'grupo_id' => ['type' => 'integer', 'description' => 'ID interno del grupo de carteras'],
                 'grupo_nombre' => ['type' => 'string', 'description' => 'Nombre completo o parcial del grupo'],
                 'cartera_nombre' => ['type' => 'string', 'description' => 'Texto literal que debe aparecer en el nombre de la cartera'],
+                'todas_activas' => ['type' => 'boolean', 'description' => 'Suma todas las carteras activas autorizadas'],
+                'panel' => ['type' => 'boolean', 'description' => 'Para todas_activas, limita la suma a las carteras visibles en el panel'],
             ], []],
             'consultar_traspasos' => ['Traspasos entre carteras (banco 99). Busca por ID de cualquiera de los movimientos, importe, cartera o fecha. Muestra origen negativo y destino positivo si ambos son accesibles.', [
                 'cliente_id' => ['type' => 'integer', 'description' => 'ID de la cartera de origen o destino'],
@@ -180,8 +184,9 @@ final class ChatQueries
         if (($filters['con_diferencia'] ?? false) && ($filters['reporte'] ?? null) !== 'pagos-saldo') {
             throw new ChatException('El filtro de diferencias corresponde a Relación depósitos documentos.');
         }
-        if ($tool === 'consultar_saldos_carteras' && $filters === []) {
-            throw new ChatException('Indica el grupo o el texto que debe aparecer en el nombre de las carteras.');
+        if ($tool === 'consultar_saldos_carteras' && !($filters['todas_activas'] ?? false)
+            && array_intersect_key($filters, array_flip(['grupo_id','grupo_nombre','cartera_nombre'])) === []) {
+            throw new ChatException('Indica el grupo, el texto del nombre o si quieres todas las carteras activas.');
         }
         if (in_array($tool, ['buscar_facturas', 'buscar_complementos', 'consultar_estatus_sat'], true)) {
             $uuidPattern = '/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iD';
@@ -246,6 +251,7 @@ final class ChatQueries
             'buscar_complementos' => $this->complements($filters, $access),
             'detalle_complemento' => $this->complementDetail($filters['id'], $access),
             'consultar_pagos' => $this->payments($filters, $access),
+            'consultar_catalogos' => $this->catalogs($filters, $access),
             'consultar_saldos_carteras' => $this->walletBalances($filters, $access),
             'consultar_traspasos' => $this->transfers($filters, $access),
             'detalle_movimiento' => $this->paymentDetail($filters['id'], $access),
@@ -707,11 +713,30 @@ final class ChatQueries
         return $this->rows($sql, 'fecha DESC, id DESC', $params, $filters, 'traspaso');
     }
 
+    private function catalogs(array $filters, ChatAccess $access): array
+    {
+        $params = [];
+        $sql = ChatCatalogs::query($filters, $access, $params);
+        $catalog = ['catalogo' => $filters['catalogo']];
+        if ($filters['contar'] ?? false) {
+            return $this->countRows($sql, $params, $filters) + $catalog;
+        }
+        [$order, $page, $size, $offset] = self::window($filters, 'nombre ASC, id ASC');
+        $limit = $size + 1;
+        $rows = $this->fetch("{$sql} ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}", $params);
+        return $catalog + ['filas' => array_slice($rows, 0, $size), 'hay_mas' => count($rows) > $size,
+            'pagina' => $page, 'limite' => $size];
+    }
+
     private function walletBalances(array $filters, ChatAccess $access): array
     {
         $params = [];
         $paymentScope = $this->paymentScope($access, $params, true, 'cap');
-        $conditions = [$access->walletConditions($params)];
+        $allActive = $filters['todas_activas'] ?? false;
+        if ($allActive && !$access->allows('consultar_catalogos')) {
+            throw new ChatException('Tu cuenta no tiene permiso para esta consulta.', 403);
+        }
+        $conditions = [$access->walletConditions($params, !$allActive || ($filters['panel'] ?? false))];
         $groupId = $filters['grupo_id'] ?? null;
         $groupName = $filters['grupo_nombre'] ?? null;
         $walletName = $filters['cartera_nombre'] ?? null;
@@ -747,7 +772,8 @@ final class ChatQueries
         if ($rows === []) {
             return $result + ['mensaje' => $byGroup
                 ? 'No encontré carteras activas accesibles para ese grupo.'
-                : 'No encontré carteras activas accesibles con «' . $walletName . '» en el nombre.'];
+                : ($walletName === null ? 'No encontré carteras activas accesibles.'
+                    : 'No encontré carteras activas accesibles con «' . $walletName . '» en el nombre.')];
         }
         if (count($rows) > 1 && ((int) $rows[0]['exacto'] === 0 || (int) $rows[1]['exacto'] === 1)) {
             $result['grupos'] = array_map(static fn (array $row): array => [
@@ -1088,7 +1114,7 @@ final class ChatQueries
         return $conditions === [] ? '' : ' AND ' . implode(' AND ', $conditions);
     }
 
-    private static function contains(string $column, string $value, array &$params): string
+    public static function contains(string $column, string $value, array &$params): string
     {
         $value = strtr($value, ['!' => '!!', '%' => '!%', '_' => '!_']);
         return $column . ' LIKE ' . ChatAccess::bind($params, '%' . $value . '%') . " ESCAPE '!'";

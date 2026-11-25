@@ -567,5 +567,50 @@ $sent = [];
 $check(str_contains($satAsk('¿Está vigente la factura #13?'), 'Faltan datos fiscales') && $sent === [],
     'Un CFDI con datos incompletos queda sin verificar sin enviar una petición.');
 
+$pdo->exec('ALTER TABLE clientes ADD COLUMN rfc VARCHAR(20), ADD COLUMN info_3 VARCHAR(20), ADD COLUMN lidera INT DEFAULT 0');
+$pdo->exec('ALTER TABLE grupo ADD COLUMN cliente_padre INT, ADD COLUMN cuenta_salida INT');
+$pdo->exec('ALTER TABLE empresas ADD COLUMN regimen VARCHAR(30), ADD COLUMN cp VARCHAR(8)');
+$pdo->exec('ALTER TABLE claves_cortas ADD COLUMN cp VARCHAR(8), ADD COLUMN regimen_fiscal INT,
+    ADD COLUMN facturacion_automatica VARCHAR(4), ADD COLUMN documentos_vivos INT');
+$pdo->exec('ALTER TABLE bancos ADD COLUMN nombre_corto VARCHAR(30), ADD COLUMN status_banco CHAR(2)');
+$pdo->exec("UPDATE bancos SET nombre_corto='Cuenta QA',status_banco='AC' WHERE id=41");
+$pdo->exec("UPDATE clientes SET rfc='QA123456XX',info_3='fin_dia',lidera=1 WHERE id=101");
+$pdo->exec("UPDATE grupo SET cliente_padre=101,cuenta_salida=41 WHERE id=2");
+$pdo->exec("UPDATE claves_cortas SET cp='01000',regimen_fiscal=601,facturacion_automatica='Si',documentos_vivos=7 WHERE id=1");
+$pdo->exec('CREATE TEMPORARY TABLE formas_pago (id INT PRIMARY KEY, clave INT, forma_pago VARCHAR(40))');
+$pdo->exec("INSERT INTO formas_pago VALUES (71,3,'Transferencia electrónica'),(3,1,'Efectivo')");
+$pdo->exec('CREATE TEMPORARY TABLE fondeadora_ejec (id INT PRIMARY KEY,id_empresa INT,minuto_ejecucion INT,pass_coreo VARCHAR(40))');
+$pdo->exec("INSERT INTO fondeadora_ejec VALUES (400,41,25,'credencial-prueba')");
+$catalogTool = 'consultar_catalogos';
+$catalogRun = static fn (array $filters): array => $run($catalogTool, $filters, $staff);
+$listed = $catalogRun(['catalogo'=>'carteras','estado'=>'activo','limite'=>1]);
+$total = $catalogRun(['catalogo'=>'carteras','estado'=>'activo','contar'=>true,'limite'=>1,'pagina'=>4]);
+$panel = $catalogRun(['catalogo'=>'carteras','estado'=>'activo','contar'=>true,'panel'=>true]);
+$check(count($listed['filas']) === 1 && $listed['hay_mas'] && $total['totales']['registros'] === $panel['totales']['registros'] + 1,
+    'El total de carteras ignora tamaño y página. El panel excluye la cartera reservada.');
+$check($ids($catalogRun(['catalogo'=>'claves','cartera_id'=>101])) === [1,20,3]
+    && count($catalogRun(['catalogo'=>'claves','rfc'=>'RFCQA123'])['filas']) === 2,
+    'Cartera y RFC son filtros distintos. Se conservan coincidencias de carteras distintas.');
+$check($ids($catalogRun(['catalogo'=>'formas','codigo'=>'03'])) === [71]
+    && $ids($catalogRun(['catalogo'=>'formas','id'=>3])) === [3],
+    'La clave SAT 03 no es el ID interno 3.');
+$catalogBank = $catalogRun(['catalogo'=>'bancos','empresa_id'=>23,'estado'=>'activo','moneda'=>'MXN'])['filas'][0];
+$catalogFunding = $catalogRun(['catalogo'=>'fondeadoras','id'=>400])['filas'][0];
+$check($catalogBank['cuenta'] === '•••• 9012' && $catalogBank['clabe'] === '•••• 5678'
+    && $catalogFunding['banco_id'] === 41 && $catalogFunding['minuto_ejecucion'] === 25
+    && !array_key_exists('pass_coreo',$catalogFunding), 'Enmascara en origen y no selecciona contraseñas.');
+$check($ids($catalogRun(['catalogo'=>'empresas','id'=>132])) === [132]
+    && !$client->allows($catalogTool) && !$limitedAdmin->allows($catalogTool),
+    'El administrador conserva acceso a la empresa 132. Los demás roles quedan sujetos al módulo.');
+$check(str_contains($lookupAsk('¿Cuántas carteras activas aparecen en el panel?',44,$oldThread),'visibles en el panel')
+    && str_contains($lookupAsk('Cartera #101',44,$oldThread),'Al final del día')
+    && str_contains($lookupAsk('¿Qué claves cortas tiene esta cartera?',44,$oldThread),'Documentos vivos 7'),
+    'El chat aplica el filtro de panel y resuelve esta cartera con su ID guardado.');
+$lookupAsk('Enumera 1 clave corta de la cartera #101',44,$oldThread);
+$check(str_contains($lookupAsk('¿Cuántas hay?',44,$oldThread),'en tu alcance: 3.')
+    && str_contains($lookupAsk('¿Qué carteras pertenecen al grupo Calle Ley (2)?',44,$oldThread),'Grupo Calle Ley')
+    && str_contains($lookupAsk('¿Cuántas carteras activas hay?',42,$lookupChat),'no tiene permiso'),
+    'Conserva filtros para contar toda la colección y deniega el catálogo a no administradores.');
+
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 
