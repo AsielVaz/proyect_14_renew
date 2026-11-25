@@ -264,29 +264,33 @@
 
     form.addEventListener('submit', (event) => {
         event.preventDefault();
-        const text = input.value.trim();
+        const draft = input.value;
+        const text = draft.trim();
         if (!text || closed || !hydrated || busy) return;
+        input.value = '';
         work(async () => {
-            if (retry?.text !== text || retry?.id !== active) {
-                const bytes = crypto.getRandomValues(new Uint8Array(16));
-                retry = { id: active, text, token: Array.from(bytes, (part) => part.toString(16).padStart(2, '0')).join('') };
-            }
-            if (!active) {
-                const data = await api('new', { solicitud: retry.token }, true);
-                select(data.id);
-                retry.id = active;
-            }
             try {
+                if (retry?.text !== text || retry?.id !== active) {
+                    const bytes = crypto.getRandomValues(new Uint8Array(16));
+                    retry = { id: active, text, token: Array.from(bytes, (part) => part.toString(16).padStart(2, '0')).join('') };
+                }
+                if (!active) {
+                    const data = await api('new', { solicitud: retry.token }, true);
+                    select(data.id);
+                    retry.id = active;
+                }
                 const data = await api('send', { id: active, solicitud: retry.token, mensaje: text }, true);
                 renderThread(data);
-                input.value = '';
                 retry = null;
                 notice('Respuesta recibida.');
             } catch (error) {
-                try {
-                    renderThread(await api('thread', { id: active }));
-                } catch {
-                    // Conserva el error del envío y el borrador para reintentar.
+                input.value = draft;
+                if (active) {
+                    try {
+                        renderThread(await api('thread', { id: active }));
+                    } catch {
+                        // Conserva el error del envío y el borrador para reintentar.
+                    }
                 }
                 throw error;
             }
