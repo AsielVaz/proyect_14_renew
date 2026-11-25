@@ -122,7 +122,9 @@ Para una pregunta de cantidad («cuántas facturas», «cuántos pagos») usa co
 Cuando el usuario pide sumar importes usa totalizar=true y presenta cada moneda por separado. No sumes una página parcial.
 Un pago, un saldo PPD y el restante de un reporte son conceptos distintos. Conserva la etiqueta de la fuente.
 Para depósitos y retiros usa consultar_pagos o detalle_movimiento. Usa vista=asignados, sin-asignar o cartera según la consulta.
+Para traspasos entre carteras usa consultar_traspasos. Consulta el banco 99 y muestra cada movimiento con su ID y el saldo acreditable con signo. El origen lleva saldo negativo y el destino lleva saldo positivo. Si falta un lado, informa que no hay contrapartida verificable en el alcance.
 Para depósitos pendientes de conciliar, consulta movimientos con pendientes_documento=true. Movimiento sin documento (id_factura=2) queda fuera. Usa Conta14 para verificar documentación relacionada y Relación depósitos documentos con con_diferencia=true para los depósitos vinculados con diferencia. No combines sus cifras como si fueran el mismo conjunto.
+Para sumar el saldo actual de las carteras de un grupo o de todas las carteras que contienen texto en su nombre, usa consultar_saldos_carteras. Presenta el saldo acreditable y la cantidad de carteras del resultado. Si hay varios grupos posibles, pide su ID.
 Para explicar por qué cambió el saldo de una cartera, usa consultar_pagos con vista=cartera y fecha de asignación. Consulta los movimientos y totaliza el saldo acreditable por tipo para el periodo. El importe del depósito y el cambio acreditado pueden diferir. Para saldo bancario usa consultar_banco y la fecha del estado de cuenta.
 Para PPD pendientes usa pendientes_ppd con la empresa emisora y la clave corta correspondiente al RFC. Incluye coincidencias del mismo RFC en otras carteras accesibles.
 Para proveedores fuera de rango usa generar_reporte con reporte=banking y el periodo pedido. Usa el porcentaje real y el rango devueltos.
@@ -219,6 +221,8 @@ TEXT;
             'buscar_complementos', 'detalle_complemento' => 'complemento_id',
             'consultar_banco' => 'linea_bancaria_id',
             'consultar_stp' => 'stp_id',
+            'consultar_saldos_carteras' => null,
+            'consultar_traspasos' => 'traspaso_movimiento_id',
             'generar_reporte' => 'reporte',
             'consultar_correos' => 'correo_log_id',
         };
@@ -230,7 +234,7 @@ TEXT;
         }
         if ($tool === 'generar_reporte') {
             $context['referencia'][$key] = $result['reporte'];
-        } elseif (!isset($result['totales'])) {
+        } elseif ($key !== null && !isset($result['totales'])) {
             unset($context['referencia'][$key]);
             if ($count === 1 && empty($result['varias_coincidencias'])) {
                 $context['referencia'][$key] = (int) $result['filas'][0]['id'];

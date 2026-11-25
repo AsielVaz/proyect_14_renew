@@ -6,6 +6,7 @@ namespace App;
 
 use DateTimeImmutable;
 use PDO;
+use PDOException;
 
 final class ChatQueries
 {
@@ -40,6 +41,7 @@ final class ChatQueries
         'movimiento' => 'detalle_movimiento',
         'banco' => 'consultar_banco',
         'stp' => 'consultar_stp',
+        'traspaso' => 'consultar_traspasos',
     ];
 
     public function __construct(private readonly PDO $pdo) {}
@@ -79,6 +81,14 @@ final class ChatQueries
                     'description' => 'En cartera usa fecha de asignación y saldo acreditable'],
                 'pendientes_documento' => ['type' => 'boolean', 'description' => 'Depósitos asignados o sin asignar que siguen sin documento relacionado'],
                 'tipo' => ['type' => 'string', 'enum' => ['deposito', 'retiro', 'comision']],
+            ] + $noFolio + $amount + $listing + $text, []],
+            'consultar_saldos_carteras' => ['Suma el saldo acreditable actual de todas las carteras activas autorizadas de un grupo o con texto en el nombre. Si hay varios grupos con el mismo criterio, devuelve candidatos para elegir.', [
+                'grupo_id' => ['type' => 'integer', 'description' => 'ID interno del grupo de carteras'],
+                'grupo_nombre' => ['type' => 'string', 'description' => 'Nombre completo o parcial del grupo'],
+                'cartera_nombre' => ['type' => 'string', 'description' => 'Texto literal que debe aparecer en el nombre de la cartera'],
+            ], []],
+            'consultar_traspasos' => ['Traspasos entre carteras (banco 99). Busca por ID de cualquiera de los movimientos, importe, cartera o fecha. Muestra origen negativo y destino positivo si ambos son accesibles.', [
+                'cliente_id' => ['type' => 'integer', 'description' => 'ID de la cartera de origen o destino'],
             ] + $noFolio + $amount + $listing + $text, []],
             'detalle_movimiento' => ['Detalle de pago o movimiento contable por su ID exacto, con documentos y líneas bancarias autorizadas.', $id, ['id']],
             'consultar_banco' => ['Líneas de estado de cuenta. El ID de línea bancaria es distinto del ID de pago. Busca por referencia, importe o filtros.', [
@@ -167,6 +177,9 @@ final class ChatQueries
         if (($filters['con_diferencia'] ?? false) && ($filters['reporte'] ?? null) !== 'pagos-saldo') {
             throw new ChatException('El filtro de diferencias corresponde a Relación depósitos documentos.');
         }
+        if ($tool === 'consultar_saldos_carteras' && $filters === []) {
+            throw new ChatException('Indica el grupo o el texto que debe aparecer en el nombre de las carteras.');
+        }
         if (in_array($tool, ['buscar_facturas', 'buscar_complementos'], true)) {
             $uuidPattern = '/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iD';
             if (!isset($filters['uuid']) && preg_match($uuidPattern, $filters['folio'] ?? '')) {
@@ -219,6 +232,8 @@ final class ChatQueries
             'buscar_complementos' => $this->complements($filters, $access),
             'detalle_complemento' => $this->complementDetail($filters['id'], $access),
             'consultar_pagos' => $this->payments($filters, $access),
+            'consultar_saldos_carteras' => $this->walletBalances($filters, $access),
+            'consultar_traspasos' => $this->transfers($filters, $access),
             'detalle_movimiento' => $this->paymentDetail($filters['id'], $access),
             'consultar_banco' => $this->bank($filters, $access),
             'consultar_stp' => $this->stp($filters, $access),
@@ -453,9 +468,188 @@ final class ChatQueries
             WHERE {$where}", 'fecha DESC, id DESC', $params, $filters, 'movimiento', ['monto', 'saldo_acreditable']);
     }
 
-    private function paymentScope(ChatAccess $access, array &$params): string
+    private function transfers(array $filters, ChatAccess $access): array
     {
-        return $access->conditions(self::PAYMENT_COMPANY, 'CAST(p.nombre AS UNSIGNED)', $params, false)
+        // La tabla auxiliar puede faltar en instalaciones con movimientos históricos.
+        $links = 'SELECT pago_entrada_id, pago_salida_id FROM s14_traspaso_links';
+        try {
+            $this->pdo->query($links . ' LIMIT 0');
+        } catch (PDOException $error) {
+            if ($error->getCode() !== '42S02') {
+                throw $error;
+            }
+            $links = 'SELECT NULL AS pago_entrada_id, NULL AS pago_salida_id WHERE 1=0';
+        }
+        $params = [];
+        $scope = $this->paymentScope($access, $params);
+        $company = self::PAYMENT_COMPANY;
+        $date = 'COALESCE(p.fecha_asignacion, p.fecha_captura)';
+        $where = self::condition($filters, ['fecha' => 'mov.fecha', 'monto' => ['mov.monto']], $params);
+        foreach (['id' => ['mov.origen_id', 'mov.destino_id'],
+            'cliente_id' => ['mov.cartera_origen_id', 'mov.cartera_destino_id'],
+            'empresa_id' => ['mov.empresa_origen_id', 'mov.empresa_destino_id'],
+            'cliente' => ['mov.origen', 'mov.destino'],
+            'empresa' => ['mov.empresa_origen', 'mov.empresa_destino']] as $key => [$origin, $destination]) {
+            if (isset($filters[$key])) {
+                $byName = in_array($key, ['cliente', 'empresa'], true);
+                $left = $byName
+                    ? self::contains($origin, $filters[$key], $params)
+                    : $origin . ' = ' . ChatAccess::bind($params, $filters[$key]);
+                $right = $byName
+                    ? self::contains($destination, $filters[$key], $params)
+                    : $destination . ' = ' . ChatAccess::bind($params, $filters[$key]);
+                $where .= " AND ({$left} OR {$right})";
+            }
+        }
+
+        // Usa el vínculo registrado y exige una única mejor coincidencia por cada lado en el histórico.
+        $sql = "WITH registrados AS ({$links}),
+            opciones AS (
+                SELECT d.id AS destino_id, o.id AS origen_id, ABS(salto.paso) AS distancia,
+                    TRIM(COALESCE(d.detalle,'')) = TRIM(COALESCE(o.detalle,'')) AS detalle_igual
+                FROM pagos d
+                CROSS JOIN (SELECT -3 paso UNION ALL SELECT -2 UNION ALL SELECT -1
+                            UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3) salto
+                JOIN pagos o ON o.id = CAST(d.id AS SIGNED) + salto.paso
+                LEFT JOIN registrados rd ON rd.pago_entrada_id = d.id
+                LEFT JOIN registrados ro ON ro.pago_salida_id = o.id
+                WHERE d.banco = '99' AND o.banco = '99'
+                    AND d.saldo_acreditable > 0 AND o.saldo_acreditable < 0
+                    AND ABS(d.saldo_acreditable + o.saldo_acreditable) < 0.00001
+                    AND CAST(d.nombre AS UNSIGNED) > 0 AND CAST(o.nombre AS UNSIGNED) > 0
+                    AND CAST(d.nombre AS UNSIGNED) <> CAST(o.nombre AS UNSIGNED)
+                    AND COALESCE(d.fecha_asignacion,d.fecha_captura) = COALESCE(o.fecha_asignacion,o.fecha_captura)
+                    AND (COALESCE(d.origen_traspaso,0) = 0 OR d.origen_traspaso = CAST(o.nombre AS UNSIGNED))
+                    AND (COALESCE(o.origen_traspaso,0) = 0 OR o.origen_traspaso = CAST(o.nombre AS UNSIGNED))
+                    AND (COALESCE(d.destino_traspaso,0) = 0 OR d.destino_traspaso = CAST(d.nombre AS UNSIGNED))
+                    AND (COALESCE(o.destino_traspaso,0) = 0 OR o.destino_traspaso = CAST(d.nombre AS UNSIGNED))
+                    AND (ABS(salto.paso) = 1 OR (
+                        d.origen_traspaso > 0 AND d.destino_traspaso > 0 AND o.origen_traspaso > 0 AND o.destino_traspaso > 0
+                        AND TRIM(COALESCE(d.detalle,'')) = TRIM(COALESCE(o.detalle,''))))
+                    AND rd.pago_entrada_id IS NULL AND ro.pago_salida_id IS NULL
+            ), preferidos AS (
+                SELECT opciones.*,
+                    RANK() OVER (PARTITION BY destino_id ORDER BY distancia, detalle_igual DESC) AS orden_destino,
+                    RANK() OVER (PARTITION BY origen_id ORDER BY distancia, detalle_igual DESC) AS orden_origen,
+                    COUNT(*) OVER (PARTITION BY destino_id, distancia, detalle_igual) AS candidatos_destino,
+                    COUNT(*) OVER (PARTITION BY origen_id, distancia, detalle_igual) AS candidatos_origen
+                FROM opciones
+            ), pares AS (
+                SELECT pago_entrada_id AS destino_id, pago_salida_id AS origen_id FROM registrados
+                UNION ALL
+                SELECT destino_id, origen_id FROM preferidos
+                WHERE orden_destino = 1 AND orden_origen = 1 AND candidatos_destino = 1 AND candidatos_origen = 1
+            ), completos AS (
+                SELECT pares.destino_id, pares.origen_id
+                FROM pares JOIN pagos d ON d.id = pares.destino_id
+                JOIN pagos o ON o.id = pares.origen_id
+                WHERE d.banco = '99' AND o.banco = '99' AND d.saldo_acreditable > 0 AND o.saldo_acreditable < 0
+                    AND ABS(d.saldo_acreditable + o.saldo_acreditable) < 0.00001
+                    AND CAST(d.nombre AS UNSIGNED) > 0 AND CAST(o.nombre AS UNSIGNED) > 0
+                    AND CAST(d.nombre AS UNSIGNED) <> CAST(o.nombre AS UNSIGNED)
+            ), visibles AS (
+                SELECT p.id, {$date} AS fecha, CAST(p.nombre AS UNSIGNED) AS cartera_id, cl.nombre AS cartera,
+                    p.saldo_acreditable, {$company} AS empresa_id, e.razon AS empresa
+                FROM pagos p LEFT JOIN captura c ON c.id = p.id_captura
+                LEFT JOIN clientes cl ON cl.id = CAST(p.nombre AS UNSIGNED)
+                LEFT JOIN empresas e ON e.id = {$company}
+                WHERE p.banco = '99' AND p.saldo_acreditable <> 0 AND {$scope}
+            ), movimientos AS (
+                SELECT vis.*, enlace.contraparte_id
+                FROM visibles vis
+                LEFT JOIN (
+                    SELECT CASE WHEN lados.es_origen THEN completos.origen_id ELSE completos.destino_id END AS movimiento_id,
+                        MIN(CASE WHEN lados.es_origen THEN completos.destino_id ELSE completos.origen_id END) AS contraparte_id
+                    FROM completos CROSS JOIN (SELECT 0 AS es_origen UNION ALL SELECT 1) lados
+                    GROUP BY movimiento_id HAVING COUNT(*) = 1
+                ) enlace ON enlace.movimiento_id = vis.id
+            )
+            SELECT a.id, COALESCE(a.fecha, b.fecha) AS fecha, ABS(a.saldo_acreditable) AS monto, 'MXN' AS moneda,
+                CASE WHEN a.saldo_acreditable < 0 THEN a.id ELSE b.id END AS origen_id,
+                CASE WHEN a.saldo_acreditable > 0 THEN a.id ELSE b.id END AS destino_id,
+                CASE WHEN a.saldo_acreditable < 0 THEN a.cartera_id ELSE b.cartera_id END AS cartera_origen_id,
+                CASE WHEN a.saldo_acreditable > 0 THEN a.cartera_id ELSE b.cartera_id END AS cartera_destino_id,
+                CASE WHEN a.saldo_acreditable < 0 THEN a.cartera ELSE b.cartera END AS origen,
+                CASE WHEN a.saldo_acreditable > 0 THEN a.cartera ELSE b.cartera END AS destino,
+                CASE WHEN a.saldo_acreditable < 0 THEN a.empresa_id ELSE b.empresa_id END AS empresa_origen_id,
+                CASE WHEN a.saldo_acreditable > 0 THEN a.empresa_id ELSE b.empresa_id END AS empresa_destino_id,
+                CASE WHEN a.saldo_acreditable < 0 THEN a.empresa ELSE b.empresa END AS empresa_origen,
+                CASE WHEN a.saldo_acreditable > 0 THEN a.empresa ELSE b.empresa END AS empresa_destino,
+                CASE WHEN a.saldo_acreditable < 0 THEN a.saldo_acreditable ELSE b.saldo_acreditable END AS saldo_origen,
+                CASE WHEN a.saldo_acreditable > 0 THEN a.saldo_acreditable ELSE b.saldo_acreditable END AS saldo_destino
+            FROM movimientos a LEFT JOIN visibles b ON b.id = a.contraparte_id
+            WHERE b.id IS NULL OR a.saldo_acreditable > 0";
+        $sql = "SELECT * FROM ({$sql}) mov WHERE 1=1{$where}";
+        if (($filters['contar'] ?? false) || ($filters['totalizar'] ?? false)) {
+            $count = $this->fetch("SELECT COUNT(CASE WHEN origen_id IS NOT NULL AND destino_id IS NOT NULL THEN 1 END) AS pares,
+                COUNT(*) AS visibles, SUM(CASE WHEN origen_id IS NOT NULL AND destino_id IS NOT NULL THEN monto ELSE 0 END) AS monto
+                FROM ({$sql}) traspasos", $params)[0];
+            return ['filas' => [], 'hay_mas' => false, 'periodo' => array_intersect_key($filters, ['desde'=>true, 'hasta'=>true]),
+                'totales' => ['registros' => (int) $count['pares'], 'sin_contrapartida' => (int) $count['visibles'] - (int) $count['pares'],
+                    'monto' => round((float) $count['monto'], 2), 'moneda' => 'MXN']];
+        }
+        return $this->rows($sql, 'fecha DESC, id DESC', $params, $filters, 'traspaso');
+    }
+
+    private function walletBalances(array $filters, ChatAccess $access): array
+    {
+        $params = [];
+        $paymentScope = $this->paymentScope($access, $params, true, 'cap');
+        $conditions = [$access->walletConditions($params)];
+        $groupId = $filters['grupo_id'] ?? null;
+        $groupName = $filters['grupo_nombre'] ?? null;
+        $walletName = $filters['cartera_nombre'] ?? null;
+        $byGroup = $groupId !== null || $groupName !== null;
+        if ($groupId !== null) {
+            $conditions[] = 'g.id = ' . ChatAccess::bind($params, $groupId);
+        }
+        if ($groupName !== null) {
+            $conditions[] = self::contains('LOWER(TRIM(g.nombre))', mb_strtolower($groupName), $params);
+        }
+        if ($walletName !== null) {
+            $conditions[] = self::contains('LOWER(c.nombre)', mb_strtolower($walletName), $params);
+        }
+        $exact = $groupName === null ? '0' : 'MAX(LOWER(TRIM(g.nombre)) = ' . ChatAccess::bind($params, mb_strtolower($groupName)) . ')';
+        $groupFields = $byGroup ? "g.id AS grupo_id, g.nombre AS grupo_nombre, {$exact} AS exacto" : 'NULL AS grupo_id, NULL AS grupo_nombre, 0 AS exacto';
+        $groupJoin = $byGroup ? 'INNER JOIN grupo g ON g.id = c.grupo' : '';
+        $groupBy = $byGroup ? ', g.id, g.nombre' : '';
+        $where = implode(' AND ', $conditions);
+        $rows = $this->fetch("SELECT grupo_id, grupo_nombre, exacto, COUNT(*) AS carteras, SUM(saldo) AS saldo
+            FROM (
+                SELECT c.id, {$groupFields}, COALESCE(SUM(p.saldo_acreditable), 0) AS saldo
+                FROM clientes c
+                {$groupJoin}
+                LEFT JOIN (pagos p LEFT JOIN captura cap ON cap.id = p.id_captura)
+                    ON p.nombre = CAST(c.id AS CHAR) AND {$paymentScope}
+                WHERE {$where}
+                GROUP BY c.id{$groupBy}
+            ) carteras
+            GROUP BY grupo_id, grupo_nombre, exacto
+            ORDER BY exacto DESC, grupo_nombre, grupo_id", $params);
+
+        $result = ['filas' => [], 'hay_mas' => false];
+        if ($rows === []) {
+            return $result + ['mensaje' => $byGroup
+                ? 'No encontré carteras activas accesibles para ese grupo.'
+                : 'No encontré carteras activas accesibles con «' . $walletName . '» en el nombre.'];
+        }
+        if (count($rows) > 1 && ((int) $rows[0]['exacto'] === 0 || (int) $rows[1]['exacto'] === 1)) {
+            $result['grupos'] = array_map(static fn (array $row): array => [
+                'id' => (int) $row['grupo_id'], 'nombre' => $row['grupo_nombre'],
+            ], array_slice($rows, 0, self::MAX_LIMIT));
+            return $result + ['mensaje' => 'Encontré varios grupos. Indica el ID del grupo que quieres consultar.'];
+        }
+        $row = $rows[0];
+        return $result + [
+            'grupo' => $byGroup ? ['id' => (int) $row['grupo_id'], 'nombre' => $row['grupo_nombre']] : null,
+            'totales' => ['registros' => (int) $row['carteras'], 'saldo_acreditable' => round((float) $row['saldo'], 2), 'moneda' => 'MXN'],
+        ];
+    }
+
+    private function paymentScope(ChatAccess $access, array &$params, bool $allowUnknownCompany = false, string $captureAlias = 'c'): string
+    {
+        $company = str_replace('c.razon', $captureAlias . '.razon', self::PAYMENT_COMPANY);
+        return $access->conditions($company, 'CAST(p.nombre AS UNSIGNED)', $params, $allowUnknownCompany)
             . ' AND ' . $access->optionalCompany('CAST(p.empresa AS UNSIGNED)', $params);
     }
 

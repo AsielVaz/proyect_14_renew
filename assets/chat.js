@@ -91,7 +91,7 @@
     }
 
     function renderAnswer(paragraph, content) {
-        const allowed = /\?(?:chat_registro=(?:factura|complemento|movimiento|banco|stp)|document=(?:invoice|complement)_(?:pdf|xml))&id=[1-9][0-9]{0,9}(?![\w&])/g;
+        const allowed = /\?(?:chat_registro=(?:factura|complemento|movimiento|banco|stp|traspaso)|document=(?:invoice|complement)_(?:pdf|xml))&id=[1-9][0-9]{0,9}(?![\w&])/g;
         let cursor = 0;
         for (const match of content.matchAll(allowed)) {
             paragraph.append(document.createTextNode(content.slice(cursor, match.index)));

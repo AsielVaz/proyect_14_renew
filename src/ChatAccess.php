@@ -84,9 +84,24 @@ final class ChatAccess
             'buscar_facturas', 'detalle_factura', 'buscar_complementos', 'detalle_complemento', 'pendientes_ppd' => true,
             'consultar_pagos', 'detalle_movimiento', 'consultar_banco' => isset($movements['totales']),
             'consultar_stp' => isset($movements['stp']),
+            'consultar_saldos_carteras' => true,
+            'consultar_traspasos' => isset($movements['traspasos']),
             'generar_reporte', 'consultar_correos' => in_array($this->role, self::REPORT_ROLES, true),
             default => false,
         };
+    }
+
+    public function walletConditions(array &$params): string
+    {
+        $params['operator_one'] = $this->operator;
+        $params['operator_restricted'] = $this->operator;
+        $conditions = [DashboardRepository::ACTIVE_WALLET_SCOPE, $this->optionalCompany('c.empresa', $params)];
+        if ($this->client !== null) {
+            $conditions[] = 'c.id = ' . self::bind($params, $this->client);
+        } elseif ($this->role !== 'administrador') {
+            $conditions[] = '(c.empresa > 0 OR p.id IS NOT NULL)';
+        }
+        return implode(' AND ', $conditions);
     }
 
     /** The expressions are fixed column references provided by the PHP repositories. */

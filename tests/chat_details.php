@@ -447,5 +447,78 @@ $check($ids($run('buscar_facturas', ['uuid'=>'A1234567-ABCD-1234-AB12-123456789A
     && $ids($run('buscar_facturas', ['id'=>2], $staff)) === [2],
     'UUID, folio e ID interno tienen filtros distintos.');
 
+$pdo->exec('ALTER TABLE pagos ADD COLUMN origen_traspaso INT, ADD COLUMN destino_traspaso INT');
+$pdo->exec('CREATE TEMPORARY TABLE s14_traspaso_links (pago_entrada_id INT PRIMARY KEY, pago_salida_id INT NOT NULL UNIQUE)');
+$pdo->exec("INSERT INTO pagos (id,nombre,monto,saldo_acreditable,empresa,banco,fecha_asignacion,origen_traspaso,destino_traspaso,detalle)
+    VALUES (2100,'102',10,10,'99','99','2026-05-05',101,102,'Traspaso adyacente'),
+           (2101,'101',-10,-10,'99','99','2026-05-05',101,102,'Traspaso adyacente'),
+           (2110,'101',-30,-30,'23','99','2026-05-05',101,102,'Traspaso intercalado'),
+           (2111,'102',30,30,'23','23','2026-05-05',101,102,'Traspaso intercalado'),
+           (2112,'102',30,30,'23','99','2026-05-05',101,102,'Traspaso intercalado'),
+           (2120,'102',50,50,'99','99','2026-05-06',101,102,'Traspaso vinculado'),
+           (2180,'101',-50,-50,'99','99','2026-05-06',101,102,'Traspaso vinculado'),
+           (2130,'101',-60,-60,'99','99','2026-05-04',101,102,'Coincidencia ambigua'),
+           (2131,'102',60,60,'99','99','2026-05-04',101,102,'Coincidencia ambigua'),
+           (2132,'101',-60,-60,'99','99','2026-05-04',101,102,'Coincidencia ambigua')");
+$pdo->exec('INSERT INTO s14_traspaso_links VALUES (2120,2180)');
+foreach ([[2101, 2100, 10.0], [2110, 2112, 30.0], [2180, 2120, 50.0]] as [$origin, $destination, $amount]) {
+    foreach ([$origin, $destination] as $movementId) {
+        $transfer = $run('consultar_traspasos', ['id' => $movementId], $staff)['filas'][0];
+        $check((int) $transfer['origen_id'] === $origin && (int) $transfer['destino_id'] === $destination
+            && (float) $transfer['saldo_origen'] === -$amount && (float) $transfer['saldo_destino'] === $amount,
+            'Ambas referencias resuelven a la misma pareja, por proximidad o vínculo explícito.');
+    }
+}
+$totals = $run('consultar_traspasos', ['contar' => true], $staff)['totales'];
+$check($totals['registros'] === 3 && $totals['sin_contrapartida'] === 3 && $totals['monto'] === 90.0,
+    'Cada par cuenta una vez y los movimientos ambiguos quedan sin pareja.');
+$scopedTransfer = $run('consultar_traspasos', ['id' => 2110], $client)['filas'][0];
+$check($scopedTransfer['destino_id'] === null && $scopedTransfer['destino'] === null
+    && $run('consultar_traspasos', ['id' => 2112], $client)['filas'] === [],
+    'El chat protege la contrapartida fuera de la cartera autorizada.');
+$transferAnswer = $lookupAsk('¿De dónde a dónde fue el último traspaso?', 44, $oldThread);
+$check(str_contains($transferAnswer, 'Origen: Cartera A (cartera #101) · movimiento #2180 · saldo acreditable -50.00 MXN')
+    && str_contains($transferAnswer, 'Destino: Cartera B (cartera #102) · movimiento #2120 · saldo acreditable +50.00 MXN'),
+    'El chat muestra las dos carteras, los IDs y los signos.');
+$scopedAnswer = $lookupAsk('Consulta el traspaso #2110', 42, $lookupChat);
+$check(str_contains($scopedAnswer, 'Destino: sin contrapartida verificable en tu alcance.') && !str_contains($scopedAnswer, '2112'),
+    'La respuesta por ID omite los datos de una cartera fuera del alcance.');
+
+$pdo->exec('ALTER TABLE clientes ADD COLUMN activo INT NOT NULL DEFAULT 1, ADD COLUMN grupo INT, ADD COLUMN empresa INT');
+$pdo->exec('CREATE TEMPORARY TABLE grupo (id INT PRIMARY KEY, nombre VARCHAR(100))');
+$pdo->exec("INSERT INTO grupo VALUES (2,'Calle Ley'),(3,'Calle Norte'),(4,'Calle Ley 2024')");
+$pdo->exec("UPDATE clientes SET grupo=2, nombre=CONCAT('JiMMy ',nombre) WHERE id IN (101,102)");
+$pdo->exec("INSERT INTO clientes (id,nombre,activo,grupo,empresa)
+    VALUES (146,'Jimmy restringido',1,2,23),(222,'Jimmy inactivo',0,2,23),
+           (223,'Jimmy saldo cero',1,2,23),(224,'Cartera Norte',1,3,23),(225,'Calle Ley futura',1,4,23),
+           (226,'Jimmy empresa reservada',1,2,132)");
+$pdo->exec("INSERT INTO pagos (id,nombre,saldo_acreditable,empresa)
+    VALUES (2200,'146',800000,'23'), (2201,'222',700000,'23'), (2202,'224',500000,'23'),
+           (2203,'101',91000,'132'), (2204,'226',92000,'132')");
+$walletTool = 'consultar_saldos_carteras';
+$walletGroup = $run($walletTool, ['grupo_id'=>2,'grupo_nombre'=>'calle ley'], $staff)['totales'];
+$walletName = $run($walletTool, ['cartera_nombre'=>'JIMMY'], $staff)['totales'];
+$check($walletGroup === $walletName && $walletGroup['registros'] === 4,
+    'Incluye las mismas carteras activas que coinciden por grupo y nombre, incluso si no tienen movimientos.');
+$groupCandidates = $run($walletTool, ['grupo_nombre'=>'Calle'], $staff);
+$check(count($groupCandidates['grupos']) === 3 && !isset($groupCandidates['totales'])
+    && $run($walletTool, ['grupo_nombre'=>'Calle Ley'], $staff)['grupo']['id'] === 2,
+    'Una coincidencia exacta prevalece y un nombre parcial ambiguo solo devuelve candidatos.');
+$check($run($walletTool, ['cartera_nombre'=>'JYMMY'], $staff)['filas'] === []
+    && !isset($run($walletTool, ['cartera_nombre'=>'%'], $staff)['totales'])
+    && !isset($run($walletTool, ['grupo_id'=>2,'grupo_nombre'=>'Calle Norte'], $staff)['totales']),
+    'Busca texto literal y valida que el nombre corresponda al ID del grupo.');
+$walletCompany = $run($walletTool, ['grupo_id'=>2], $client)['totales'];
+$walletUser = $run($walletTool, ['cartera_nombre'=>'JIMMY'], $client)['totales'];
+$check($walletCompany === $walletUser && $walletCompany['registros'] === 1
+    && $walletCompany['saldo_acreditable'] === (float) $pdo->query(
+        "SELECT SUM(saldo_acreditable) FROM pagos WHERE nombre='101' AND empresa='23'"
+    )->fetchColumn(), 'La suma de un cliente excluye otras carteras y otras empresas.');
+$check(str_contains($lookupAsk('cuando saldo tiene el grupo de calle ley (2)', 44, $oldThread), 'Grupo Calle Ley (#2)')
+    && str_contains($lookupAsk('Saldo del grupo Calle Ley 2024', 44, $oldThread), 'Grupo Calle Ley 2024 (#4)')
+    && str_contains($lookupAsk('suma todas las carteas que tengan JYMMY en su nombre', 44, $oldThread), '«JYMMY»')
+    && str_contains($lookupAsk('Suma todas las carteras que tengan «JIMMY» en su nombre', 44, $oldThread), '4 carteras activas'),
+    'El chat resuelve las frases del usuario, conserva el texto literal y reconoce nombres con números.');
+
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

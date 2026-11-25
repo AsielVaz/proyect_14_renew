@@ -9,15 +9,17 @@ use RuntimeException;
 
 final class DashboardRepository
 {
+    public const ACTIVE_WALLET_SCOPE = 'c.activo = 1
+        AND (c.id <> 1 OR :operator_one = 1)
+        AND (c.id NOT IN (146, 189) OR :operator_restricted = 32)';
+
     public function __construct(private readonly PDO $pdo)
     {
     }
 
     public function wallets(string $search, int $page, int $operatorId, int $perPage = 24): array
     {
-        $permissions = 'c.activo = 1
-            AND (c.id <> 1 OR :operator_one = 1)
-            AND (c.id NOT IN (146, 189) OR :operator_restricted = 32)';
+        $permissions = self::ACTIVE_WALLET_SCOPE;
         $params = ['operator_one' => $operatorId, 'operator_restricted' => $operatorId];
         $where = 'WHERE ' . $permissions;
         if ($search !== '') {
@@ -76,10 +78,7 @@ final class DashboardRepository
                 COALESCE(SUM(p.saldo_acreditable), 0) AS balance
             FROM clientes c
             LEFT JOIN pagos p ON p.nombre = CAST(c.id AS CHAR)
-            WHERE c.id = :id
-              AND c.activo = 1
-              AND (c.id <> 1 OR :operator_one = 1)
-              AND (c.id NOT IN (146, 189) OR :operator_restricted = 32)
+            WHERE c.id = :id AND ' . self::ACTIVE_WALLET_SCOPE . '
             GROUP BY c.id');
         $query->execute([
             'id' => $clientId,

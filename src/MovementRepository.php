@@ -302,17 +302,22 @@ final class MovementRepository
         }
 
         self::assertAdministrator($pdo, $operatorId);
+        $cepAllowsReturn = "LOWER(COALESCE(cep, '')) NOT LIKE '%banxico%'";
         $update = $pdo->prepare("UPDATE pre_ejecuta_plantilla
-            SET estado = 'D', causa_devolucion = :cause WHERE id = :id");
+            SET estado = 'D', causa_devolucion = :cause WHERE id = :id AND {$cepAllowsReturn}");
         $update->execute([
             'id' => $orderId,
             'cause' => 'Saldo retornado por sistema (' . $operatorId . ')',
         ]);
         if ($update->rowCount() === 0) {
-            $order = $pdo->prepare('SELECT 1 FROM pre_ejecuta_plantilla WHERE id = :id');
+            $order = $pdo->prepare("SELECT ({$cepAllowsReturn}) FROM pre_ejecuta_plantilla WHERE id = :id");
             $order->execute(['id' => $orderId]);
-            if (!$order->fetchColumn()) {
+            $allowsReturn = $order->fetchColumn();
+            if ($allowsReturn === false) {
                 throw new RuntimeException('La orden STP seleccionada ya no existe.');
+            }
+            if (!(bool) $allowsReturn) {
+                throw new RuntimeException('No se puede tramitar la devolución de una orden con CEP de Banxico.');
             }
         }
     }

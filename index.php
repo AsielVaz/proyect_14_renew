@@ -1969,7 +1969,6 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             trim((string) (current_user()['type'] ?? '')),
             'UTF-8'
         ) === 'administrador';
-        $canProcessStpReturn = $movementKey === 'stp' && $isMovementAdministrator;
         $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
         $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,
@@ -2193,6 +2192,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && $matchedMovementInvoiceId <= 0
                             && !$movementClientHasPendingInvoices;
                         $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice || $canAssignMovementDocument;
+                        $canProcessStpReturn = $movementKey === 'stp' && $isMovementAdministrator
+                            && stripos((string) ($row['cep'] ?? ''), 'banxico') === false;
                         $hasMovementContextMenu = $canProcessStpReturn || $canMarkMovementWithoutDocument
                             || (!$isWithdrawalMovement
                             && ($displayMovementInvoiceId > 0

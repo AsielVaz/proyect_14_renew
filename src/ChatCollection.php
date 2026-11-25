@@ -12,6 +12,7 @@ final class ChatCollection
         'buscar_facturas' => ['facturas?', 'Factura', 'facturas'],
         'buscar_complementos' => ['complementos?(?: de pago)?', 'Complemento', 'complementos'],
         'consultar_stp' => ['(?:pagos?|orden(?:es)?|transaccion(?:es)?|transferencias?) (?:de )?stp', 'Orden STP', 'órdenes STP'],
+        'consultar_traspasos' => ['traspasos?(?: entre carteras)?', 'Traspaso', 'traspasos'],
         'consultar_banco' => ['(?:lineas? bancarias?|movimientos? bancarios?)', 'Línea bancaria', 'líneas bancarias'],
         'consultar_pagos' => ['(?:pagos?|movimientos?(?: contables?)?)', 'Movimiento contable', 'movimientos contables'],
     ];
@@ -21,6 +22,10 @@ final class ChatCollection
     ): ?array
     {
         $text = preg_replace('/^\h*\d+[.)]\h*/m', '', $text) ?? $text;
+        $walletBalance = self::walletBalanceRequest($text);
+        if ($walletBalance !== null) {
+            return $walletBalance;
+        }
         $text = strtr(mb_strtolower($text), [
             'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u',
             '¿' => '', '?' => '', '¡' => '', '!' => '',
@@ -72,12 +77,24 @@ final class ChatCollection
             ] + $period + $company, 'correo_factura');
         }
 
+        $transfer = self::RESOURCES['consultar_traspasos'][0];
+        if (preg_match("~^(?:(?:consulta(?:r)?|muestra|busca|ver) )?(?:el )?{$transfer} (?:#|(?:con )?id )([1-9][0-9]{0,9})$~", $text, $movement)
+            && (int) $movement[1] <= 4294967295) {
+            return self::make('consultar_traspasos', ['id' => (int) $movement[1], 'limite' => 1] + $period + $company, 'uno');
+        }
+        if (preg_match("~^(?:de donde a donde fue|entre que carteras fue) el ultimo {$transfer}$~", $text)) {
+            return self::make('consultar_traspasos', ['limite' => 1] + $period + $company, 'uno');
+        }
+        if (preg_match("~^(?:(?:que|cuales) {$transfer} (?:hubo|hay|se hicieron)|{$transfer})$~", $text)) {
+            return self::make('consultar_traspasos', $period + $company, 'lista');
+        }
+
         $mentionsStp = preg_match('/\bstp\b/', $text);
         if ($mentionsStp) {
             $text = preg_replace('/ con (?:(?:su|el) )?estado,? (?:(?:su|el) )?comprobante (?:e|y) (?:(?:sus|las) )?incidencias$/', '', $text) ?? $text;
         }
         $aboutRecentStp = ($lastTool ?? ($previous['herramienta'] ?? null)) === 'consultar_stp'
-            && !preg_match('/\b(?:facturas?|complementos?|reportes?|bancari[oa]s?)\b/', $text);
+            && !preg_match('/\b(?:facturas?|complementos?|reportes?|traspasos?|bancari[oa]s?)\b/', $text);
         $lookup = self::stpLookupRequest($text, $aboutRecentStp, $pendingStp);
         if ($lookup !== null) {
             if (isset($lookup['filtros'])) {
@@ -118,6 +135,34 @@ final class ChatCollection
                 $quantity = (int) (($matches[2] ?? '') ?: ChatQueries::DEFAULT_LIMIT);
                 return self::make($tool, ['limite' => min(ChatQueries::MAX_LIMIT, max(1, $quantity)), 'orden' => $order] + $period + $company, 'lista');
             }
+        }
+        return null;
+    }
+
+    private static function walletBalanceRequest(string $text): ?array
+    {
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+        $text = preg_replace('/^[\s¿¡]+|[\s.?!]+$/u', '', $text) ?? $text;
+        $balance = '(?:cu[aá]n(?:to|do)(?:\s+saldo)?\s+(?:tiene|hay en)|(?:cu[aá]l es|dime|dame|consulta|muestra|calcula) el saldo(?: total)?(?: de)?|saldo(?: total)?(?: de)?)';
+        if (preg_match("~^{$balance} (?:el |del )?grupo\s+(.+)$~iu", $text, $group)) {
+            $name = preg_replace('/^(?:de\s+|#\s*|id\s+#?)/iu', '', $group[1]);
+            $filters = [];
+            if (preg_match('/^(?:([1-9][0-9]{0,9})|(.+?)\s*\(\s*([1-9][0-9]{0,9})\s*\))$/u', $name, $match)) {
+                $id = (int) ($match[1] ?: $match[3]);
+                if ($id <= 4294967295) {
+                    $filters['grupo_id'] = $id;
+                    $name = $match[2] ?? '';
+                }
+            }
+            if ($name !== '') {
+                $filters['grupo_nombre'] = preg_replace('/^[\s"\'«]+|[\s"\'»]+$/u', '', $name);
+            }
+            return self::make('consultar_saldos_carteras', $filters, 'saldo_carteras');
+        }
+
+        $sum = "(?:suma(?:me|r)?|totaliza|calcula|{$balance})(?: el saldo de)?";
+        if (preg_match("~^{$sum} (?:todas )?(?:las )?car(?:teras|teas) (?:que (?:tengan|tienen|contengan|contienen)|con) (.+?)(?: en (?:su|el) nombre)?$~iu", $text, $wallet)) {
+            return self::make('consultar_saldos_carteras', ['cartera_nombre' => preg_replace('/^[\s"\'«]+|[\s"\'»]+$/u', '', $wallet[1])], 'saldo_carteras');
         }
         return null;
     }
@@ -288,6 +333,12 @@ final class ChatCollection
             return $result['error'];
         }
         $tool = $request['herramienta'];
+        if ($tool === 'consultar_saldos_carteras') {
+            return self::walletBalanceReply($request['filtros'], $result);
+        }
+        if ($tool === 'consultar_traspasos') {
+            return self::transferReply($request, $result);
+        }
         if (($result['reporte'] ?? null) === 'banking') {
             return self::bankingReply($result);
         }
@@ -447,6 +498,70 @@ final class ChatCollection
             $lines[] = 'Total: ' . number_format($totals['registros'], 0, '.', ',');
         }
         return implode("\n", $lines);
+    }
+
+    private static function walletBalanceReply(array $filters, array $result): string
+    {
+        if (isset($result['grupos'])) {
+            $groups = array_map(static fn (array $group): string => $group['nombre'] . ' (#' . $group['id'] . ')', $result['grupos']);
+            return 'Encontré varios grupos: ' . implode(', ', $groups) . '. Escribe «Saldo del grupo #ID» con el número que corresponda.';
+        }
+        if (!isset($result['totales'])) {
+            return $result['mensaje'] ?? ChatQueries::NOT_FOUND;
+        }
+
+        $totals = $result['totales'];
+        $count = $totals['registros'];
+        $wallets = number_format($count) . ($count === 1 ? ' cartera activa' : ' carteras activas');
+        $selection = isset($result['grupo'])
+            ? 'Grupo ' . $result['grupo']['nombre'] . ' (#' . $result['grupo']['id'] . ')'
+            : 'Carteras con «' . $filters['cartera_nombre'] . '» en el nombre';
+        return $selection . ' · Saldo acreditable total de ' . $wallets . ' en tu alcance: '
+            . number_format($totals['saldo_acreditable'], 2, '.', ',') . ' ' . $totals['moneda'] . '.';
+    }
+
+    private static function transferReply(array $request, array $result): string
+    {
+        if (isset($result['totales'])) {
+            $count = $result['totales']['registros'];
+            $unpaired = $result['totales']['sin_contrapartida'];
+            $reply = 'Traspasos con origen y destino verificados: ' . number_format($count) . '.';
+            if ($unpaired > 0) {
+                $reply .= ' Movimientos sin contrapartida verificable en tu alcance: ' . number_format($unpaired) . '.';
+            }
+            return $reply;
+        }
+        if ($result['filas'] === []) {
+            return $request['modo'] === 'pagina' ? 'No hay más traspasos en ese listado.' : 'No encontré traspasos en tu alcance.';
+        }
+
+        $one = $request['modo'] === 'uno';
+        $position = ($result['pagina'] - 1) * $result['limite'];
+        $lines = [];
+        foreach ($result['filas'] as $row) {
+            $heading = !empty($row['origen_id']) && !empty($row['destino_id']) ? 'Traspaso' : 'Movimiento de traspaso';
+            $lines[] = ($one ? '' : (++$position) . '. ') . $heading . (!empty($row['fecha']) ? ' · ' . $row['fecha'] : '');
+            foreach (['origen' => 'Origen', 'destino' => 'Destino'] as $side => $label) {
+                if (empty($row[$side . '_id'])) {
+                    $lines[] = $label . ': sin contrapartida verificable en tu alcance.';
+                    continue;
+                }
+                $id = (int) $row[$side . '_id'];
+                $wallet = 'cartera #' . (int) $row['cartera_' . $side . '_id'];
+                if (!empty($row[$side])) {
+                    $wallet = trim(preg_replace('/\s+/u', ' ', $row[$side]) ?? $row[$side]) . ' (' . $wallet . ')';
+                }
+                $balance = (float) $row['saldo_' . $side];
+                $lines[] = $label . ': ' . $wallet . ' · movimiento #' . $id . ' · saldo acreditable '
+                    . ($balance > 0 ? '+' : '') . number_format($balance, 2, '.', ',') . ' ' . $row['moneda'];
+                $lines[] = '?chat_registro=movimiento&id=' . $id;
+            }
+            $lines[] = '';
+        }
+        if (!$one && $result['hay_mas']) {
+            $lines[] = 'Escribe «siguiente página» para ver más.';
+        }
+        return trim(implode("\n", $lines));
     }
 
     private static function periodLabel(array $period): string

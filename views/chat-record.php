@@ -1,7 +1,7 @@
 <?php
 $recordTitles = [
     'factura' => 'Factura', 'complemento' => 'Complemento de pago',
-    'movimiento' => 'Movimiento contable', 'banco' => 'Línea bancaria', 'stp' => 'Orden STP',
+    'movimiento' => 'Movimiento contable', 'banco' => 'Línea bancaria', 'stp' => 'Orden STP', 'traspaso' => 'Traspaso',
 ];
 $sectionTitles = [
     'conceptos' => 'Conceptos', 'facturas' => 'Facturas relacionadas', 'complementos' => 'Complementos relacionados',
@@ -19,6 +19,7 @@ $displayFields = static function (array $row, bool $main = false): void {
         $label = match ($field) {
             'id' => 'ID', 'uuid' => 'UUID', 'rfc' => 'RFC', 'pdf' => 'PDF', 'xml' => 'XML',
             'enlace' => 'Registro', 'es_ppd' => 'Pago diferido (PPD)', 'saldo_ppd_registrado' => 'Saldo PPD registrado',
+            'origen_id' => 'ID del movimiento de origen', 'destino_id' => 'ID del movimiento de destino',
             'pago_id' => 'ID del pago', 'linea_bancaria_id' => 'ID de línea bancaria',
             'estado_codigo' => 'Código de estado STP', 'posible_incidencia' => 'Posible incidencia',
             default => ucfirst(str_replace('_', ' ', $field)),

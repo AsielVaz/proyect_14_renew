@@ -15,6 +15,7 @@ final class GroupRepository
 
     public function groups(int $operatorId): array
     {
+        $visibility = DashboardRepository::ACTIVE_WALLET_SCOPE;
         $query = $this->pdo->prepare("SELECT g.id, g.nombre, g.color, g.cliente_padre,
                 g.cuenta_salida, padre.nombre AS cliente_padre_nombre,
                 COUNT(c.id) AS carteras,
@@ -23,9 +24,7 @@ final class GroupRepository
             FROM grupo g
             LEFT JOIN clientes padre ON padre.id = g.cliente_padre
             LEFT JOIN clientes c ON c.grupo = g.id
-                AND c.activo = 1
-                AND (c.id <> 1 OR :operator_one = 1)
-                AND (c.id NOT IN (146, 189) OR :operator_restricted = 32)
+                AND {$visibility}
             LEFT JOIN (
                 SELECT CAST(nombre AS UNSIGNED) AS cliente_id,
                     SUM(COALESCE(saldo_acreditable, 0)) AS saldo
@@ -65,6 +64,7 @@ final class GroupRepository
             throw new RuntimeException('El grupo solicitado no existe.');
         }
 
+        $visibility = DashboardRepository::ACTIVE_WALLET_SCOPE;
         $walletStatement = $this->pdo->prepare("SELECT c.id, c.nombre, c.clave_corta, c.color, c.texto,
                 c.imagen, c.lidera,
                 COALESCE(saldos.saldo, 0) AS saldo,
@@ -92,9 +92,7 @@ final class GroupRepository
                 ) latest ON latest.latest_id = balances.id
             ) script ON script.id_cliente = c.id
             WHERE c.grupo = :group_id
-                AND c.activo = 1
-                AND (c.id <> 1 OR :operator_one = 1)
-                AND (c.id NOT IN (146, 189) OR :operator_restricted = 32)
+                AND {$visibility}
             ORDER BY c.lidera DESC, c.nombre");
         $walletStatement->execute([
             'group_id' => $groupId,
