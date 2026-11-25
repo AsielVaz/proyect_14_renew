@@ -2192,9 +2192,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && $matchedMovementInvoiceId <= 0
                             && !$movementClientHasPendingInvoices;
                         $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice || $canAssignMovementDocument;
-                        $canProcessStpReturn = $movementKey === 'stp' && $isMovementAdministrator
-                            && stripos((string) ($row['cep'] ?? ''), 'banxico') === false;
-                        $hasMovementContextMenu = $canProcessStpReturn || $canMarkMovementWithoutDocument
+                        $hasStpContextMenu = $movementKey === 'stp' && $isMovementAdministrator;
+                        $stpHasBanxicoCep = $hasStpContextMenu && stripos((string) ($row['cep'] ?? ''), 'banxico') !== false;
+                        $hasMovementContextMenu = $hasStpContextMenu || $canMarkMovementWithoutDocument
                             || (!$isWithdrawalMovement
                             && ($displayMovementInvoiceId > 0
                                 || $movementComplementId > 0
@@ -2285,8 +2285,11 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             <?= e(display_field_value((string) $secondaryKey, $secondaryRaw, $secondaryFormats[$secondaryKey] ?? 'text')) ?>
                                         </span>
                                     <?php endforeach; ?>
-                                    <?php if ($canProcessStpReturn && $columnKey === 'status'): ?>
+                                    <?php if ($hasStpContextMenu && $columnKey === 'status'): ?>
                                         <div class="record-action-source" hidden>
+                                            <?php if ($stpHasBanxicoCep): ?>
+                                            <button type="button" data-record-action data-action-icon="✓" disabled>Movimiento completado</button>
+                                            <?php else: ?>
                                             <form method="post"
                                                 data-confirm-title="Tramitar devolución STP"
                                                 data-confirm="Al confirmar, la orden STP #<?= e($row['id']) ?> quedará marcada para devolución. Esta marca deja constancia de la solicitud de reintegro del importe a la cartera. ¿Entiendes y deseas continuar?"
@@ -2297,6 +2300,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                                 <input type="hidden" name="return_url" value="<?= e($movementReturnUrl) ?>">
                                                 <button type="submit" data-record-action data-action-danger>Tramitar devolución</button>
                                             </form>
+                                            <?php endif; ?>
                                         </div>
                                     <?php endif; ?>
                                 </td>
