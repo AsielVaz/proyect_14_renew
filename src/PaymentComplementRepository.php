@@ -534,6 +534,12 @@ final class PaymentComplementRepository
         return $treatment === null ? null : self::TREATMENT_LABELS[$treatment];
     }
 
+    public function stampedTaxTreatmentLabel(array $invoice): ?string
+    {
+        $treatment = $this->invoiceTaxTreatment($invoice, true, true);
+        return $treatment === null ? null : self::TREATMENT_LABELS[$treatment];
+    }
+
     /** @param array<string, mixed> $invoice */
     private function addTaxTreatment(array &$invoice): void
     {
@@ -544,7 +550,7 @@ final class PaymentComplementRepository
     }
 
     /** @param array<string, mixed> $invoice */
-    private function invoiceTaxTreatment(array $invoice, bool $strict = false): ?string
+    private function invoiceTaxTreatment(array $invoice, bool $strict = false, bool $xmlOnly = false): ?string
     {
         $xml = trim((string) ($invoice['xml_firmado'] ?? ''));
         if ($strict && trim((string) ($invoice['uuid'] ?? '')) === '') {
@@ -558,6 +564,12 @@ final class PaymentComplementRepository
             libxml_use_internal_errors($previous);
             if ($loaded && (!$strict || $document->documentElement?->localName === 'Comprobante')) {
                 $xpath = new \DOMXPath($document);
+                if ($xmlOnly && strcasecmp(
+                    (string) $xpath->evaluate('string(//*[local-name()="TimbreFiscalDigital"]/@UUID)'),
+                    trim((string) ($invoice['uuid'] ?? ''))
+                ) !== 0) {
+                    return null;
+                }
                 $retentions = $xpath->query('//*[local-name()="Retencion" and @Impuesto="002"]');
                 if ($retentions !== false && $retentions->length > 0) {
                     if (!$strict) {
@@ -574,8 +586,8 @@ final class PaymentComplementRepository
                             return '4';
                         }
                     }
-                    if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0
-                        || abs((float) ($invoice['retencion_iva_tasa'] ?? 0) - 0.04) < 0.000001) {
+                    if (!$xmlOnly && (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0
+                        || abs((float) ($invoice['retencion_iva_tasa'] ?? 0) - 0.04) < 0.000001)) {
                         return '4';
                     }
                     return null;
@@ -596,6 +608,9 @@ final class PaymentComplementRepository
             }
         }
 
+        if ($xmlOnly) {
+            return null;
+        }
         if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0
             || ($strict && abs((float) ($invoice['retencion_iva_tasa'] ?? 0) - 0.04) < 0.000001)) {
             return '4';

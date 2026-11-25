@@ -166,6 +166,8 @@ final class ReportRepository
             $company = 'COALESCE(NULLIF(f.razon, 0), l.empresa_origen)';
             $client = 'COALESCE(NULLIF(f.nombre, 0), l.empresa_destino)';
             $date = "COALESCE(CASE WHEN l.fecha_envia >= '1000-01-01' THEN l.fecha_envia END, l.fecha_inserta)";
+            $destination = ($filters['destinatario'] ?? false)
+                ? ", NULLIF(TRIM(REPLACE(REPLACE(l.correo_destino, CHAR(13), ' '), CHAR(10), ' ')),'') AS destinatario_registrado" : '';
             $query = "SELECT l.id, 'factura' AS tipo_correo, f.id AS factura_id, e.razon AS empresa,
                 receiver.nombre AS receptor, l.estado AS codigo_estado,
                 CASE l.estado WHEN 1 THEN 'Envío registrado'
@@ -175,7 +177,7 @@ final class ReportRepository
                     ELSE 'Sin envío confirmado' END AS estado,
                 CASE WHEN l.fecha_envia >= '1000-01-01' THEN l.fecha_envia END AS fecha_envia,
                 CASE WHEN l.fecha_recibe >= '1000-01-01' THEN l.fecha_recibe END AS fecha_recibe,
-                l.fecha_inserta
+                l.fecha_inserta{$destination}
                 FROM facturas_correo l LEFT JOIN facturas f ON f.id = l.id_factura
                 LEFT JOIN empresas e ON e.id = {$company}
                 LEFT JOIN clientes receiver ON receiver.id = {$client}";
@@ -190,7 +192,8 @@ final class ReportRepository
             'id' => 'l.id', 'empresa_id' => $company, 'empresa' => 'e.razon', 'fecha' => $date,
         ], $params);
         $sort = ($filters['orden'] ?? 'recientes') === 'antiguos' ? 'ASC' : 'DESC';
-        return $this->chatRows("{$query} WHERE {$where}", $params, $filters, "id {$sort}", $limit);
+        return $this->chatRows("{$query} WHERE {$where}", $params, $filters, "id {$sort}", $limit)
+            + ['detalle_destinatario' => $filters['tipo_correo'] === 'factura' && ($filters['destinatario'] ?? false)];
     }
 
     private function chatRows(string $sql, array $params, array $filters, string $order, int $limit): array

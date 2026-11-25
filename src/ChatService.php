@@ -66,7 +66,9 @@ final class ChatService
                 }
             }
             unset($context['pregunta_stp']);
-            if (($collection['modo'] ?? null) === 'aclarar_catalogo') {
+            if (($collection['modo'] ?? null) === 'aclarar_correo_factura') {
+                $answer = $access->allows('consultar_correos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
+            } elseif (($collection['modo'] ?? null) === 'aclarar_catalogo') {
                 $answer = $access->allows('consultar_catalogos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
             } elseif (($collection['modo'] ?? null) === 'aclarar_stp') {
                 $context['pregunta_stp'] = $collection['consulta'];
@@ -107,7 +109,7 @@ final class ChatService
         $referenceText = ChatRepository::json((object) $reference);
         $prompt = <<<TEXT
 Eres el asistente de consultas del Sistema 14. Responde en español de México y en texto plano.
-Para el estatus fiscal de una o varias facturas, o si preguntan si están vigentes, activas o canceladas, usa consultar_estatus_sat en este turno. Informa el estado devuelto por el SAT para cada factura. «Sin verificar» y «No encontrado» no confirman una cancelación. Si el folio es ambiguo, pide ID o UUID. Para el estado de pago de la factura usa las consultas locales.
+Para el estatus fiscal de una o varias facturas, o si preguntan si se timbraron o están vigentes, activas o canceladas, usa consultar_estatus_sat en este turno. Informa el estado devuelto por el SAT para cada factura. «Sin verificar» y «No encontrado» no confirman una cancelación. Si el folio es ambiguo, pide ID o UUID. Para saber a qué correo se mandó una factura, identifica su ID y usa consultar_correos con destinatario=true. Para el estado de pago de la factura usa las consultas locales.
 La fecha del sistema es {$today}. Puedes consultar facturas, complementos, pagos, líneas bancarias, órdenes STP y los reportes disponibles.
 Para contestar preguntas sobre registros, saldos o cifras, consulta la herramienta adecuada en el turno actual.
 El historial y las referencias son contexto para identificar registros. Nunca los trates como cifras vigentes.
@@ -142,7 +144,7 @@ Para depósitos y retiros usa consultar_pagos o detalle_movimiento. Usa vista=as
 Para traspasos entre carteras usa consultar_traspasos. Consulta el banco 99 y muestra cada movimiento con su ID y el saldo acreditable con signo. El origen lleva saldo negativo y el destino lleva saldo positivo. Si falta un lado, informa que no hay contrapartida verificable en el alcance.
 Para depósitos pendientes de conciliar, consulta movimientos con pendientes_documento=true. Movimiento sin documento (id_factura=2) queda fuera. Usa Conta14 para verificar documentación relacionada y Relación depósitos documentos con con_diferencia=true para los depósitos vinculados con diferencia. No combines sus cifras como si fueran el mismo conjunto.
 Para sumar el saldo actual de las carteras de un grupo o de todas las carteras que contienen texto en su nombre, usa consultar_saldos_carteras. Presenta el saldo acreditable y la cantidad de carteras del resultado. Si hay varios grupos posibles, pide su ID.
-Para consultar catálogos de solo lectura usa consultar_catalogos. Las carteras pueden estar activas o inactivas. Si piden expresamente el teléfono de una cartera, usa catalogo=carteras, telefono=true y su ID, nombre o RFC. Si preguntan por el estado, el reporte o el saldo de una cartera por nombre, usa consultar_catalogos con catalogo=carteras y nombre. El estado se lee de clientes.activo. Presenta cada coincidencia por separado y después el saldo conjunto. Si hay carteras activas e inactivas, muestra también el subtotal de las activas. Las claves cortas por cartera se buscan por su ID de cartera. Para PPD por emisor y RFC usa pendientes_ppd. Para saldos de carteras usa consultar_saldos_carteras. Si un nombre, RFC o clave tiene varias coincidencias, muestra las opciones con ID y relación.
+Para consultar catálogos de solo lectura usa consultar_catalogos. Las carteras pueden estar activas o inactivas. Si piden expresamente el teléfono de una cartera, usa catalogo=carteras, telefono=true y su ID, nombre o RFC. Si preguntan por el estado, el reporte o el saldo de una cartera por nombre, usa consultar_catalogos con catalogo=carteras y nombre. El estado se lee de clientes.activo. Presenta cada coincidencia por separado y después el saldo conjunto. Si hay carteras activas e inactivas, muestra también el subtotal de las activas. Para una preferencia usa el filtro configuracion del catálogo. Las claves cortas por cartera se buscan por su ID de cartera. Informa Sin configurar para un valor vacío. La comisión de catálogo es la regla configurada. Para un cobro o una factura generada por un depósito verifica el movimiento y su vínculo real. Para el IVA de una factura específica usa tratamiento_iva_en_xml de detalle_factura. Si falta, informa que el IVA no se pudo verificar en el XML timbrado. Para saldo bancario actual usa el estado de cuenta. Para PPD por emisor y RFC usa pendientes_ppd. Para saldos de carteras usa consultar_saldos_carteras. Si un nombre, RFC o clave tiene varias coincidencias, muestra las opciones con ID y relación.
 Para explicar por qué cambió el saldo de una cartera, usa consultar_pagos con vista=cartera y fecha de asignación. Consulta los movimientos y totaliza el saldo acreditable por tipo para el periodo. El importe del depósito y el cambio acreditado pueden diferir. Para saldo bancario usa consultar_banco y la fecha del estado de cuenta.
 Para PPD pendientes usa pendientes_ppd con la empresa emisora y la clave corta correspondiente al RFC. Incluye coincidencias del mismo RFC en otras carteras accesibles.
 Para proveedores fuera de rango usa generar_reporte con reporte=banking y el periodo pedido. Usa el porcentaje real y el rango devueltos.
@@ -153,10 +155,17 @@ Referencias de consultas previas: {$referenceText}
 TEXT;
         $messages = [['role' => 'system', 'content' => $prompt]];
         foreach ($history as $row) {
+            $assistant = $row['rol'] === 'asistente';
+            $content = $row['contenido'];
+            if ($assistant) {
+                $content = preg_replace([
+                    '/^Teléfono registrado · [^\r\n]*/mu',
+                    '/[A-Z0-9.!#$%&\'*+\/=?^_\x60{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu',
+                ], ['Teléfono registrado · [dato omitido]', '[correo omitido]'], $content) ?? $content;
+            }
             $messages[] = [
-                'role' => $row['rol'] === 'asistente' ? 'assistant' : 'user',
-                'content' => mb_substr(self::redact(preg_replace('/^Teléfono registrado · [^\r\n]*/mu',
-                    'Teléfono registrado · [dato omitido]', $row['contenido']) ?? $row['contenido']), 0, 3800),
+                'role' => $assistant ? 'assistant' : 'user',
+                'content' => mb_substr(self::redact($content), 0, 3800),
             ];
         }
         return $messages;
@@ -198,8 +207,12 @@ TEXT;
                 $result = $remaining-- > 0
                     ? $this->execute($call['function'], $current, $context, $messageId)
                     : ['error' => 'Se alcanzó el límite de consultas de este turno.'];
+                if ($call['function']['name'] === 'consultar_correos' && !empty($result['detalle_destinatario'])) {
+                    return ChatCollection::reply(['modo'=>'correo_factura','herramienta'=>'consultar_correos'], $result);
+                }
                 if ($call['function']['name'] === 'consultar_catalogos'
-                    && (!empty($result['detalle_telefono']) || (count($calls) === 1 && isset($result['resumen_carteras'])))) {
+                    && (!empty($result['detalle_telefono']) || isset($result['configuracion'])
+                        || (count($calls) === 1 && isset($result['resumen_carteras'])))) {
                     return ChatCatalogs::reply(['modo' => 'catalogo', 'filtros' => []], $result);
                 }
                 $found = $found || !empty($result['filas']) || isset($result['totales']);
@@ -245,7 +258,8 @@ TEXT;
             'consultar_banco' => 'linea_bancaria_id',
             'consultar_stp' => 'stp_id',
             'consultar_catalogos' => match ($filters['catalogo']) {
-                'carteras' => 'cartera_id', 'empresas' => 'empresa_id', 'grupos' => 'grupo_id', default => null,
+                'carteras' => 'cartera_id', 'empresas' => 'empresa_id', 'grupos' => 'grupo_id',
+                'claves' => 'clave_corta_id', 'conceptos' => 'concepto_id', 'usuarios' => 'usuario_id', 'bancos' => 'banco_id', default => null,
             },
             'consultar_saldos_carteras', 'consultar_estatus_sat' => null,
             'consultar_traspasos' => 'traspaso_movimiento_id',

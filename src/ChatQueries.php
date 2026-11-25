@@ -100,6 +100,7 @@ final class ChatQueries
             'detalle_movimiento' => ['Detalle de pago o movimiento contable por su ID exacto, con documentos y líneas bancarias autorizadas.', $id, ['id']],
             'consultar_banco' => ['Líneas de estado de cuenta. El ID de línea bancaria es distinto del ID de pago. Busca por referencia, importe o filtros.', [
                 'pago_id' => ['type' => 'integer', 'description' => 'ID interno del pago para consultar su línea bancaria relacionada'],
+                'cuenta_id' => ['type' => 'integer', 'description' => 'ID en el catálogo bancos de la cuenta para filtrar el estado de cuenta'],
             ] + $noFolio + $amount + $listing + $text, []],
             'consultar_stp' => ['Órdenes STP por fecha de creación, folio, importe, estado e incidencias. Para la última orden usa limite=1.', [
                 'estado_stp' => ['type' => 'string', 'enum' => array_keys(self::STP_LABELS)],
@@ -111,9 +112,11 @@ final class ChatQueries
                 'empresa_id' => ['type' => 'integer', 'description' => 'ID de la empresa emisora'],
                 'clave_corta_id' => ['type' => 'integer', 'description' => 'ID de la clave corta'],
                 'clave_corta' => ['type' => 'string', 'description' => 'Código exacto de la clave corta cuando no se conoce su ID'],
+                'rfc' => ['type' => 'string', 'description' => 'RFC exacto del receptor cuando la consulta ya indica el RFC'],
             ] + $listing, ['empresa_id']],
             'consultar_correos' => ['Consulta los registros de Dev de correo de facturas o correos contextuales. Distingue envío, cola y fecha programada.', [
                 'tipo_correo' => ['type' => 'string', 'enum' => ['factura', 'contextual']],
+                'destinatario' => ['type' => 'boolean', 'description' => 'Incluye el destinatario del log solo si se solicita expresamente'],
                 'factura_id' => ['type' => 'integer', 'description' => 'ID interno de la factura previamente identificada'],
             ] + array_diff_key($noFolio, ['cliente' => true]) + array_diff_key($listing, ['totalizar' => true]), ['tipo_correo']],
             'generar_reporte' => ['Consulta los reportes Conta14, Relación depósitos documentos o Banking (proveedores fuera de rango).', [
@@ -178,8 +181,14 @@ final class ChatQueries
             $filters[$key] = $key === 'monto' ? number_format($value, 2, '.', '') : $value;
         }
         if (array_diff($required, array_keys($filters)) !== []
-            || ($tool === 'pendientes_ppd' && !isset($filters['clave_corta_id']) && !isset($filters['clave_corta']))) {
+            || ($tool === 'pendientes_ppd' && !isset($filters['clave_corta_id']) && !isset($filters['clave_corta']) && !isset($filters['rfc']))) {
             throw new ChatException('Falta un identificador requerido para esta consulta.');
+        }
+        if ($tool === 'pendientes_ppd' && isset($filters['rfc'])) {
+            $filters['rfc'] = mb_strtoupper($filters['rfc']);
+            if (!preg_match('/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/uD', $filters['rfc'])) {
+                throw new ChatException('Indica el RFC completo del receptor.');
+            }
         }
         if (($filters['con_diferencia'] ?? false) && ($filters['reporte'] ?? null) !== 'pagos-saldo') {
             throw new ChatException('El filtro de diferencias corresponde a Relación depósitos documentos.');
@@ -486,6 +495,9 @@ final class ChatQueries
     private function pendingInvoices(array $filters, ChatAccess $access): array
     {
         $params = [];
+        if (isset($filters['rfc']) && !isset($filters['clave_corta_id']) && !isset($filters['clave_corta'])) {
+            return $this->invoices($filters, $access, true);
+        }
         $scope = $access->conditions('e.id', 'cc.id_cliente', $params, false);
         $company = ChatAccess::bind($params, $filters['empresa_id']);
         $column = isset($filters['clave_corta_id']) ? 'cc.id' : 'cc.clave_corta';
@@ -497,7 +509,8 @@ final class ChatQueries
             return ['filas' => [], 'hay_mas' => false, 'mensaje' => $keys === [] ? self::NOT_FOUND
                 : 'La clave corta corresponde a más de un RFC. Indica el ID de la clave corta.'];
         }
-        return $this->invoices($filters + ['rfc' => $keys[0]['rfc']], $access, true);
+        $filters['rfc'] = $keys[0]['rfc'];
+        return $this->invoices($filters, $access, true);
     }
 
     private function complements(array $filters, ChatAccess $access): array
@@ -729,7 +742,7 @@ final class ChatQueries
     {
         $params = [];
         $sql = ChatCatalogs::query($filters, $access, $params);
-        $catalog = ['catalogo' => $filters['catalogo']];
+        $catalog = array_intersect_key($filters, ['catalogo'=>true,'configuracion'=>true]);
         if ($filters['contar'] ?? false) {
             return $this->countRows($sql, $params, $filters) + $catalog;
         }
@@ -743,7 +756,7 @@ final class ChatQueries
                         SELECT marcadas.*, MAX(exacta) OVER() AS hay_exacta FROM marcadas
                     ) SELECT id,nombre,estado,telefono FROM elegibles WHERE exacta=hay_exacta";
             }
-        } elseif ($filters['catalogo'] === 'carteras' && (isset($filters['nombre']) || isset($filters['id']) || isset($filters['rfc']))) {
+        } elseif (!isset($filters['configuracion']) && $filters['catalogo'] === 'carteras' && (isset($filters['nombre']) || isset($filters['id']) || isset($filters['rfc']))) {
             return $this->walletReport($sql, $params, $filters, $access) + $catalog;
         }
         [$order, $page, $size, $offset] = self::window($filters, 'nombre ASC, id ASC');
@@ -913,6 +926,9 @@ final class ChatQueries
             $where .= " AND ce.id = (SELECT p.id_captura_edo_cta FROM pagos p LEFT JOIN captura c ON c.id = p.id_captura
                 WHERE p.id = {$requested} AND " . $this->paymentScope($access, $params) . ')';
         }
+        if (isset($filters['cuenta_id'])) {
+            $where .= ' AND b.id = ' . ChatAccess::bind($params, $filters['cuenta_id']);
+        }
         $client = self::BANK_CLIENT;
         $balance = $access->canSeeBankBalance() ? 'ce.saldo' : 'NULL';
         return $this->rows("SELECT ce.id, ce.id_captura AS captura_id, b.id AS cuenta_id, ce.fecha AS fecha_banco, ce.fecha_operacion, ce.fecha_sistema,
@@ -1036,7 +1052,9 @@ final class ChatQueries
             return ['filas' => [], 'hay_mas' => false];
         }
 
-        $result['filas'][0]['tratamiento_fiscal'] = (new PaymentComplementRepository($this->pdo))->taxTreatmentLabel($fiscal) ?? 'No determinado';
+        $tax = new PaymentComplementRepository($this->pdo);
+        $result['filas'][0]['tratamiento_fiscal'] = $tax->taxTreatmentLabel($fiscal) ?? 'No determinado';
+        $result['filas'][0]['tratamiento_iva_en_xml'] = $tax->stampedTaxTreatmentLabel($fiscal);
         if (trim((string) $fiscal['uuid']) !== '') {
             $result['filas'][0]['pdf'] = '?document=invoice_pdf&id=' . $id;
             if (trim((string) $fiscal['xml_firmado']) !== '') {

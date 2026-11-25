@@ -6,6 +6,11 @@ namespace App;
 
 final class ChatCatalogs
 {
+    private const NOTIFICATIONS = "CASE LOWER(TRIM(c.info_3))
+        WHEN 'movimiento' THEN 'Aviso por movimiento y resumen de fin de día'
+        WHEN 'fin_dia' THEN 'Al final del día (solo resumen)'
+        WHEN 'no' THEN 'Sin notificar' END";
+
     public const NAMES = [
         'carteras' => 'carteras', 'claves' => 'claves cortas', 'grupos' => 'grupos', 'empresas' => 'empresas',
         'bancos' => 'cuentas bancarias', 'conceptos' => 'conceptos facturables', 'unidades' => 'unidades de medida',
@@ -16,9 +21,14 @@ final class ChatCatalogs
 
     public static function request(string $text, array $reference): ?array
     {
+        $text = preg_replace('/^((?:que|cuales son|muestra|dime|lista) )claves (?=(?:tiene|de|asociadas a)\b)/', '$1claves cortas ', $text) ?? $text;
         $phone = self::phoneRequest($text, $reference);
         if ($phone !== null) {
             return $phone;
+        }
+        $config = self::configurationRequest($text, $reference);
+        if ($config !== null) {
+            return $config;
         }
         $article = '(?:la |las |el |los )?';
         $wallet = '(?:carteras?|clientes?)';
@@ -133,6 +143,102 @@ final class ChatCatalogs
         return null;
     }
 
+    private static function configurationRequest(string $text, array $reference): ?array
+    {
+        $topics = [
+            ['carteras','correos_saldos','a que correos se (?:mandan|envian) (?:los )?(?:movimientos y saldos|saldos y movimientos|movimientos|saldos)|correos? de (?:movimientos y saldos|saldos)'],
+            ['carteras','correo_facturacion','correo (?:principal )?de facturacion|correo para (?:facturas|complementos)'],
+            ['carteras','copias_facturacion','quien recibe copia de las facturas|copias?(?: ocultas?)? de (?:las )?facturas'],
+            ['carteras','correo_principal','correo(?: principal)?'],
+            ['carteras','notificaciones','como se notifica|como se notifican|notificaciones'],
+            ['carteras','comisiones_adicionales','comisiones? adicionales?'],
+            ['carteras','comision','que comision tiene configurada|que comision tiene|comision(?: configurada)?'],
+            ['carteras','lidera','esta marcada para liderar|marcada para liderar'],
+            ['grupos','cartera_padre','cartera padre'],
+            ['claves','documentos_vivos','cuantos documentos vivos tiene|documentos vivos(?: de)?'],
+            ['claves','facturacion_automatica','facturacion automatica|factura automaticamente'],
+            ['carteras','facturacion_automatica','facturacion automatica|factura automaticamente'],
+            ['carteras','razon_social','razon social'],
+            ['conceptos','iva','iva(?: configurado)?|facturacion automatica'],
+            ['bancos','saldo_inicial','saldo inicial'],
+            ['usuarios','empresas_permitidas','empresas permitidas|empresas vinculadas'],
+        ];
+        if (preg_match('/^(.+?) (factura automaticamente|esta marcada para liderar)$/', $text, $reverse)) {
+            $text = $reverse[2] . ' de ' . $reverse[1];
+        }
+        $nouns = ['carteras'=>'cartera', 'grupos'=>'grupo', 'claves'=>'clave(?: corta)?',
+            'conceptos'=>'concepto(?: facturable)?', 'usuarios'=>'usuario', 'bancos'=>'(?:cuenta bancaria|banco)'];
+        $keys = ['carteras'=>'cartera_id', 'grupos'=>'grupo_id', 'claves'=>'clave_corta_id',
+            'conceptos'=>'concepto_id', 'usuarios'=>'usuario_id', 'bancos'=>'banco_id'];
+        foreach ($topics as [$catalog, $field, $topic]) {
+            $noun = $nouns[$catalog];
+            $prefix = '(?:(?:cual es|cuales son|dime|dame|consulta|muestra) )?(?:el |la |los |las |una |un )?';
+            if (!preg_match("~^{$prefix}(?:{$topic})(?: (?:de|del|para|a|en|tiene)?)?(?: (?:la |el )?({$noun})(?: (.+))?| ((?:esta|este|esa|ese) {$noun}))?$~", $text, $match)) {
+                continue;
+            }
+            $value = trim($match[2] ?? '');
+            if ($value === '') {
+                $id = $reference[$keys[$catalog]] ?? null;
+                if ($id === null) {
+                    // Un tema compartido requiere que la pregunta identifique su catálogo.
+                    if (empty($match[3]) && in_array($field, ['facturacion_automatica','iva','saldo_inicial'], true)) {
+                        continue;
+                    }
+                    return ['modo' => 'aclarar_catalogo', 'mensaje' => 'Indica el nombre, clave o ID del registro que quieres consultar.'];
+                }
+                $filters = ['catalogo' => $catalog, 'id' => (int) $id];
+            } else {
+                $canonical = ['carteras'=>'cartera','grupos'=>'grupo','claves'=>'clave corta','conceptos'=>'concepto','usuarios'=>'usuario','bancos'=>'cuenta bancaria'];
+                $parsed = self::request($canonical[$catalog] . ' ' . $value, $reference);
+                $filters = $parsed['filtros'] ?? [];
+            }
+            if (array_intersect_key($filters, ['id'=>true,'nombre'=>true,'codigo'=>true,'rfc'=>true]) !== []) {
+                return ['herramienta'=>'consultar_catalogos','modo'=>'catalogo',
+                    'filtros'=>['configuracion'=>$field] + $filters];
+            }
+        }
+        return null;
+    }
+
+    private static function configurationFields(string $catalog, string $field, ChatAccess $access, array &$params): string
+    {
+        $wallet = match ($field) {
+            'correo_principal' => 'c.correo AS correo_principal_saldos',
+            'correos_saldos' => 'c.correo AS correo_principal_saldos, c.correo_2_s AS correo_saldos_2, c.correo_3_s AS correo_saldos_3',
+            'correo_facturacion' => 'c.correo2 AS correo_principal_facturacion',
+            'copias_facturacion' => 'c.correo2_2_f AS copia_oculta_1, c.correo2_3_f AS copia_oculta_2',
+            'notificaciones' => self::NOTIFICATIONS . ' AS notificaciones',
+            'comision' => 'c.comision AS comision, c.esquema_comision AS esquema_comision',
+            'comisiones_adicionales' => implode(', ', array_map(static function (int $i) use ($access, &$params): string {
+                $scope = $access->optionalCompany('sub.empresa', $params);
+                return "(SELECT CONCAT('#',sub.id,' ',sub.nombre) FROM clientes sub WHERE sub.id=c.`{$i}_subcomision`
+                    AND {$scope}) AS cartera_comision_{$i}, c.porc_{$i}_subcomision AS porcentaje_comision_{$i}";
+            }, [1,2,3])),
+            'lidera' => "CASE c.lidera WHEN 1 THEN 'Sí' WHEN 0 THEN 'No' END AS marcada_para_liderar",
+            'facturacion_automatica' => 'c.facturacion_automatica AS facturacion_automatica_cartera',
+            'razon_social' => 'c.razon_social',
+            default => null,
+        };
+        if ($catalog === 'carteras' && $wallet !== null) {
+            return "c.nombre, IF(c.activo=1,'Activa','Inactiva') AS estado, {$wallet}";
+        }
+        return match ([$catalog, $field]) {
+            ['grupos','cartera_padre'] => "t.nombre, CASE WHEN c.id IS NOT NULL THEN CONCAT('#',c.id,' ',c.nombre) END AS cartera_padre",
+            ['claves','documentos_vivos'] => 't.razon_social AS nombre, t.clave_corta, c.nombre AS cartera, t.documentos_vivos',
+            ['claves','facturacion_automatica'] => 't.razon_social AS nombre, t.clave_corta, c.nombre AS cartera,
+                t.facturacion_automatica AS facturacion_automatica_clave, c.facturacion_automatica AS facturacion_automatica_cartera',
+            ['conceptos','iva'] => 't.concepto AS nombre, e.razon AS empresa, t.aplica_iva,
+                t.impuesto AS porcentaje_iva, t.objeto_impuesto, t.facturable_auto AS facturacion_automatica',
+            ['bancos','saldo_inicial'] => 't.nombre_corto AS nombre, e.razon AS empresa, t.saldo_inicial, t.moneda',
+            ['usuarios','empresas_permitidas'] => "TRIM(CONCAT_WS(' ',t.nombre,t.appat,t.apmat)) AS nombre,
+                c.nombre AS cartera, COALESCE((SELECT GROUP_CONCAT(DISTINCT CONCAT_WS(' ',CONCAT('#',ce.id_empresa),ex.razon)
+                    ORDER BY ex.razon SEPARATOR ', ') FROM cliente_empresa ce LEFT JOIN empresas ex ON ex.id=ce.id_empresa
+                    WHERE ce.id_usuario=t.id AND ce.id_empresa>0),
+                    IF(t.empresa_asignada>0,CONCAT_WS(' ',CONCAT('#',t.empresa_asignada),e.razon),NULL)) AS empresas_permitidas",
+            default => throw new ChatException('Esa configuración no corresponde al catálogo solicitado.'),
+        };
+    }
+
     private static function phoneRequest(string $text, array $reference): ?array
     {
         $ask = '(?:(?:cual es|que|dime|dame|muestra|muestrame|consulta|busca|me puedes dar) )?(?:el )?telefono';
@@ -158,7 +264,9 @@ final class ChatCatalogs
     {
         $type = self::NAMES[$result['catalogo']];
         $summary = $result['resumen_carteras'] ?? null;
+        $configuration = $result['configuracion'] ?? null;
         $filters = $request['filtros'];
+        $showUnset = $configuration !== null || array_intersect_key($filters, ['id'=>true,'codigo'=>true,'rfc'=>true]) !== [];
         if (isset($filters['estado'])) {
             $type .= match ($filters['estado']) {
                 'activo' => ' activas',
@@ -178,7 +286,7 @@ final class ChatCatalogs
             $lines = [];
             foreach ($result['filas'] as $row) {
                 $lines[] = $row['nombre'] . ' (#' . (int) $row['id'] . ') · ' . $row['estado'];
-                $lines[] = 'Teléfono registrado · ' . ($row['telefono'] ?? 'Sin teléfono asignado');
+                $lines[] = 'Teléfono registrado · ' . ($row['telefono'] ?? 'Sin configurar');
             }
             if ($result['hay_mas']) {
                 $lines[] = 'Escribe «siguiente página» para ver más coincidencias.';
@@ -189,18 +297,34 @@ final class ChatCatalogs
             'regimen_fiscal'=>'Régimen fiscal','aplica_iva'=>'Aplica IVA','porcentaje_iva'=>'IVA (%)',
             'facturacion_automatica'=>'Facturación automática','cartera_id'=>'ID cartera','empresa_id'=>'ID empresa',
             'grupo_id'=>'ID grupo','banco_id'=>'ID cuenta bancaria','clabe'=>'CLABE','codigo'=>'Clave',
-            'minuto_ejecucion'=>'Minuto programado','saldo_acreditable'=>'Saldo acreditable'];
+            'minuto_ejecucion'=>'Minuto programado','saldo_acreditable'=>'Saldo acreditable',
+            'razon_social'=>'Razón social','comision'=>'Comisión (%)','esquema_comision'=>'Esquema de comisión',
+            'facturacion_automatica_clave'=>'Facturación automática de la clave',
+            'facturacion_automatica_cartera'=>'Facturación automática de la cartera','marcada_para_liderar'=>'Marcada para liderar'];
         $position = ($result['pagina'] - 1) * $result['limite'];
         $lines = [ucfirst($type) . ' · Página ' . $result['pagina']];
         foreach ($result['filas'] as $row) {
             $parts = [(trim((string) ($row['nombre'] ?? '')) ?: 'Sin nombre') . ' (#' . (int) $row['id'] . ')'];
             foreach (array_diff_key($row, ['id'=>true,'nombre'=>true]) as $key => $value) {
-                if ($value !== null && $value !== '') {
+                $value = is_string($value) ? trim($value) : $value;
+                if ($value === null || $value === '') {
+                    $value = $showUnset ? 'Sin configurar' : null;
+                }
+                if ($value !== null) {
                     $formatted = $key === 'saldo_acreditable' && $summary !== null ? self::amount($value, $summary) : $value;
                     $parts[] = ($labels[$key] ?? ucfirst(str_replace('_', ' ', $key))) . ' ' . $formatted;
                 }
             }
             $lines[] = ++$position . '. ' . implode(' · ', $parts);
+        }
+        if ($configuration === 'correo_facturacion') {
+            $lines[] = 'Configuración del contacto para facturas y complementos. Si el correo está sin configurar, ese flujo omite el envío.';
+        } elseif ($configuration === 'documentos_vivos') {
+            $lines[] = 'Conteo precalculado del cron para la clave corta.';
+        } elseif ($configuration === 'saldo_inicial') {
+            $lines[] = 'Saldo de arranque configurado. Para el saldo actual, consulta el estado de cuenta.';
+        } elseif ($configuration !== null) {
+            array_unshift($lines, 'Configuración registrada en Sistema 14');
         }
         if ($result['hay_mas']) {
             $lines[] = 'Escribe «siguiente página» para ver más.';
@@ -241,6 +365,9 @@ final class ChatCatalogs
             'moneda' => ['type' => 'string', 'description' => 'Código de moneda de la cuenta bancaria'],
             'estado' => ['type' => 'string', 'enum' => ['activo', 'inactivo']],
             'panel' => ['type' => 'boolean', 'description' => 'Solo carteras visibles en el panel principal'],
+            'configuracion' => ['type' => 'string', 'enum' => ['correo_principal','correos_saldos','correo_facturacion',
+                'copias_facturacion','notificaciones','comision','comisiones_adicionales','lidera','cartera_padre','razon_social',
+                'facturacion_automatica','documentos_vivos','iva','saldo_inicial','empresas_permitidas']],
             'telefono' => ['type' => 'boolean', 'description' => 'Devuelve el teléfono de la cartera solo cuando se solicita expresamente. Requiere ID, nombre o RFC.'],
             'lider' => ['type' => 'boolean', 'description' => 'Solo carteras marcadas como líderes o designadas como cartera padre del grupo'],
         ];
@@ -260,10 +387,8 @@ final class ChatCatalogs
         [$fields, $joins, $columns, $companies] = match ($catalog) {
             'carteras' => [
                 "c.nombre, c.rfc, IF(c.activo=1,'Activa','Inactiva') AS estado,
-                 g.id AS grupo_id, g.nombre AS grupo, CASE LOWER(TRIM(c.info_3))
-                    WHEN 'movimiento' THEN 'Por movimiento' WHEN 'fin_dia' THEN 'Al final del día'
-                    WHEN 'no' THEN 'Sin notificar' ELSE NULLIF(c.info_3,'') END AS notificaciones,
-                 IF(c.lidera=1 OR g.cliente_padre=c.id,'Sí','No') AS lider, e.id AS empresa_id, e.razon AS empresa",
+                 g.id AS grupo_id, g.nombre AS grupo, " . self::NOTIFICATIONS . " AS notificaciones,
+                 IF(c.lidera=1,'Sí','No') AS marcada_para_liderar, e.id AS empresa_id, e.razon AS empresa",
                 "LEFT JOIN grupo g ON g.id=c.grupo {$company}c.empresa",
                 ['nombre'=>'c.nombre','rfc'=>'c.rfc','estado'=>'IF(c.activo=1,1,0)','grupo_id'=>'g.id','grupo'=>'g.nombre'] + $companyFilters, ['c.empresa'],
             ],
@@ -274,7 +399,7 @@ final class ChatCatalogs
                 ['nombre'=>'t.razon_social','codigo'=>'t.clave_corta','rfc'=>'t.rfc'] + $walletFilters, ['c.empresa'],
             ],
             'grupos' => [
-                't.nombre, c.id AS lider_id, c.nombre AS lider, b.nombre_corto AS cuenta_salida,
+                't.nombre, c.id AS cartera_padre_id, c.nombre AS cartera_padre, b.nombre_corto AS cuenta_salida,
                  (SELECT COUNT(*) FROM clientes miembro WHERE miembro.grupo=t.id) AS carteras,
                  (SELECT COUNT(*) FROM clientes miembro WHERE miembro.grupo=t.id AND miembro.activo=1) AS carteras_activas',
                 $wallet . 't.cliente_padre ' . $bank . 't.cuenta_salida',
@@ -335,6 +460,12 @@ final class ChatCatalogs
             ],
         };
 
+        if (isset($filters['configuracion'])) {
+            if (($filters['contar'] ?? false) || array_intersect_key($filters, ['id'=>true,'nombre'=>true,'codigo'=>true,'rfc'=>true]) === []) {
+                throw new ChatException('Identifica el registro cuya configuración quieres consultar.');
+            }
+            $fields = self::configurationFields($catalog, $filters['configuracion'], $access, $params);
+        }
         if ($filters['telefono'] ?? false) {
             self::requireWallets($catalog, 'El teléfono de cartera solo está disponible en el catálogo de carteras.');
             if (($filters['contar'] ?? false) || array_intersect_key($filters, ['id'=>true,'nombre'=>true,'rfc'=>true]) === []) {
@@ -358,7 +489,7 @@ final class ChatCatalogs
             $where[] = '(c.lidera=1 OR g.cliente_padre=c.id)';
         }
         foreach (array_intersect_key($filters, self::properties()) as $key => $value) {
-            if (in_array($key, ['catalogo','panel','lider','telefono'], true)) {
+            if (in_array($key, ['catalogo','panel','lider','telefono','configuracion'], true)) {
                 continue;
             }
             $column = $columns[$key] ?? throw new ChatException('Ese filtro no corresponde a ' . self::NAMES[$catalog] . '.');

@@ -636,7 +636,7 @@ $check(!array_key_exists('telefono', $wallet) && str_contains(
     $lookupAsk('¿Cuál es el teléfono asignado a la cartera 10H?',44,$oldThread),'Teléfono registrado · 5551234567'
 ), 'El teléfono solo aparece ante una consulta expresa.');
 $check(str_contains($lookupAsk('¿Qué teléfono tiene la cartera #302?',44,$oldThread),'Inactiva')
-    && str_contains($lookupAsk('Teléfono de la cartera #303',44,$oldThread),'Sin teléfono asignado')
+    && str_contains($lookupAsk('Teléfono de la cartera #303',44,$oldThread),'Sin configurar')
     && str_contains($lookupAsk('Teléfono de la cartera 10H',42,$lookupChat),'no tiene permiso'),
     'Se incluyen inactivas, se identifica un teléfono vacío y se aplican permisos de Catálogos.');
 $lookupAsk('Teléfono registrado de la cartera 10H',44,$oldThread);
@@ -647,6 +647,49 @@ $privacyChat = new App\ChatService($pdo, $chatRepository, $queries, static funct
     return ['content'=>'Entendido.'];
 });
 $privacyChat->ask(44,$oldThread,bin2hex(random_bytes(16)),'Gracias por la orientación');
+
+$pdo->exec('ALTER TABLE clientes ADD COLUMN correo VARCHAR(100), ADD COLUMN correo_2_s VARCHAR(100),
+    ADD COLUMN correo_3_s VARCHAR(100), ADD COLUMN correo2 VARCHAR(100), ADD COLUMN correo2_2_f VARCHAR(100),
+    ADD COLUMN correo2_3_f VARCHAR(100), ADD COLUMN facturacion_automatica VARCHAR(10), ADD COLUMN razon_social VARCHAR(100),
+    ADD COLUMN comision DECIMAL(7,2), ADD COLUMN esquema_comision VARCHAR(40),
+    ADD COLUMN 1_subcomision INT, ADD COLUMN 2_subcomision INT, ADD COLUMN 3_subcomision INT,
+    ADD COLUMN porc_1_subcomision DECIMAL(7,2), ADD COLUMN porc_2_subcomision DECIMAL(7,2), ADD COLUMN porc_3_subcomision DECIMAL(7,2)');
+$pdo->exec("UPDATE clientes SET correo='saldos@fixture.test',correo_2_s='saldos-alt@fixture.test',correo2='facturacion@fixture.test',
+    correo2_2_f='copia@fixture.test', info_3='movimiento', facturacion_automatica='No',
+    comision=2.5, esquema_comision='Total', 1_subcomision=102, porc_1_subcomision=0.75 WHERE id=101");
+$pdo->exec('ALTER TABLE facturas_correo ADD COLUMN correo_destino VARCHAR(100)');
+$pdo->exec("UPDATE facturas_correo SET correo_destino='historico@fixture.test' WHERE id=802");
+$lookupAsk('Cartera #101',44,$oldThread);
+$check(str_contains($lookupAsk('¿Cuál es el correo de la cartera?',44,$oldThread),'saldos@fixture.test')
+    && str_contains($lookupAsk('¿A qué correos se mandan los movimientos y saldos?',44,$oldThread),'saldos-alt@fixture.test')
+    && str_contains($lookupAsk('¿Cuál es el correo de facturación?',44,$oldThread),'facturacion@fixture.test')
+    && str_contains($lookupAsk('¿Quién recibe copia de las facturas?',44,$oldThread),'copia@fixture.test'),
+    'Cada pregunta de correo usa exclusivamente los campos previstos para ese flujo.');
+$check(str_contains($lookupAsk('¿A qué correo se mandó la factura #10?',44,$oldThread),'historico@fixture.test')
+    && !str_contains($lookupAsk('¿A qué correo se mandó la factura #10?',44,$oldThread),'facturacion@fixture.test'),
+    'El destinatario de una factura sale del log de envío y no de la configuración actual.');
+$check(str_contains($lookupAsk('¿Cómo se notifica esta cartera?',44,$oldThread),'Aviso por movimiento y resumen de fin de día')
+    && str_contains($lookupAsk('Comisiones adicionales de la cartera #101',44,$oldThread),'#102')
+    && str_contains($lookupAsk('¿Cuál es la cartera padre del grupo #2?',44,$oldThread),'#101'),
+    'Notificaciones, subcomisiones y cartera padre se leen de sus campos específicos.');
+$lookupAsk('Clave corta #1',44,$oldThread);
+$automatic = $lookupAsk('¿Esta clave factura automáticamente?',44,$oldThread);
+$check(str_contains($automatic,'Facturación automática de la clave Si')
+    && str_contains($automatic,'Facturación automática de la cartera No')
+    && str_contains($lookupAsk('¿Cuántos documentos vivos tiene esta clave?',44,$oldThread),'Documentos vivos 7'),
+    'La automatización de la clave y de la cartera se muestra por separado y documentos vivos conserva el conteo del cron.');
+$pdo->exec("UPDATE facturas SET metodo_pago=2 WHERE id=11");
+$pdo->exec("INSERT INTO claves_cortas (id,id_cliente,clave_corta,razon_social,rfc)
+    VALUES (92,102,'QA92','Otra cartera del mismo RFC','MOAF580320PJ1')");
+$pdo->exec("INSERT INTO facturas (id,razon,nombre,id_clave_corta,uuid,metodo_pago,total_iva,status)
+    VALUES (930,23,102,'92','QA-930',2,100,'Vigente')");
+$check(str_contains($lookupAsk('¿Cuántas facturas PPD para el RFC MOAF580320PJ1 de la empresa 23?',44,$oldThread),'indicados · 2.'),
+    'El conteo contextual de PPD usa el RFC del receptor y la empresa emisora.');
+
+$check(str_contains($lookupAsk('IVA de la factura #10',44,$oldThread),'IVA según el XML timbrado')
+    && str_contains($lookupAsk('IVA de la factura #11',44,$oldThread),'IVA sin verificar en el XML timbrado')
+    && str_contains($lookupAsk('Saldo bancario actual de la cuenta #41',44,$oldThread),'7,000.00 MXN'),
+    'IVA se verifica exclusivamente en el XML timbrado y saldo bancario sale de la última línea de la cuenta.');
 
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

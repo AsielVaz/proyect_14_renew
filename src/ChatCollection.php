@@ -92,6 +92,34 @@ final class ChatCollection
             ] + $period + $company, 'correo_factura');
         }
 
+        if (preg_match('/^(?:a que (?:correo|direccion(?: de correo)?)|a quien) (?:se )?(?:mando|envio) (?:la factura (?:#|(?:con )?id )([1-9][0-9]{0,9})|(?:esta|esa) factura)$/', $text, $recipient)) {
+            $id = isset($recipient[1]) ? (int) $recipient[1] : $recentInvoice;
+            if (!$id || $id > 4294967295) {
+                return ['modo'=>'aclarar_correo_factura','mensaje'=>'Indica el ID interno o UUID de la factura cuyo envío quieres consultar.'];
+            }
+            return self::make('consultar_correos', ['tipo_correo'=>'factura','factura_id'=>$id,'limite'=>1,'destinatario'=>true]
+                + $period + $company, 'correo_factura');
+        }
+        if (preg_match('/^(cuant[oa]s|que|cuales) (?:documentos|facturas) (?:vivos|ppd|pendientes(?: de (?:pago|complemento))?)\b/', $text, $ppd)
+            && preg_match('/\brfc\s*[: ]\s*([a-zñ&]{3,4}\d{6}[a-z0-9]{3})\b/u', $text, $receiver)) {
+            if ($company === [] && preg_match('/\bempresa #?([1-9][0-9]{0,9})\b/', $text, $issuer)) {
+                $company = ['empresa_id' => (int) $issuer[1]];
+            }
+            if ($company !== []) {
+                return self::make('pendientes_ppd', ['rfc'=>$receiver[1],'contar'=>str_starts_with($ppd[1], 'cuant')] + $company + $period, 'ppd_rfc');
+            }
+        }
+
+        if (preg_match('/^(?:(?:cual es|dime|muestra) )?(?:el )?saldo (?:bancario(?: actual)?|actual(?: bancario)?) (?:de )?(?:la )?cuenta(?: bancaria)? (?:id |#)?([1-9][0-9]{0,9})$/', $text, $account)) {
+            return self::make('consultar_banco', ['cuenta_id'=>(int) $account[1],'limite'=>1] + $period + $company, 'saldo_bancario');
+        }
+
+        if (preg_match('/^(?:(?:cual es|dime|consulta) )?(?:el )?iva (?:de )?(?:la factura (?:#|id )([1-9][0-9]{0,9})|esta factura)$/', $text, $tax)) {
+            $invoice = isset($tax[1]) ? (int) $tax[1] : $recentInvoice;
+            if ($invoice) {
+                return self::make('detalle_factura', ['id'=>$invoice], 'iva_factura');
+            }
+        }
         $transfer = self::RESOURCES['consultar_traspasos'][0];
         if (preg_match("~^(?:(?:consulta(?:r)?|muestra|busca|ver) )?(?:el )?{$transfer} (?:#|(?:con )?id )([1-9][0-9]{0,9})$~", $text, $movement)
             && (int) $movement[1] <= 4294967295) {
@@ -167,6 +195,12 @@ final class ChatCollection
         $subject = '(?:la |las |una )?(?:(ultima[s]?(?: \d{1,3})?) )?facturas?';
         $status = '(?:estatus|estado|vigencia)(?: fiscal)?(?: (?:en (?:el )?)?sat)?';
         $prefix = "(?:(?:cual es|cuales son|dime|dame|consulta|consultar|muestra|verifica|revisa|valida) (?:el )?)?(?:{$status}(?: de)?|(?:que|cual) {$status} tiene[n]?)";
+        if (preg_match('/^(?:ya )?se timbro (?:la factura (?:#|id )([1-9][0-9]{0,9})|esta factura)$/', $text, $stamp)) {
+            $id = isset($stamp[1]) ? (int) $stamp[1] : $recentInvoice;
+            if ($id) {
+                return self::make('consultar_estatus_sat', ['referencias'=>'id:' . $id] + $filters, 'estatus_sat');
+            }
+        }
         $patterns = [
             "~^{$prefix} {$subject}(?:[: ]+(.+))?$~",
             "~^{$current}{$state} {$subject}(?:[: ]+(.+))?$~",
@@ -402,6 +436,38 @@ final class ChatCollection
         if ($tool === 'consultar_traspasos') {
             return self::transferReply($request, $result);
         }
+        if ($request['modo'] === 'iva_factura') {
+            $row = $result['filas'][0] ?? null;
+            if ($row === null) {
+                return ChatQueries::NOT_FOUND;
+            }
+            return 'Factura #' . $row['id'] . ' · ' . (isset($row['tratamiento_iva_en_xml'])
+                ? 'IVA según el XML timbrado · ' . $row['tratamiento_iva_en_xml']
+                : 'IVA sin verificar en el XML timbrado.') . "\n" . $row['enlace'];
+        }
+        if ($request['modo'] === 'saldo_bancario') {
+            $row = $result['filas'][0] ?? null;
+            if ($row === null) {
+                return 'No encontré líneas de estado de cuenta accesibles para esa cuenta.';
+            }
+            if ($row['saldo_bancario'] === null) {
+                return 'El saldo bancario de esa línea no está disponible.';
+            }
+            return 'Cuenta bancaria #' . $row['cuenta_id'] . ' · Saldo en el último registro consultado '
+                . number_format((float) $row['saldo_bancario'], 2, '.', ',')
+                . (!empty($row['moneda']) ? ' ' . $row['moneda'] : '')
+                . (!empty($row['fecha']) ? ' · Fecha ' . $row['fecha'] : '') . "\n" . $row['enlace'];
+        }
+        if ($tool === 'pendientes_ppd') {
+            if (isset($result['totales'])) {
+                return 'Facturas PPD con saldo pendiente para la empresa y el RFC indicados · '
+                    . number_format($result['totales']['registros']) . '.';
+            }
+            if ($result['filas'] === []) {
+                return $result['mensaje'] ?? ChatQueries::NOT_FOUND;
+            }
+            $tool = 'buscar_facturas';
+        }
         if (($result['reporte'] ?? null) === 'banking') {
             return self::bankingReply($result);
         }
@@ -538,6 +604,9 @@ final class ChatCollection
                 $line .= ' · fecha programada ' . $row['fecha_programada'];
             }
             $lines[] = $line;
+            if (array_key_exists('destinatario_registrado', $row)) {
+                $lines[] = 'Destinatario registrado en el log · ' . ($row['destinatario_registrado'] ?? 'Sin configurar');
+            }
         }
         return implode("\n", $lines);
     }
