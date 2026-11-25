@@ -295,6 +295,28 @@ final class MovementRepository
             ORDER BY razon ASC, id ASC")->fetchAll();
     }
 
+    public static function markStpForReturn(PDO $pdo, int $orderId, int $operatorId): void
+    {
+        if ($orderId <= 0) {
+            throw new RuntimeException('La orden STP seleccionada no es válida.');
+        }
+
+        self::assertAdministrator($pdo, $operatorId);
+        $update = $pdo->prepare("UPDATE pre_ejecuta_plantilla
+            SET estado = 'D', causa_devolucion = :cause WHERE id = :id");
+        $update->execute([
+            'id' => $orderId,
+            'cause' => 'Saldo retornado por sistema (' . $operatorId . ')',
+        ]);
+        if ($update->rowCount() === 0) {
+            $order = $pdo->prepare('SELECT 1 FROM pre_ejecuta_plantilla WHERE id = :id');
+            $order->execute(['id' => $orderId]);
+            if (!$order->fetchColumn()) {
+                throw new RuntimeException('La orden STP seleccionada ya no existe.');
+            }
+        }
+    }
+
     public function markWithoutDocument(int $paymentId, int $operatorId): array
     {
         if ($paymentId <= 0) {
@@ -302,7 +324,7 @@ final class MovementRepository
         }
 
         return $this->transaction(function () use ($paymentId, $operatorId): array {
-            $this->assertAdministrator($operatorId);
+            self::assertAdministrator($this->pdo, $operatorId);
             $payment = $this->paymentForUpdate($paymentId);
             if (in_array($payment['nombre'] ?? null, [null, '', '0', 0], true)
                 || mb_strtolower(trim((string) ($payment['status'] ?? '')), 'UTF-8') !== 'asignado') {
@@ -1353,13 +1375,13 @@ final class MovementRepository
         }
     }
 
-    private function assertAdministrator(int $id): void
+    private static function assertAdministrator(PDO $pdo, int $id): void
     {
-        $query = $this->pdo->prepare('SELECT tipo FROM usuarios WHERE id = :id');
+        $query = $pdo->prepare('SELECT tipo FROM usuarios WHERE id = :id');
         $query->execute(['id' => $id]);
         $userType = mb_strtolower(trim((string) $query->fetchColumn()), 'UTF-8');
         if ($userType !== 'administrador') {
-            throw new RuntimeException('Solo un administrador puede marcar un movimiento como que no requiere documento.');
+            throw new RuntimeException('Solo un administrador puede realizar esta acción.');
         }
     }
 

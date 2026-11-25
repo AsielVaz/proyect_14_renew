@@ -14,6 +14,13 @@ final class InvoiceRepository
     {
     }
 
+    public static function catalogJoins(): string
+    {
+        return 'INNER JOIN clientes c ON c.id = f.nombre
+            INNER JOIN empresas e ON e.id = f.razon
+            INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta';
+    }
+
     public function page(
         string $search,
         int $page,
@@ -44,10 +51,7 @@ final class InvoiceRepository
             $where .= ' AND f.fecha < :date_to';
             $params['date_to'] = (new \DateTimeImmutable($dateTo))->modify('+1 day')->format('Y-m-d') . ' 00:00:00';
         }
-        $joins = ' FROM facturas f
-            INNER JOIN clientes c ON c.id = f.nombre
-            INNER JOIN empresas e ON e.id = f.razon
-            INNER JOIN claves_cortas cc ON cc.id = f.id_clave_corta
+        $joins = ' FROM facturas f ' . self::catalogJoins() . '
             LEFT JOIN formas_pago fp ON fp.id = f.forma_pago
             LEFT JOIN metodos_pago mp ON mp.id = f.metodo_pago
             LEFT JOIN (

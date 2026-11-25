@@ -1,0 +1,135 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use PDO;
+
+final class ChatAccess
+{
+    private const STAFF = ['administrador', 'administrador_b', 'supercapturista', 'capturista', 'archivo'];
+    private const REPORT_ROLES = ['administrador', 'administrador_b', 'supercapturista'];
+
+    private function __construct(
+        private readonly string $role,
+        private readonly int $operator,
+        private readonly ?int $client,
+        private readonly array $companies,
+        private readonly bool $restrictedCompanyAllowed,
+        private readonly array $previousCompanies,
+        private readonly bool $previousRestrictedCompanyAllowed,
+    ) {}
+
+    public static function load(PDO $pdo, int $operator): self
+    {
+        $query = $pdo->prepare('SELECT tipo, cliente, empresa_asignada FROM usuarios WHERE id = ?');
+        $query->execute([$operator]);
+        $user = $query->fetch();
+        $role = mb_strtolower(trim((string) ($user['tipo'] ?? '')));
+        $client = in_array($role, self::STAFF, true) ? null : (int) ($user['cliente'] ?? 0);
+        if ($client !== null && ($client <= 0 || !in_array($role, ['cliente', 'esclavo'], true))) {
+            throw new ChatException('Tu cuenta no tiene acceso al chat de consultas.', 403);
+        }
+
+        $query = $pdo->prepare('SELECT DISTINCT id_empresa FROM cliente_empresa WHERE id_usuario = ? AND id_empresa > 0');
+        $query->execute([$operator]);
+        $companies = array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+        $assigned = (int) ($user['empresa_asignada'] ?? 0);
+        if ($companies === [] && $assigned > 0) {
+            $companies[] = $assigned;
+        }
+        sort($companies, SORT_NUMERIC);
+
+        $isAdministrator = $role === 'administrador';
+        return new self(
+            $role, $operator, $client, $isAdministrator ? [] : $companies,
+            $isAdministrator, $isAdministrator ? $companies : [],
+            CompanyPanelRepository::canAccessCompany(CompanyPanelRepository::RESTRICTED_COMPANY, $operator)
+        );
+    }
+
+    public function signature(): string
+    {
+        return $this->signatureForScope($this->companies, $this->restrictedCompanyAllowed);
+    }
+
+    public function previousSignatures(): array
+    {
+        if (!$this->restrictedCompanyAllowed) {
+            return [];
+        }
+        // Los dos alcances anteriores del administrador son subconjuntos del actual.
+        $previous = $this->signatureForScope([], $this->previousRestrictedCompanyAllowed);
+        $assigned = $this->signatureForScope($this->previousCompanies, $this->previousRestrictedCompanyAllowed);
+        return array_values(array_diff(array_unique([$previous, $assigned]), [$this->signature()]));
+    }
+
+    private function signatureForScope(array $companies, bool $restrictedCompanyAllowed): string
+    {
+        return hash('sha256', json_encode([
+            $this->role, $this->operator, $this->client, $companies, $restrictedCompanyAllowed,
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    public function canSeeBankBalance(): bool
+    {
+        return $this->client === null;
+    }
+
+    public function allows(string $tool): bool
+    {
+        $movements = Movements::allowedFor($this->role);
+        return match ($tool) {
+            'buscar_facturas', 'detalle_factura', 'buscar_complementos', 'detalle_complemento', 'pendientes_ppd' => true,
+            'consultar_pagos', 'detalle_movimiento', 'consultar_banco' => isset($movements['totales']),
+            'consultar_stp' => isset($movements['stp']),
+            'generar_reporte', 'consultar_correos' => in_array($this->role, self::REPORT_ROLES, true),
+            default => false,
+        };
+    }
+
+    /** The expressions are fixed column references provided by the PHP repositories. */
+    public function conditions(string $company, string $client, array &$params, bool $allowUnknownCompany = true): string
+    {
+        $conditions = $this->companyConditions($company, $params, $allowUnknownCompany);
+        if ($this->client !== null) {
+            $conditions[] = $client . ' = ' . self::bind($params, $this->client);
+        }
+        return $conditions === [] ? '1=1' : implode(' AND ', $conditions);
+    }
+
+    private function companyConditions(string $company, array &$params, bool $allowUnknownCompany): array
+    {
+
+        $conditions = [];
+        if (!$this->restrictedCompanyAllowed) {
+            $conditions[] = 'COALESCE(' . $company . ', 0) <> ' . CompanyPanelRepository::RESTRICTED_COMPANY;
+        }
+        if ($this->companies !== []) {
+            $ids = [];
+            foreach ($this->companies as $id) {
+                $ids[] = self::bind($params, $id);
+            }
+            $conditions[] = $company . ' IN (' . implode(', ', $ids) . ')';
+        } elseif (!$allowUnknownCompany && (!$this->restrictedCompanyAllowed || !$this->previousRestrictedCompanyAllowed || $this->client !== null)) {
+            $conditions[] = $company . ' > 0';
+        }
+        return $conditions;
+    }
+
+    public function optionalCompany(string $company, array &$params): string
+    {
+        $conditions = $this->companyConditions($company, $params, true);
+        return $conditions === [] ? '1=1' : '(NULLIF(' . $company . ', 0) IS NULL OR ('
+            . implode(' AND ', $conditions) . '))';
+    }
+
+    public static function bind(array &$params, string|int $value): string
+    {
+        $key = 'chat_' . count($params);
+        $params[$key] = $value;
+        return ':' . $key;
+    }
+}
+

@@ -50,10 +50,181 @@ final class ReportRepository
         ];
     }
 
-    private function source(string $key, array $filters): array
+    public function runChatReport(array $filters, ChatAccess $access, int $limit): array
+    {
+        $key = $filters['reporte'];
+        if (!$access->allows('generar_reporte') || !in_array($key, ['conta', 'pagos-saldo', 'banking'], true)) {
+            throw new ChatException('Tu cuenta no tiene permiso para este reporte.', 403);
+        }
+
+        $params = [];
+        if ($key === 'banking') {
+            return $this->runChatBanking($filters, $access, $limit);
+        }
+        $conta = $key === 'conta';
+        $company = 'COALESCE(NULLIF(c.razon, 0), NULLIF(CAST(p.empresa AS UNSIGNED), 0))';
+        $dateColumn = $conta ? "COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura)" : 'p.fecha_banco';
+        $where = ' AND ' . $access->conditions($company, 'CAST(p.nombre AS UNSIGNED)', $params, false);
+        $where .= ' AND ' . $access->optionalCompany('CAST(p.empresa AS UNSIGNED)', $params);
+        foreach ($conta ? ['f', 'fc', 'legacy_response'] : ['chat_factura', 'chat_complemento'] as $alias) {
+            $where .= " AND ({$alias}.id IS NULL OR ("
+                . $access->conditions("{$alias}.razon", "{$alias}.nombre", $params, false) . '))';
+        }
+        $where .= ChatQueries::condition($filters, [
+            'id' => 'p.id', 'empresa_id' => $company, 'empresa' => 'e.razon', 'cliente' => $conta ? 'cl.nombre' : 'chat_cliente.nombre',
+            'fecha' => $dateColumn,
+        ], $params);
+        if ($filters['con_diferencia'] ?? false) {
+            $where .= " AND COALESCE(p.id_factura, 0) <> 2 AND LOWER(p.tipo_movimiento) IN ('deposito', 'depósito')";
+        }
+        [$source, , $sort] = $this->source($key, [], $where);
+        if ($filters['con_diferencia'] ?? false) {
+            $source = "SELECT * FROM ({$source}) con_saldo WHERE ABS(restante) > 0.005";
+        }
+
+        $period = array_intersect_key($filters, ['desde' => true, 'hasta' => true]);
+        if (($filters['contar'] ?? false) && !($filters['totalizar'] ?? false)) {
+            $query = $this->pdo->prepare("SET STATEMENT max_statement_time=8 FOR
+                SELECT COUNT(*) FROM ({$source}) AS chat_reporte");
+            $query->execute($params);
+            return ['reporte' => $key, 'filas' => [], 'hay_mas' => false, 'periodo' => $period,
+                'totales' => ['registros' => (int) $query->fetchColumn()]];
+        }
+        if ($filters['totalizar'] ?? false) {
+            $balance = $conta ? '' : ', SUM(restante) AS suma_restante';
+            $query = $this->pdo->prepare("SET STATEMENT max_statement_time=8 FOR SELECT moneda, COUNT(*) AS registros, SUM(monto) AS suma_importes{$balance}
+                FROM ({$source}) AS chat_reporte GROUP BY moneda ORDER BY moneda");
+            $query->execute($params);
+            $rows = $query->fetchAll();
+            return ['reporte' => $key, 'filas' => [], 'hay_mas' => false, 'periodo' => $period, 'totales' => [
+                'registros' => array_sum(array_column($rows, 'registros')),
+                'por_moneda' => $rows,
+            ]];
+        }
+
+        $columns = $conta
+            ? 'pago_id, documentos, empresa, cliente, monto, moneda, fecha_pago, factura_id, factura_folio, factura_estado,
+                complemento_id, complemento_folio, complemento_fecha, complemento_estado'
+            : 'id, empresa, monto, moneda, fecha_banco, restante, folios_asociados';
+        $limit = $filters['limite'] ?? $limit;
+        $page = $filters['pagina'] ?? 1;
+        $offset = ($page - 1) * $limit;
+        $fetchLimit = $limit + 1;
+        $date = $conta ? 'fecha_pago' : 'fecha_banco';
+        $id = $conta ? 'pago_id' : 'id';
+        if (isset($filters['orden'])) {
+            $direction = $filters['orden'] === 'antiguos' ? 'ASC' : 'DESC';
+            $sort = "{$date} IS NULL ASC, {$date} {$direction}, {$id} {$direction}";
+        }
+        $query = $this->pdo->prepare("SET STATEMENT max_statement_time=8 FOR SELECT {$columns} FROM ({$source}) AS chat_reporte
+            ORDER BY {$sort} LIMIT {$fetchLimit} OFFSET {$offset}");
+        $query->execute($params);
+        $rows = $query->fetchAll();
+        return ['reporte' => $key, 'filas' => array_slice($rows, 0, $limit),
+            'hay_mas' => count($rows) > $limit, 'pagina' => $page, 'limite' => $limit, 'periodo' => $period];
+    }
+
+    private function runChatBanking(array $filters, ChatAccess $access, int $limit): array
+    {
+        $from = $filters['desde'] ?? date('Y-m-01');
+        $until = $filters['hasta'] ?? date('Y-m-d');
+        if ($from > $until) {
+            throw new ChatException('La fecha inicial debe ser igual o anterior a la fecha final.');
+        }
+        $params = ['date_from' => $from, 'date_to' => $until];
+        $visibility = $access->conditions('origin.id', 'cl.id_cliente', $params, false) . ' AND '
+            . $access->conditions('provider.id', 'f.nombre', $params, false);
+        $origin = ChatQueries::condition($filters, ['empresa_id' => 'origin.id', 'empresa' => 'origin.razon'], $params);
+        $sql = $this->bankingQuery($visibility, $origin);
+        $filters += ['desde' => $from, 'hasta' => $until];
+        return ['reporte' => 'banking'] + $this->chatRows($sql, $params, $filters,
+            'empresa_origen ASC, porcentaje_real DESC, proveedor ASC', $limit);
+    }
+
+    public function runChatMail(array $filters, ChatAccess $access, int $limit): array
+    {
+        if (!$access->allows('consultar_correos')) {
+            throw new ChatException('Tu cuenta no tiene permiso para consultar los registros de correo.', 403);
+        }
+        $params = [];
+        if ($filters['tipo_correo'] === 'contextual') {
+            $company = 'l.id_proveedor';
+            $client = 'receiver.id_cliente';
+            $date = 'l.fecha_entrega';
+            $query = "SELECT l.id, 'contextual' AS tipo_correo, f.id AS factura_id, e.razon AS empresa,
+                receiver.razon_social AS receptor, l.estado AS codigo_estado,
+                CASE l.estado WHEN 0 THEN 'Pendiente de envío'
+                    WHEN 1 THEN 'Envío registrado, reenvío pendiente'
+                    WHEN 2 THEN 'Flujo de correo registrado como completado'
+                    ELSE 'Estado sin interpretar' END AS estado,
+                l.fecha_entrega AS fecha_programada, l.fecha_respuesta AS respuesta_programada
+                FROM contexto_correo l JOIN empresas e ON e.id = l.id_proveedor
+                JOIN claves_cortas receiver ON receiver.id = l.id_empresa
+                LEFT JOIN facturas f ON f.id = l.id_factura";
+            $where = '1=1';
+        } else {
+            $company = 'COALESCE(NULLIF(f.razon, 0), l.empresa_origen)';
+            $client = 'COALESCE(NULLIF(f.nombre, 0), l.empresa_destino)';
+            $date = "COALESCE(CASE WHEN l.fecha_envia >= '1000-01-01' THEN l.fecha_envia END, l.fecha_inserta)";
+            $query = "SELECT l.id, 'factura' AS tipo_correo, f.id AS factura_id, e.razon AS empresa,
+                receiver.nombre AS receptor, l.estado AS codigo_estado,
+                CASE l.estado WHEN 1 THEN 'Envío registrado'
+                    WHEN 2 THEN 'Aceptado o en cola'
+                    WHEN -1 THEN 'Rechazado'
+                    WHEN -2 THEN 'Error de envío'
+                    ELSE 'Sin envío confirmado' END AS estado,
+                CASE WHEN l.fecha_envia >= '1000-01-01' THEN l.fecha_envia END AS fecha_envia,
+                CASE WHEN l.fecha_recibe >= '1000-01-01' THEN l.fecha_recibe END AS fecha_recibe,
+                l.fecha_inserta
+                FROM facturas_correo l LEFT JOIN facturas f ON f.id = l.id_factura
+                LEFT JOIN empresas e ON e.id = {$company}
+                LEFT JOIN clientes receiver ON receiver.id = {$client}";
+            $where = 'COALESCE(l.id_factura, 0) >= 0 AND ' . $access->optionalCompany('l.empresa_origen', $params);
+        }
+        $where .= ' AND ' . $access->conditions($company, $client, $params, false)
+            . ' AND (f.id IS NULL OR (' . $access->conditions('f.razon', 'f.nombre', $params, false) . '))';
+        if (isset($filters['factura_id'])) {
+            $where .= ' AND f.id = ' . ChatAccess::bind($params, $filters['factura_id']);
+        }
+        $where .= ChatQueries::condition($filters, [
+            'id' => 'l.id', 'empresa_id' => $company, 'empresa' => 'e.razon', 'fecha' => $date,
+        ], $params);
+        $sort = ($filters['orden'] ?? 'recientes') === 'antiguos' ? 'ASC' : 'DESC';
+        return $this->chatRows("{$query} WHERE {$where}", $params, $filters, "id {$sort}", $limit);
+    }
+
+    private function chatRows(string $sql, array $params, array $filters, string $order, int $limit): array
+    {
+        $period = array_intersect_key($filters, ['desde' => true, 'hasta' => true]);
+        if (($filters['contar'] ?? false) || ($filters['totalizar'] ?? false)) {
+            $query = $this->pdo->prepare("SET STATEMENT max_statement_time=8 FOR SELECT COUNT(*) FROM ({$sql}) datos");
+            $query->execute($params);
+            return ['filas' => [], 'periodo' => $period, 'hay_mas' => false,
+                'totales' => ['registros' => (int) $query->fetchColumn()]];
+        }
+        $page = $filters['pagina'] ?? 1;
+        $size = $filters['limite'] ?? $limit;
+        $offset = ($page - 1) * $size;
+        $count = $size + 1;
+        $query = $this->pdo->prepare("SET STATEMENT max_statement_time=8 FOR
+            SELECT * FROM ({$sql}) datos ORDER BY {$order} LIMIT {$count} OFFSET {$offset}");
+        $query->execute($params);
+        $rows = $query->fetchAll();
+        return ['filas' => array_slice($rows, 0, $size), 'periodo' => $period, 'hay_mas' => count($rows) > $size,
+            'pagina' => $page, 'limite' => $size];
+    }
+
+    private function source(string $key, array $filters, string $chatFilter = ''): array
     {
         $from = $this->validDate((string) ($filters['from'] ?? '')) ?: date('Y-m-01');
         $to = $this->validDate((string) ($filters['to'] ?? '')) ?: date('Y-m-d');
+
+        $chatCurrency = $chatFilter === '' ? '' : ", NULLIF(b.moneda, '') AS moneda";
+        $chatGroupedCurrency = $chatFilter === '' ? '' : ", MAX(NULLIF(b.moneda, '')) AS moneda";
+        $chatJoins = $chatFilter === '' ? '' : '
+            LEFT JOIN clientes chat_cliente ON chat_cliente.id = CAST(p.nombre AS UNSIGNED)
+            LEFT JOIN facturas chat_factura ON chat_factura.id = rfp.id_factura
+            LEFT JOIN facturas_complementos chat_complemento ON chat_complemento.id = rfp.id_factura_com';
 
         return match ($key) {
             'accesos' => [
@@ -90,7 +261,7 @@ final class ReportRepository
                         COALESCE(e.razon, 'Empresa no identificada') AS empresa,
                         COALESCE(cl.nombre, 'Sin asignar') AS cliente,
                         COALESCE(b.nombre_corto, p.banco, p.nombre_corto, 'Sin cuenta') AS cuenta,
-                        p.tipo_movimiento, p.monto,
+                        p.tipo_movimiento, p.monto{$chatCurrency},
                         COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura) AS fecha_pago,
                         p.fecha_asignacion,
                         CONCAT_WS(' · ', NULLIF(p.detalle, ''), NULLIF(p.descripcion, ''), NULLIF(p.descripcion_detallada, '')) AS detalle_pago,
@@ -142,7 +313,7 @@ final class ReportRepository
                  WHERE p.tipo_movimiento = 'Deposito'
                    AND (COALESCE(p.id_factura, 0) > 0
                     OR (TRIM(COALESCE(p.id_factura_res, '')) REGEXP '^[0-9]+$'
-                        AND CAST(p.id_factura_res AS UNSIGNED) > 0))",
+                        AND CAST(p.id_factura_res AS UNSIGNED) > 0)){$chatFilter}",
                 [], '`pago_id` DESC',
             ],
             'conta-interno' => [
@@ -175,7 +346,7 @@ final class ReportRepository
                 "SELECT p.id, e.razon AS empresa, b.nombre_corto AS banco, p.monto,
                         p.tipo_movimiento, p.descripcion, p.descripcion_detallada, p.fecha_banco,
                         SUM(rfp.monto_factura - p.monto) AS restante,
-                        COUNT(rfp.id) AS folios_asociados
+                        COUNT(rfp.id) AS folios_asociados{$chatGroupedCurrency}
                  FROM pagos p
                  LEFT JOIN clientes cl ON cl.id = p.cliente_origen_comision
                  INNER JOIN captura c ON c.id = p.id_captura
@@ -184,6 +355,8 @@ final class ReportRepository
                     AND (p.monto = ce.deposito OR p.monto = ce.retiro)
                  INNER JOIN empresas e ON e.id = c.razon
                  INNER JOIN relacion_factura_pago rfp ON rfp.id_pago = p.id
+                 {$chatJoins}
+                 WHERE 1=1{$chatFilter}
                  GROUP BY p.id, e.razon, b.nombre_corto, p.monto, p.tipo_movimiento,
                           p.descripcion, p.descripcion_detallada, p.fecha_banco",
                 [], '`id` DESC',
@@ -258,8 +431,11 @@ final class ReportRepository
                 LIMIT 1000";
     }
 
-    private function bankingQuery(): string
+    private function bankingQuery(string $visibility = '', string $originFilter = ''): string
     {
+        $visibleGroup = $visibility === '' ? '' : ", MIN(CASE WHEN {$visibility} THEN 1 ELSE 0 END) AS visible";
+        $visiblePartition = $visibility === '' ? '' : ', MIN(daily.visible) OVER (PARTITION BY daily.empresa_origen) AS visible';
+        $visibleFilter = $visibility === '' ? '' : ' AND banking_rows.visible = 1';
         return "SELECT banking_rows.empresa_origen, banking_rows.proveedor, banking_rows.total,
                        ROUND(banking_rows.porcentaje_real, 2) AS porcentaje_real,
                        banking_rows.porcentaje_sugerido,
@@ -269,21 +445,21 @@ final class ReportRepository
                     SELECT daily.empresa_origen, daily.proveedor, daily.total, daily.porcentaje_sugerido,
                            daily.total / NULLIF(SUM(daily.total) OVER (PARTITION BY daily.empresa_origen), 0) * 100 AS porcentaje_real,
                            daily.porcentaje_sugerido * 0.70 AS rango_inferior,
-                           daily.porcentaje_sugerido * 1.30 AS rango_superior
+                           daily.porcentaje_sugerido * 1.30 AS rango_superior{$visiblePartition}
                     FROM (
                         SELECT origin.razon AS empresa_origen, provider.razon AS proveedor,
-                               SUM(f.total_iva) AS total, p14.porcentaje_sugerido
+                               SUM(f.total_iva) AS total, p14.porcentaje_sugerido{$visibleGroup}
                         FROM claves_cortas cl
                         INNER JOIN empresas origin ON origin.rfc = cl.rfc
                         INNER JOIN facturas f ON f.id_clave_corta = cl.id
                         INNER JOIN empresas provider ON provider.id = f.razon
                         INNER JOIN proveedores_14 p14 ON p14.id_empresa = cl.id AND p14.id_proveedor = provider.id
                         WHERE f.metodo_pago = 1 AND DATE(f.fecha) BETWEEN :date_from AND :date_to
-                          AND f.razon <> 132 AND provider.comodin = 0 AND origin.id <> 132
+                          AND f.razon <> 132 AND provider.comodin = 0 AND origin.id <> 132{$originFilter}
                         GROUP BY origin.razon, provider.razon, p14.porcentaje_sugerido
                     ) daily
                 ) banking_rows
-                WHERE (banking_rows.porcentaje_real BETWEEN banking_rows.rango_inferior AND banking_rows.rango_superior) IS NOT TRUE";
+                WHERE (banking_rows.porcentaje_real BETWEEN banking_rows.rango_inferior AND banking_rows.rango_superior) IS NOT TRUE{$visibleFilter}";
     }
 
     private function transform(string $key, array $rows): array

@@ -13,7 +13,18 @@ if (isset($_GET['cron'])) {
     handle_cron_endpoint((string) $_GET['cron']);
 }
 
+if (isset($_GET['chat_api'])) {
+    auth_validate_session();
+    require __DIR__ . '/src/chat.php';
+    handle_chat_endpoint(is_string($_GET['chat_api']) ? $_GET['chat_api'] : '');
+}
+
 handle_authentication();
+
+if (isset($_GET['chat_registro'])) {
+    require __DIR__ . '/src/chat.php';
+    handle_chat_record();
+}
 
 if (isset($_GET['webauthn'])) {
     handle_webauthn_endpoint((string) $_GET['webauthn']);
@@ -80,14 +91,23 @@ if (isset($_GET['document']) && $_SERVER['REQUEST_METHOD'] === 'GET') {
             throw new RuntimeException('El documento solicitado no es válido.');
         }
         $documentType = (string) $_GET['document'];
+        $documentKind = match ($documentType) {
+            'invoice_pdf', 'invoice_xml' => 'factura',
+            'complement_pdf', 'complement_xml' => 'complemento',
+            default => throw new RuntimeException('Tipo de documento no disponible.'),
+        };
+        $chatQueries = new App\ChatQueries(db());
+        $documentAccess = App\ChatAccess::load(db(), current_operator_id());
+        $chatQueries->assertDocument($documentKind, (int) $documentId, $documentAccess);
         $document = match ($documentType) {
             'invoice_pdf' => pdf_document_service()->invoice((int) $documentId),
+            'invoice_xml' => $chatQueries->invoiceXml((int) $documentId, $documentAccess),
             'complement_pdf' => pdf_document_service()->complement((int) $documentId),
             'complement_xml' => local_complement_stamp_service()->xmlDocument((int) $documentId),
             default => throw new RuntimeException('Tipo de documento no disponible.'),
         };
         header('Content-Type: ' . ($documentType === 'complement_xml' ? 'application/xml; charset=UTF-8' : 'application/pdf'));
-        header('Content-Disposition: inline; filename="' . $document['filename'] . '"');
+        header('Content-Disposition: ' . (str_ends_with($documentType, '_xml') ? 'attachment' : 'inline') . '; filename="' . $document['filename'] . '"');
         header('Content-Length: ' . strlen($document['bytes']));
         header('Cache-Control: private, max-age=0, must-revalidate');
         echo $document['bytes'];
@@ -806,6 +826,12 @@ try {
             } elseif ($postAction === 'movement_assign_batch') {
                 $result = movement_repository()->assignBatch((array) ($_POST['assignments'] ?? []), $operatorId);
                 flash('success', $result['movements'] . ' movimientos asignados. Se generaron ' . $result['commissions'] . ' movimientos de comisión.');
+            } elseif ($postAction === 'stp_mark_for_return' && $movementKey === 'stp') {
+                $orderId = filter_var($_POST['stp_order_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                \App\MovementRepository::markStpForReturn(db(), $orderId === false ? 0 : $orderId, $operatorId);
+                flash('success', 'La orden STP #' . $orderId . ' quedó marcada para devolución.');
+                $returnUrl = (string) ($_POST['return_url'] ?? '');
+                redirect(preg_match('/^\?movement=stp(?:&|$)/D', $returnUrl) ? $returnUrl : '?movement=stp');
             } elseif ($postAction === 'movement_mark_without_document') {
                 if ($movementKey !== 'asignados'
                     || mb_strtolower(trim((string) (current_user()['type'] ?? '')), 'UTF-8') !== 'administrador') {
@@ -1102,6 +1128,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     <!-- theme.css contiene todos los tokens visuales; app.css define componentes. -->
     <link rel="stylesheet" href="assets/theme.css">
     <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="assets/chat.css">
 </head>
 <body class="<?= $companyModule ? 'company-module' : '' ?><?= $companyView === 'list' ? ' company-directory-module' : '' ?><?= $companyView === 'detail' ? ' company-detail-module' : '' ?>">
 <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -1232,6 +1259,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <?php if ($securityModule): ?><p class="topbar-description">Administra los dispositivos que pueden autenticar tu cuenta sin contraseña.</p><?php endif; ?>
         </div>
         <div class="topbar-actions">
+            <button type="button" class="button" data-chat-open aria-haspopup="dialog" aria-controls="s14-chat">
+                Asistente
+            </button>
             <button type="button" class="global-search-trigger" data-global-search-open aria-haspopup="dialog" aria-controls="global-search-dialog">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
                 <span>Buscar</span><kbd>Ctrl K</kbd>
@@ -1939,6 +1969,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             trim((string) (current_user()['type'] ?? '')),
             'UTF-8'
         ) === 'administrador';
+        $canProcessStpReturn = $movementKey === 'stp' && $isMovementAdministrator;
         $hasMovementContextActions = in_array($movementKey, ['asignados', 'cartera'], true);
         $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,
@@ -2162,7 +2193,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                             && $matchedMovementInvoiceId <= 0
                             && !$movementClientHasPendingInvoices;
                         $hasMovementCreationActions = $canCreateMovementComplement || $canCreateMovementInvoice || $canAssignMovementDocument;
-                        $hasMovementContextMenu = $canMarkMovementWithoutDocument
+                        $hasMovementContextMenu = $canProcessStpReturn || $canMarkMovementWithoutDocument
                             || (!$isWithdrawalMovement
                             && ($displayMovementInvoiceId > 0
                                 || $movementComplementId > 0
@@ -2253,6 +2284,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                                             <?= e(display_field_value((string) $secondaryKey, $secondaryRaw, $secondaryFormats[$secondaryKey] ?? 'text')) ?>
                                         </span>
                                     <?php endforeach; ?>
+                                    <?php if ($canProcessStpReturn && $columnKey === 'status'): ?>
+                                        <div class="record-action-source" hidden>
+                                            <form method="post"
+                                                data-confirm-title="Tramitar devolución STP"
+                                                data-confirm="Al confirmar, la orden STP #<?= e($row['id']) ?> quedará marcada para devolución. Esta marca deja constancia de la solicitud de reintegro del importe a la cartera. ¿Entiendes y deseas continuar?"
+                                                data-confirm-accept="Entiendo y confirmo">
+                                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                <input type="hidden" name="action" value="stp_mark_for_return">
+                                                <input type="hidden" name="stp_order_id" value="<?= e($row['id']) ?>">
+                                                <input type="hidden" name="return_url" value="<?= e($movementReturnUrl) ?>">
+                                                <button type="submit" data-record-action data-action-danger>Tramitar devolución</button>
+                                            </form>
+                                        </div>
+                                    <?php endif; ?>
                                 </td>
                             <?php endforeach; ?>
                             <?php if ($movementAction || $hasMovementContextActions): ?>
@@ -2810,6 +2855,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         </section>
     <?php endif; ?>
 </main>
+
+<?php require __DIR__ . '/views/chat.php'; ?>
 
 <div class="glass-modal-backdrop" id="confirmationModal" hidden>
     <section class="glass-modal" role="dialog" aria-modal="true" aria-labelledby="confirmationTitle" aria-describedby="confirmationMessage">
@@ -5228,6 +5275,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             clearDetails();
             title.textContent = form.dataset.confirmTitle || 'Confirmar operación';
             message.textContent = form.dataset.confirm || '¿Deseas continuar?';
+            if (form.dataset.confirmAccept) accept.textContent = form.dataset.confirmAccept;
             if (form.id === 'invoiceForm') {
                 renderInvoicePreview(form);
                 accept.textContent = 'Aceptar y guardar';
@@ -5418,6 +5466,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
 <script src="assets/movement-highlights.js"></script>
 <script src="assets/wallet-balance.js"></script>
 <script src="assets/global-search.js"></script>
+<script src="assets/chat.js"></script>
 <script src="assets/company-directory.js"></script>
 <script src="assets/searchable-select.js"></script>
 <script src="assets/manual-email.js"></script>

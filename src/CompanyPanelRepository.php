@@ -9,7 +9,7 @@ use RuntimeException;
 
 final class CompanyPanelRepository
 {
-    private const RESTRICTED_COMPANY = 132;
+    public const RESTRICTED_COMPANY = 132;
     private const RESTRICTED_OPERATORS = [1, 31, 82];
 
     public function __construct(private readonly PDO $pdo)
@@ -436,10 +436,15 @@ final class CompanyPanelRepository
         return array_values($companies);
     }
 
+    public static function canAccessCompany(int $companyId, int $operatorId): bool
+    {
+        return $companyId > 0 && ($companyId !== self::RESTRICTED_COMPANY
+            || in_array($operatorId, self::RESTRICTED_OPERATORS, true));
+    }
+
     private function assertAccess(int $companyId, int $operatorId): void
     {
-        if ($companyId <= 0 || ($companyId === self::RESTRICTED_COMPANY
-            && !in_array($operatorId, self::RESTRICTED_OPERATORS, true))) {
+        if (!self::canAccessCompany($companyId, $operatorId)) {
             throw new RuntimeException('No tienes acceso a la empresa solicitada.');
         }
     }

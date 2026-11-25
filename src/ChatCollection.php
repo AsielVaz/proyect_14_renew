@@ -1,0 +1,535 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use DateTimeImmutable;
+
+final class ChatCollection
+{
+    private const RESOURCES = [
+        'buscar_facturas' => ['facturas?', 'Factura', 'facturas'],
+        'buscar_complementos' => ['complementos?(?: de pago)?', 'Complemento', 'complementos'],
+        'consultar_stp' => ['(?:pagos?|orden(?:es)?|transaccion(?:es)?|transferencias?) (?:de )?stp', 'Orden STP', 'órdenes STP'],
+        'consultar_banco' => ['(?:lineas? bancarias?|movimientos? bancarios?)', 'Línea bancaria', 'líneas bancarias'],
+        'consultar_pagos' => ['(?:pagos?|movimientos?(?: contables?)?)', 'Movimiento contable', 'movimientos contables'],
+    ];
+
+    public static function request(
+        string $text, array $previous, ?string $lastTool = null, ?array $pendingStp = null
+    ): ?array
+    {
+        $text = preg_replace('/^\h*\d+[.)]\h*/m', '', $text) ?? $text;
+        $text = strtr(mb_strtolower($text), [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u',
+            '¿' => '', '?' => '', '¡' => '', '!' => '',
+        ]);
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text, " .\t\n\r");
+        if (isset($pendingStp['herramienta']) && preg_match('/^(?:si[, ]+)?(?:el pago (?:de |por )?|la transferencia (?:de |por )?)?stp$/', $text)) {
+            return $pendingStp;
+        }
+        if (isset($previous['herramienta'])) {
+            $page = null;
+            if (in_array($text, ['siguiente pagina', 'muestra la siguiente pagina', 'pagina siguiente', 'siguiente',
+                'muestra mas', 'ver mas', 'y las anteriores', 'y los anteriores', 'y la anterior', 'y el anterior'], true)) {
+                $page = $previous['pagina'] + 1;
+            } elseif (preg_match('/^pagina ([1-9][0-9]{0,4})$/', $text, $pageNumber)) {
+                $page = (int) $pageNumber[1];
+            }
+            if ($page !== null) {
+                $filters = $previous['filtros'];
+                $filters['limite'] = $previous['limite'];
+                $filters['pagina'] = $page;
+                return self::make($previous['herramienta'], $filters, 'pagina');
+            }
+        }
+
+        $period = [];
+        if (preg_match('/ (de hoy|de ayer|de esta semana|de este mes|del mes pasado)$/', $text, $suffix)) {
+            $period = self::period($suffix[1]);
+            $text = substr($text, 0, -strlen($suffix[0]));
+        }
+
+        $company = [];
+        if (preg_match('/ (?:de|en|para) (?:la )?empresa #?([1-9][0-9]{0,9})$/', $text, $companyMatch)
+            && (int) $companyMatch[1] <= 4294967295) {
+            $company = ['empresa_id' => (int) $companyMatch[1]];
+            $text = substr($text, 0, -strlen($companyMatch[0]));
+        }
+
+        if (preg_match('/^(?:que|cuales) depositos (?:siguen|estan|quedaron) pendientes (de conciliar|de documentar|sin documento)$/', $text, $pending)) {
+            $mode = $pending[1] === 'de conciliar' ? 'pendientes_conciliar' : 'pendientes_deposito';
+            return self::make('consultar_pagos', ['pendientes_documento' => true] + $period + $company, $mode);
+        }
+        if (preg_match('/^(?:que|cuales) proveedores (?:quedaron|estan|salieron) fuera de rango(?: en banking)?$/', $text)) {
+            return self::make('generar_reporte', ['reporte' => 'banking'] + $period + $company, 'lista');
+        }
+        if (preg_match('/^(?:ya )?se envio el correo de la factura (?:#|(?:con )?id )([1-9][0-9]{0,9})$/', $text, $mail)
+            && (int) $mail[1] <= 4294967295) {
+            return self::make('consultar_correos', [
+                'tipo_correo' => 'factura', 'factura_id' => (int) $mail[1], 'limite' => 1,
+            ] + $period + $company, 'correo_factura');
+        }
+
+        $mentionsStp = preg_match('/\bstp\b/', $text);
+        if ($mentionsStp) {
+            $text = preg_replace('/ con (?:(?:su|el) )?estado,? (?:(?:su|el) )?comprobante (?:e|y) (?:(?:sus|las) )?incidencias$/', '', $text) ?? $text;
+        }
+        $aboutRecentStp = ($lastTool ?? ($previous['herramienta'] ?? null)) === 'consultar_stp'
+            && !preg_match('/\b(?:facturas?|complementos?|reportes?|bancari[oa]s?)\b/', $text);
+        $lookup = self::stpLookupRequest($text, $aboutRecentStp, $pendingStp);
+        if ($lookup !== null) {
+            if (isset($lookup['filtros'])) {
+                $lookup['filtros'] = $company + $lookup['filtros'];
+            } else {
+                $lookup['consulta']['filtros'] = $company + ($pendingStp['filtros'] ?? []);
+            }
+            return $lookup;
+        }
+        $latestStp = self::latestStpRequest($text, $period + $company, $aboutRecentStp);
+        if ($latestStp !== null) {
+            return $latestStp;
+        }
+        if ($mentionsStp || $aboutRecentStp) {
+            $request = self::stpRequest($text, $period);
+            if ($request !== null) {
+                $request['filtros'] += $company;
+                return $request;
+            }
+        }
+
+        $article = '(?:la |el |las |los |un |una )?';
+        $show = '(?:(?:cual es|cual fue|cuales son|dime|dame|muestra|muestrame|busca|consulta|ver) )?';
+        $list = '(?:lista|listame|listar|enumera|enumerame|enumerar|muestra|muestrame|dame|consulta|ver)';
+        foreach (self::RESOURCES as $tool => [$noun]) {
+            if (preg_match("~^{$show}{$article}(?:(?:ultim[oa]|primer[oa]) {$noun}|{$noun} mas (?:reciente|antigu[oa]))$~", $text)) {
+                $order = preg_match('~(?:mas antigu[oa]|primer[oa])~', $text) ? 'antiguos' : 'recientes';
+                return self::make($tool, ['limite' => 1, 'orden' => $order] + $period + $company, 'uno');
+            }
+            if (preg_match("~^(?:(?:cuant[oa]s) {$noun}(?: hay| tengo| tenemos| existen| se han registrado)?|"
+                . "(?:cuenta|cuentame|contar|numero de|total de) {$article}{$noun})(?: en total)?$~", $text)) {
+                return self::make($tool, ['contar' => true] + $period + $company, 'conteo');
+            }
+            $pattern = "~^{$list} (?:tod[oa]s )?{$article}(?:(ultim[oa]s|primer[oa]s) )?(?:(\d{1,6}) )?{$noun}(?: (?:mas )?(recientes|antigu[oa]s))?$~";
+            if (preg_match($pattern, $text, $matches)) {
+                $order = str_starts_with($matches[1] ?? '', 'primer') || str_starts_with($matches[3] ?? '', 'antigu')
+                    ? 'antiguos' : 'recientes';
+                $quantity = (int) (($matches[2] ?? '') ?: ChatQueries::DEFAULT_LIMIT);
+                return self::make($tool, ['limite' => min(ChatQueries::MAX_LIMIT, max(1, $quantity)), 'orden' => $order] + $period + $company, 'lista');
+            }
+        }
+        return null;
+    }
+
+    private static function stpLookupRequest(string $text, bool $aboutRecentStp, ?array $pendingStp): ?array
+    {
+        $identifier = '(?=[a-z0-9-]*\d)[a-z0-9][a-z0-9-]{0,39}';
+        $subject = '(?:orden|transaccion|transferencia|pago) (?:de )?stp';
+        $verb = '(?:consultar?|buscar?|ver|muestra)';
+        $selector = '(folio|id(?: interno)?)';
+        $lookup = "~^(?:{$verb} )?(?:(?:una |la |el )?{$subject}(?: (?:por|con) (?:el )?{$selector})?|"
+            . "{$selector} (?:de )?stp)(?:[:# ]+({$identifier}))?$~";
+        if (preg_match($lookup, $text, $match)) {
+            $criterion = ($match[1] ?? '') ?: ($match[2] ?? '');
+            $value = $match[3] ?? '';
+            return $value === '' ? self::stpIdentifierPrompt($criterion) : self::stpIdentifier($value, $criterion);
+        }
+
+        $waiting = ($pendingStp['modo'] ?? null) === 'esperar_identificador_stp';
+        if (($aboutRecentStp || $waiting) && preg_match("~^(?:{$selector}[:# ]+)?#?({$identifier})$~", $text, $match)) {
+            $criterion = $match[1] ?: ($waiting ? $pendingStp['criterio'] : '');
+            $request = self::stpIdentifier($match[2], $criterion, $match[1] !== '');
+            if ($waiting && isset($request['filtros'])) {
+                $request['filtros'] += $pendingStp['filtros'] ?? [];
+            }
+            return $request;
+        }
+        return null;
+    }
+
+    private static function stpIdentifierPrompt(string $criterion): array
+    {
+        return ['modo' => 'pedir_identificador_stp', 'consulta' => [
+            'modo' => 'esperar_identificador_stp', 'criterio' => $criterion,
+        ]];
+    }
+
+    private static function stpIdentifier(string $value, string $criterion, bool $explicit = true): array
+    {
+        if (str_starts_with($criterion, 'id')) {
+            if (!ctype_digit($value) || (int) $value <= 0 || (int) $value > 4294967295) {
+                return self::stpIdentifierPrompt('id');
+            }
+            $filters = ['id' => (int) $value];
+        } elseif (ctype_digit($value) && !($explicit && $criterion === 'folio') && strlen($value) <= 20) {
+            $filters = ['referencia_stp' => $value];
+        } else {
+            $filters = ['folio' => strtoupper($value)];
+        }
+        return self::make('consultar_stp', $filters, 'buscar_identificador_stp');
+    }
+
+    private static function latestStpRequest(string $text, array $period, bool $aboutRecentStp): ?array
+    {
+        $stp = self::RESOURCES['consultar_stp'][0];
+        $subject = "(?:{$stp}|pago|orden|transaccion|transferencia)";
+        $latest = "(?:(?:la |el )?ultim[oa] {$subject}|(?:la |el )?{$subject} mas reciente)";
+        $outcome = '(?:salio bien|fue exitos[oa]|se completo correctamente|se realizo sin problemas)';
+        $completed = 'se (?:concreto|liquido|completo|realizo|ejecuto|hizo)';
+        $problem = '(?:algun |alguna )?(?:problemas?|errores?|incidencias?|fallas?)';
+
+        $mode = match (true) {
+            (bool) preg_match("~^(?:y )?(?:(?:hubo|hay|se registro|se reporto) {$problem} (?:con|en) {$latest}|{$latest} (?:tuvo|presento|dio) {$problem})$~", $text)
+                => 'incidencia_ultima_stp',
+            (bool) preg_match("~^(?:y )?(?:(?:ya )?{$outcome} {$latest}|{$latest} (?:ya )?{$outcome}|todo bien con {$latest})$~", $text)
+                => 'resultado_stp',
+            (bool) preg_match("~^(?:y )?(?:(?:ya )?{$completed} {$latest}|{$latest} (?:ya )?{$completed}|(?:(?:cual es|cual fue|dime|muestra) )?(?:el )?estado d(?:e |el ){$latest})$~", $text)
+                => 'estado_stp',
+            default => null,
+        };
+        if ($mode === null) {
+            return null;
+        }
+        $request = self::make('consultar_stp', ['limite' => 1, 'orden' => 'recientes'] + $period, $mode);
+        return $aboutRecentStp || preg_match('/\bstp\b/', $text)
+            ? $request
+            : ['modo' => 'aclarar_stp', 'consulta' => $request];
+    }
+
+    private static function stpRequest(string $text, array $period): ?array
+    {
+        if (preg_match('/\b(?:desde|hasta|entre|empresa|cliente|cartera|folio|monto|importe|horas?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b|\d{4}-\d{2}-\d{2}/', $text)) {
+            return null;
+        }
+        $mentionsProblems = preg_match('/\b(?:errores?|incidencias?|fallas?|fallos?|problemas?|fallaron)\b/', $text);
+        $isList = preg_match('/^(?:lista|listame|listar|enumera|enumerame|enumerar|muestra|muestrame|dame)\b/', $text);
+        $asksAboutProblems = $mentionsProblems && ($isList || preg_match(
+            '/\b(?:hubo|hay|reportaron|detectaron|ocurrieron|habido|tuvimos|cuant[oa]s|cuenta|recient(?:emente|es?))\b/', $text
+        ));
+        if ($asksAboutProblems) {
+            $filters = self::stpPeriod($text, $period ?: self::recentDays(7)) + ['solo_problemas' => true];
+            if ($isList) {
+                if (preg_match('/\b([1-9][0-9]{0,5}) (?:errores|incidencias|fallas|fallos|problemas)\b/', $text, $quantity)) {
+                    $filters['limite'] = min(ChatQueries::MAX_LIMIT, (int) $quantity[1]);
+                }
+                return self::make('consultar_stp', $filters + ['orden' => 'recientes'], 'incidencias_lista');
+            }
+            return self::make('consultar_stp', $filters + ['contar' => true], 'incidencias_stp');
+        }
+        if (!preg_match('/^(?:y )?(?:dime )?(?:cuant[oa]s|cuenta|contar|resumen|desglose)\b|(?:por estado|resumen)\b/', $text)) {
+            return null;
+        }
+
+        $patterns = [
+            'liquidado' => '/\bliquid(?:aron|ad[oa]s?|o)\b/',
+            'devuelto' => '/\b(?:devolvieron|devuelt[oa]s?|devoluciones)\b/',
+            'cancelado' => '/\bcancel(?:aron|ad[oa]s?|aciones)\b/',
+            'en_espera' => '/\b(?:en espera|pendientes)\b/',
+        ];
+        $states = [];
+        foreach ($patterns as $state => $pattern) {
+            if (preg_match($pattern, $text)) {
+                $states[] = $state;
+            }
+        }
+        if ($states === [] && !preg_match('/\b(?:resumen|desglose|por estado|cada estado)\b/', $text)) {
+            return null;
+        }
+        return self::make('consultar_stp', self::stpPeriod($text, $period) + ['resumir_estados' => true], 'resumen_stp')
+            + ['estados' => $states];
+    }
+
+    private static function stpPeriod(string $text, array $fallback): array
+    {
+        if (preg_match('/\bultimos ([1-9][0-9]{0,3}) dias\b/', $text, $match)) {
+            return self::recentDays((int) $match[1]);
+        }
+        if (preg_match('/\b(hoy|ayer|esta semana|este mes|mes pasado)\b/', $text, $match)) {
+            $label = $match[1] === 'mes pasado' ? 'del mes pasado' : 'de ' . $match[1];
+            return self::period($label);
+        }
+        if ($fallback === [] && preg_match('/\brecient(?:emente|es?)\b/', $text)) {
+            return self::recentDays(7);
+        }
+        return $fallback;
+    }
+
+    private static function recentDays(int $days): array
+    {
+        $today = new DateTimeImmutable('today');
+        return ['desde' => $today->modify('-' . ($days - 1) . ' days')->format('Y-m-d'), 'hasta' => $today->format('Y-m-d')];
+    }
+
+    private static function period(string $label): array
+    {
+        $today = new DateTimeImmutable('today');
+        [$start, $end] = match ($label) {
+            'de hoy' => [$today, $today],
+            'de ayer' => [$today->modify('-1 day'), $today->modify('-1 day')],
+            'de esta semana' => [$today->modify('monday this week'), $today],
+            'de este mes' => [$today->modify('first day of this month'), $today],
+            'del mes pasado' => [$today->modify('first day of last month'), $today->modify('last day of last month')],
+        };
+        return ['desde' => $start->format('Y-m-d'), 'hasta' => $end->format('Y-m-d')];
+    }
+
+    private static function make(string $tool, array $filters, string $mode): array
+    {
+        return ['herramienta' => $tool, 'filtros' => $filters, 'modo' => $mode];
+    }
+
+    public static function reply(array $request, array $result): string
+    {
+        if ($request['modo'] === 'pendientes_conciliar') {
+            return self::reconciliationReply($request, $result);
+        }
+        if (isset($result['error'])) {
+            return $result['error'];
+        }
+        $tool = $request['herramienta'];
+        if (($result['reporte'] ?? null) === 'banking') {
+            return self::bankingReply($result);
+        }
+        if ($tool === 'consultar_correos') {
+            return self::mailReply($result);
+        }
+        [, $single, $plural] = self::RESOURCES[$tool] ?? ['', 'Registro', 'registros del reporte'];
+        if ($request['modo'] === 'resumen_stp') {
+            return self::stpSummary($request, $result);
+        }
+        if ($request['modo'] === 'incidencias_stp') {
+            $count = $result['totales']['registros'];
+            $period = self::periodLabel($result['periodo']);
+            return $count === 0
+                ? 'No encontré devoluciones ni avisos de incidencias en órdenes STP ' . $period . '.'
+                : 'Sí. Órdenes STP con devoluciones o avisos de incidencias ' . $period . ': '
+                    . number_format($count, 0, '.', ',') . '.';
+        }
+        if ($request['modo'] === 'conteo') {
+            return 'Total de ' . $plural . ' en tu alcance: ' . number_format($result['totales']['registros'], 0, '.', ',') . '.';
+        }
+        if ($result['filas'] === []) {
+            if ($request['modo'] === 'pendientes_deposito') {
+                return 'No encontré depósitos pendientes de documentar en tu alcance.';
+            }
+            if ($request['modo'] === 'incidencias_lista') {
+                return 'No encontré devoluciones ni avisos de incidencias en órdenes STP ' . self::periodLabel($result['periodo']) . '.';
+            }
+            return $request['modo'] === 'pagina' ? 'No hay más ' . $plural . ' en ese listado.' : ChatQueries::NOT_FOUND;
+        }
+
+        if (in_array($request['modo'], ['estado_stp', 'resultado_stp', 'incidencia_ultima_stp'], true)) {
+            return self::stpReply($result['filas'][0], $request['modo']);
+        }
+
+        $page = $result['pagina'];
+        $position = ($page - 1) * $result['limite'];
+        $ancient = ($request['filtros']['orden'] ?? '') === 'antiguos';
+        $lookup = $request['modo'] === 'buscar_identificador_stp';
+        $one = $request['modo'] === 'uno' || ($lookup && count($result['filas']) === 1 && !$result['hay_mas']);
+        $order = $ancient ? 'por fecha, de antiguo a reciente' : 'por fecha, de reciente a antiguo';
+        $lines = $one
+            ? [$single . ($ancient ? ' con la fecha más antigua' : ' con la fecha más reciente') . ':']
+            : ['Listado de ' . $plural . ' (' . $order . ', página ' . $page . '):'];
+        if ($request['modo'] === 'incidencias_lista') {
+            $lines = ['Órdenes STP con devoluciones o avisos de incidencias ' . self::periodLabel($result['periodo'])
+                . ' (página ' . $page . '):'];
+        }
+        if ($request['modo'] === 'pendientes_deposito') {
+            $lines = ['Depósitos pendientes de documentar en Movimientos:'];
+        }
+        if ($lookup) {
+            $lines = $one ? ['Orden STP encontrada:']
+                : ['Encontré varias órdenes STP. Indica el ID interno de la orden que quieres consultar.'];
+        }
+        foreach ($result['filas'] as $row) {
+            $prefix = $one ? '' : (++$position) . '. ';
+            $line = self::line($single, $row);
+            if ($tool === 'consultar_stp') {
+                $line .= ' · Comprobante: ' . ($row['comprobante_enviado'] === true ? 'enviado' : 'envío sin confirmar');
+                $line .= ' · Incidencias: ' . ($row['posible_incidencia'] ? 'posible incidencia' : 'sin avisos registrados');
+            }
+            $lines[] = $prefix . $line;
+            if ($tool === 'consultar_stp' && $row['posible_incidencia']) {
+                array_push($lines, ...self::stpNotes($row));
+            }
+            if (isset($row['enlace'])) {
+                $lines[] = $row['enlace'];
+            }
+        }
+        if (!$one && $result['hay_mas']) {
+            $lines[] = 'Escribe «siguiente página» para ver más.';
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function reconciliationReply(array $request, array $result): string
+    {
+        $request['modo'] = 'pendientes_deposito';
+        $sections = [self::reply($request, $result)];
+        $report = $result['diferencias'] ?? null;
+        if ($report === null) {
+            return $sections[0];
+        }
+        if (isset($report['error'])) {
+            $sections[] = 'Relación depósitos documentos · ' . $report['error'];
+        } elseif ($report['filas'] === []) {
+            $sections[] = 'Relación depósitos documentos no muestra depósitos vinculados con diferencia en tu alcance.';
+        } else {
+            $lines = ['Depósitos vinculados con diferencia en Relación depósitos documentos:'];
+            foreach ($report['filas'] as $row) {
+                $lines[] = self::line('Movimiento', $row) . ' · diferencia registrada '
+                    . number_format((float) $row['restante'], 2, '.', ',')
+                    . (empty($row['moneda']) ? '' : ' ' . $row['moneda']);
+            }
+            if ($report['hay_mas']) {
+                $lines[] = 'Se muestran los primeros resultados del reporte.';
+            }
+            $sections[] = implode("\n", $lines);
+        }
+        return implode("\n\n", $sections);
+    }
+
+    private static function bankingReply(array $result): string
+    {
+        if ($result['filas'] === []) {
+            return 'El reporte Banking no muestra proveedores fuera de rango ' . self::periodLabel($result['periodo']) . '.';
+        }
+        $lines = ['Proveedores fuera de rango en Banking ' . self::periodLabel($result['periodo']) . ':'];
+        foreach ($result['filas'] as $row) {
+            $actual = $row['porcentaje_real'] === null ? 'sin porcentaje calculado' : $row['porcentaje_real'] . '% facturado';
+            $lines[] = $row['empresa_origen'] . ' · ' . $row['proveedor'] . ' · ' . $actual
+                . ' · sugerido ' . $row['porcentaje_sugerido'] . '% · rango ' . $row['rango'];
+        }
+        if ($result['hay_mas']) {
+            $lines[] = 'Escribe «siguiente página» para ver más.';
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function mailReply(array $result): string
+    {
+        if ($result['filas'] === []) {
+            return 'No encontré registros de correo accesibles con esos datos.';
+        }
+        $lines = [];
+        foreach ($result['filas'] as $row) {
+            $document = isset($row['factura_id']) ? ' · factura #' . $row['factura_id'] : '';
+            $line = 'Registro de correo #' . $row['id'] . $document . ' · ' . $row['estado'];
+            if (!empty($row['fecha_envia'])) {
+                $line .= ' · fecha registrada del intento ' . $row['fecha_envia'];
+            }
+            if (!empty($row['fecha_programada'])) {
+                $line .= ' · fecha programada ' . $row['fecha_programada'];
+            }
+            $lines[] = $line;
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function stpSummary(array $request, array $result): string
+    {
+        $labels = [
+            'liquidado' => 'Liquidadas', 'devuelto' => 'Devueltas', 'cancelado' => 'Canceladas',
+            'en_espera' => 'En espera', 'desconocido' => 'Estado no reconocido',
+        ];
+        $totals = $result['totales'];
+        $states = $request['estados'];
+        $lines = ['Estado actual de las órdenes STP registradas ' . self::periodLabel($result['periodo']) . ':'];
+        foreach ($labels as $state => $label) {
+            if (($states === [] && ($state !== 'desconocido' || $totals['por_estado'][$state] > 0))
+                || in_array($state, $states, true)) {
+                $lines[] = $label . ': ' . number_format($totals['por_estado'][$state], 0, '.', ',');
+            }
+        }
+        if ($states === []) {
+            $lines[] = 'Total: ' . number_format($totals['registros'], 0, '.', ',');
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function periodLabel(array $period): string
+    {
+        if (isset($period['desde'], $period['hasta'])) {
+            return $period['desde'] === $period['hasta'] ? 'el ' . $period['desde']
+                : 'del ' . $period['desde'] . ' al ' . $period['hasta'];
+        }
+        return 'en tu historial autorizado';
+    }
+
+    private static function stpNotes(array $row): array
+    {
+        $notes = [];
+        foreach (['causa_devolucion' => 'Causa de devolución', 'status_pre' => 'Estado previo'] as $key => $label) {
+            if (trim((string) ($row[$key] ?? '')) !== '') {
+                $notes[] = $label . ': ' . $row[$key];
+            }
+        }
+        return $notes;
+    }
+
+    private static function stpReply(array $row, string $mode): string
+    {
+        $asksAboutOutcome = $mode === 'resultado_stp';
+        $summary = match ($row['estado']) {
+            'Liquidado' => ($asksAboutOutcome && $row['posible_incidencia'] ? '' : 'Sí. ')
+                . 'La última transacción STP se liquidó.'
+                . ($row['comprobante_enviado'] === true ? ' Se envió el comprobante.' : '')
+                . ($asksAboutOutcome && !$row['posible_incidencia'] ? ' No hay avisos de incidencias registrados.' : ''),
+            'Devuelto' => 'No. La última transacción STP fue devuelta.',
+            'Cancelado' => 'No. La última transacción STP fue cancelada.',
+            'En espera' => 'Aún no. La última transacción STP está en espera.',
+            default => 'No pude confirmar si se concretó la última transacción STP. El estado registrado no se reconoce.',
+        };
+        if ($mode === 'incidencia_ultima_stp') {
+            $summary = match (true) {
+                $row['estado'] === 'Devuelto' => 'Sí. La última transferencia STP fue devuelta.',
+                $row['posible_incidencia'] => 'Sí. La última transferencia STP tiene un aviso de posible incidencia.',
+                $row['estado'] === 'Cancelado' => 'La última transferencia STP fue cancelada. No hay avisos de incidencias registrados.',
+                default => 'No encontré devoluciones ni avisos de incidencias en la última transferencia STP.',
+            };
+        }
+        $lines = [$summary, self::line('Orden STP', $row)];
+        if ($row['posible_incidencia']) {
+            if ($mode !== 'incidencia_ultima_stp' || $row['estado'] === 'Devuelto') {
+                $lines[] = 'Hay una posible incidencia registrada.';
+            }
+            array_push($lines, ...self::stpNotes($row));
+        }
+        if (isset($row['enlace'])) {
+            $lines[] = $row['enlace'];
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function line(string $label, array $row): string
+    {
+        $parts = [$label . ' #' . ($row['id'] ?? $row['pago_id'])];
+        if (!empty($row['folio'])) {
+            $parts[] = 'folio ' . $row['folio'];
+        }
+        $date = $row['fecha'] ?? $row['fecha_creacion'] ?? $row['fecha_pago'] ?? $row['fecha_banco'] ?? '';
+        if (preg_match('/^\d{4}-\d{2}-\d{2}/', (string) $date) && !str_starts_with($date, '0000')) {
+            $parts[] = substr($date, 0, 10);
+        }
+        foreach (['empresa', 'cliente', 'estado'] as $field) {
+            if (!empty($row[$field])) {
+                $parts[] = $row[$field];
+            }
+        }
+        $amount = $row['total'] ?? $row['monto'] ?? null;
+        $currency = trim((string) ($row['moneda'] ?? ''));
+        if (is_numeric($amount)) {
+            $parts[] = number_format((float) $amount, 2, '.', ',') . ($currency === '' ? '' : ' ' . $currency);
+        }
+        foreach (['deposito' => 'depósito', 'retiro' => 'retiro'] as $field => $caption) {
+            if (isset($row[$field]) && (float) $row[$field] != 0.0) {
+                $parts[] = $caption . ' ' . number_format((float) $row[$field], 2, '.', ',')
+                    . ($currency === '' ? '' : ' ' . $currency);
+            }
+        }
+        return implode(' · ', $parts);
+    }
+}
+

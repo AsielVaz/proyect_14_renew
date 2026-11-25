@@ -528,6 +528,12 @@ final class PaymentComplementRepository
         return $value === false || $value === null ? 0 : max(0, (int) $value);
     }
 
+    public function taxTreatmentLabel(array $invoice): ?string
+    {
+        $treatment = $this->invoiceTaxTreatment($invoice, true);
+        return $treatment === null ? null : self::TREATMENT_LABELS[$treatment];
+    }
+
     /** @param array<string, mixed> $invoice */
     private function addTaxTreatment(array &$invoice): void
     {
@@ -538,38 +544,63 @@ final class PaymentComplementRepository
     }
 
     /** @param array<string, mixed> $invoice */
-    private function invoiceTaxTreatment(array $invoice): string
+    private function invoiceTaxTreatment(array $invoice, bool $strict = false): ?string
     {
         $xml = trim((string) ($invoice['xml_firmado'] ?? ''));
+        if ($strict && trim((string) ($invoice['uuid'] ?? '')) === '') {
+            $xml = '';
+        }
         if ($xml !== '') {
             $document = new \DOMDocument();
             $previous = libxml_use_internal_errors(true);
             $loaded = $document->loadXML($xml, LIBXML_NONET | LIBXML_NOBLANKS);
             libxml_clear_errors();
             libxml_use_internal_errors($previous);
-            if ($loaded) {
+            if ($loaded && (!$strict || $document->documentElement?->localName === 'Comprobante')) {
                 $xpath = new \DOMXPath($document);
                 $retentions = $xpath->query('//*[local-name()="Retencion" and @Impuesto="002"]');
                 if ($retentions !== false && $retentions->length > 0) {
-                    return '4';
+                    if (!$strict) {
+                        return '4';
+                    }
+                    foreach ($retentions as $retention) {
+                        if (!$retention instanceof \DOMElement) {
+                            continue;
+                        }
+                        $base = (float) $retention->getAttribute('Base');
+                        $rate = $retention->getAttribute('TasaOCuota');
+                        if (($rate !== '' && abs((float) $rate - 0.04) < 0.000001)
+                            || ($rate === '' && $base > 0 && abs((float) $retention->getAttribute('Importe') - $base * 0.04) <= 0.005)) {
+                            return '4';
+                        }
+                    }
+                    if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0
+                        || abs((float) ($invoice['retencion_iva_tasa'] ?? 0) - 0.04) < 0.000001) {
+                        return '4';
+                    }
+                    return null;
                 }
                 $transfers = $xpath->query('//*[local-name()="Traslado" and @Impuesto="002"]');
                 $zeroRate = false;
+                $otherRate = false;
                 if ($transfers !== false) {
                     foreach ($transfers as $transfer) {
                         if (!$transfer instanceof \DOMElement) continue;
                         $rate = trim($transfer->getAttribute('TasaOCuota'));
-                        if ($rate !== '' && (float) $rate >= 0.159999) return 'T';
+                        if ($rate !== '' && ($strict ? abs((float) $rate - 0.16) < 0.000001 : (float) $rate >= 0.159999)) return 'T';
+                        if ($strict && $rate !== '' && (float) $rate > 0) $otherRate = true;
                         if ($rate !== '' && abs((float) $rate) < 0.000001) $zeroRate = true;
                     }
                 }
-                return $zeroRate ? 'T0' : 'SV';
+                return $otherRate ? null : ($zeroRate ? 'T0' : 'SV');
             }
         }
 
-        if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0) {
+        if (strcasecmp(trim((string) ($invoice['retencion_transporte'] ?? '')), 'Si') === 0
+            || ($strict && abs((float) ($invoice['retencion_iva_tasa'] ?? 0) - 0.04) < 0.000001)) {
             return '4';
         }
+
 
         $invoiceId = (int) ($invoice['id'] ?? 0);
         if ($invoiceId > 0) {
@@ -578,8 +609,16 @@ final class PaymentComplementRepository
                 WHERE d.id_factura = :invoice');
             $query->execute(['invoice' => $invoiceId]);
             $taxableZero = false;
+            $exempt = false;
             foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $detail) {
-                if ((float) ($detail['iva'] ?? 0) >= 15.999) return 'T';
+                $vat = $detail['iva'] ?? null;
+                if ($strict && $vat === null) {
+                    continue;
+                }
+                if ($strict ? (float) $vat === 16.0 : (float) $vat >= 15.999) return 'T';
+                if ((float) $vat === 0.0 && strcasecmp(trim((string) ($detail['aplica_iva'] ?? '')), 'no') === 0) {
+                    $exempt = true;
+                }
                 if ((float) ($detail['iva'] ?? 0) === 0.0
                     && strcasecmp(trim((string) ($detail['aplica_iva'] ?? '')), 'no') !== 0
                     && trim((string) ($detail['aplica_iva'] ?? '')) !== '') {
@@ -587,10 +626,14 @@ final class PaymentComplementRepository
                 }
             }
             if ($taxableZero) return 'T0';
+            if ($strict && $exempt) return 'SV';
         }
 
         $total = (float) ($invoice['xml_total'] ?? $invoice['total_iva'] ?? 0);
         $subtotal = (float) ($invoice['xml_subtotal'] ?? 0);
+        if ($strict) {
+            return $subtotal > 0 && abs($total - $subtotal * 1.16) <= 0.02 ? 'T' : null;
+        }
         return $subtotal > 0 && $total > $subtotal + 0.005 ? 'T' : 'SV';
     }
 
