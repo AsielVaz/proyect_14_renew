@@ -3,7 +3,7 @@
     <header class="s14-chat-header">
         <div>
             <h2 id="s14-chat-title">Asistente de consultas</h2>
-            <p>Facturas, pagos, STP y reportes · Solo lectura</p>
+            <p data-chat-scope>Facturas y movimientos · Solo lectura</p>
         </div>
         <button type="button" class="button s14-chat-dismiss" data-chat-dismiss aria-label="Cerrar asistente">×</button>
     </header>

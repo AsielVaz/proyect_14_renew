@@ -200,7 +200,7 @@ final class ChatCatalogs
         return null;
     }
 
-    private static function configurationFields(string $catalog, string $field, ChatAccess $access, array &$params): string
+    private static function configurationFields(string $catalog, string $field): string
     {
         $wallet = match ($field) {
             'correo_principal' => 'c.correo AS correo_principal_saldos',
@@ -209,10 +209,9 @@ final class ChatCatalogs
             'copias_facturacion' => 'c.correo2_2_f AS copia_oculta_1, c.correo2_3_f AS copia_oculta_2',
             'notificaciones' => self::NOTIFICATIONS . ' AS notificaciones',
             'comision' => 'c.comision AS comision, c.esquema_comision AS esquema_comision',
-            'comisiones_adicionales' => implode(', ', array_map(static function (int $i) use ($access, &$params): string {
-                $scope = $access->optionalCompany('sub.empresa', $params);
+            'comisiones_adicionales' => implode(', ', array_map(static function (int $i): string {
                 return "(SELECT CONCAT('#',sub.id,' ',sub.nombre) FROM clientes sub WHERE sub.id=c.`{$i}_subcomision`
-                    AND {$scope}) AS cartera_comision_{$i}, c.porc_{$i}_subcomision AS porcentaje_comision_{$i}";
+                ) AS cartera_comision_{$i}, c.porc_{$i}_subcomision AS porcentaje_comision_{$i}";
             }, [1,2,3])),
             'lidera' => "CASE c.lidera WHEN 1 THEN 'Sí' WHEN 0 THEN 'No' END AS marcada_para_liderar",
             'facturacion_automatica' => 'c.facturacion_automatica AS facturacion_automatica_cartera',
@@ -330,6 +329,8 @@ final class ChatCatalogs
             $lines[] = 'Conteo precalculado del cron para la clave corta.';
         } elseif ($configuration === 'saldo_inicial') {
             $lines[] = 'Saldo de arranque configurado. Para el saldo actual, consulta el estado de cuenta.';
+        } elseif ($configuration === 'empresas_permitidas') {
+            $lines[] = 'Asignaciones registradas en el catálogo. El chat permite consultar todas las empresas dentro de los módulos y carteras de cada rol.';
         } elseif ($configuration !== null) {
             array_unshift($lines, 'Configuración registrada en Sistema 14');
         }
@@ -391,37 +392,37 @@ final class ChatCatalogs
         $walletFilters = ['cartera_id' => 'c.id', 'cartera' => 'c.nombre'];
         $paymentCode = "CASE WHEN CHAR_LENGTH(CAST(t.clave AS CHAR))=1 THEN CONCAT('0',t.clave) ELSE CAST(t.clave AS CHAR) END";
         $companyFilters = ['empresa_id' => 'e.id', 'empresa' => 'e.razon'];
-        [$fields, $joins, $columns, $companies] = match ($catalog) {
+        [$fields, $joins, $columns] = match ($catalog) {
             'carteras' => [
                 "c.nombre, c.rfc, IF(c.activo=1,'Activa','Inactiva') AS estado,
                  g.id AS grupo_id, g.nombre AS grupo, " . self::NOTIFICATIONS . " AS notificaciones,
                  IF(c.lidera=1,'Sí','No') AS marcada_para_liderar, e.id AS empresa_id, e.razon AS empresa",
                 "LEFT JOIN grupo g ON g.id=c.grupo {$company}c.empresa",
-                ['nombre'=>'c.nombre','rfc'=>'c.rfc','estado'=>'IF(c.activo=1,1,0)','grupo_id'=>'g.id','grupo'=>'g.nombre'] + $companyFilters, ['c.empresa'],
+                ['nombre'=>'c.nombre','rfc'=>'c.rfc','estado'=>'IF(c.activo=1,1,0)','grupo_id'=>'g.id','grupo'=>'g.nombre'] + $companyFilters,
             ],
             'claves' => [
                 't.clave_corta, t.razon_social AS nombre, t.rfc, c.id AS cartera_id, c.nombre AS cartera,
                  t.regimen_fiscal, t.cp, t.facturacion_automatica, t.documentos_vivos',
                 $wallet . 't.id_cliente',
-                ['nombre'=>'t.razon_social','codigo'=>'t.clave_corta','rfc'=>'t.rfc'] + $walletFilters, ['c.empresa'],
+                ['nombre'=>'t.razon_social','codigo'=>'t.clave_corta','rfc'=>'t.rfc'] + $walletFilters,
             ],
             'grupos' => [
                 't.nombre, c.id AS cartera_padre_id, c.nombre AS cartera_padre, b.nombre_corto AS cuenta_salida,
                  (SELECT COUNT(*) FROM clientes miembro WHERE miembro.grupo=t.id) AS carteras,
                  (SELECT COUNT(*) FROM clientes miembro WHERE miembro.grupo=t.id AND miembro.activo=1) AS carteras_activas',
                 $wallet . 't.cliente_padre ' . $bank . 't.cuenta_salida',
-                ['nombre'=>'t.nombre'], ['c.empresa', 'b.razon'],
+                ['nombre'=>'t.nombre'],
             ],
             'empresas' => [
                 't.razon AS nombre, t.rfc, t.regimen AS regimen_fiscal, t.cp',
-                '', ['nombre'=>'t.razon','rfc'=>'t.rfc'], ['t.id'],
+                '', ['nombre'=>'t.razon','rfc'=>'t.rfc'],
             ],
             'bancos' => [
                 "t.nombre_corto AS nombre, t.banco, t.moneda, e.id AS empresa_id, e.razon AS empresa,
                  CASE t.status_banco WHEN 'AC' THEN 'Activa' WHEN 'IN' THEN 'Inactiva' ELSE 'Sin definir' END AS estado,
                  " . self::masked('t.numero_cuenta') . ' AS cuenta, ' . self::masked('t.clabe_interbancaria') . ' AS clabe',
                 $company . 't.razon',
-                ['nombre'=>"CONCAT_WS(' ',t.nombre_corto,t.banco)",'moneda'=>'t.moneda','estado'=>"CASE t.status_banco WHEN 'AC' THEN 1 WHEN 'IN' THEN 0 END"] + $companyFilters, ['t.razon'],
+                ['nombre'=>"CONCAT_WS(' ',t.nombre_corto,t.banco)",'moneda'=>'t.moneda','estado'=>"CASE t.status_banco WHEN 'AC' THEN 1 WHEN 'IN' THEN 0 END"] + $companyFilters,
             ],
             'conceptos' => [
                 't.concepto AS nombre, t.clave_sat, t.clave_unidad_medida, u.unidad,
@@ -429,15 +430,15 @@ final class ChatCatalogs
                  e.id AS empresa_id, e.razon AS empresa',
                 $company . 't.razon LEFT JOIN (SELECT clave_unidad_medida, MIN(nombre_unidad_medida) AS unidad
                     FROM catalogo_unidad_medida GROUP BY clave_unidad_medida) u ON u.clave_unidad_medida=t.clave_unidad_medida',
-                ['nombre'=>'t.concepto','codigo'=>'t.clave_sat'] + $companyFilters, ['t.razon'],
+                ['nombre'=>'t.concepto','codigo'=>'t.clave_sat'] + $companyFilters,
             ],
             'unidades' => [
                 't.clave_unidad_medida AS codigo, t.nombre_unidad_medida AS nombre',
-                '', ['codigo'=>'t.clave_unidad_medida','nombre'=>'t.nombre_unidad_medida'], [],
+                '', ['codigo'=>'t.clave_unidad_medida','nombre'=>'t.nombre_unidad_medida'],
             ],
             'formas' => [
                 "{$paymentCode} AS codigo, t.forma_pago AS nombre",
-                '', ['codigo'=>$paymentCode,'nombre'=>'t.forma_pago'], [],
+                '', ['codigo'=>$paymentCode,'nombre'=>'t.forma_pago'],
             ],
             'usuarios' => [
                 "TRIM(CONCAT_WS(' ',t.nombre,t.appat,t.apmat)) AS nombre, t.tipo AS rol, c.id AS cartera_id, c.nombre AS cartera,
@@ -445,25 +446,25 @@ final class ChatCatalogs
                  (SELECT GROUP_CONCAT(DISTINCT CONCAT('#',ex.id,' ',ex.razon) ORDER BY ex.razon SEPARATOR ', ')
                     FROM cliente_empresa ce JOIN empresas ex ON ex.id=ce.id_empresa WHERE ce.id_usuario=t.id) AS empresas_vinculadas",
                 $wallet . 't.cliente ' . $company . 't.empresa_asignada',
-                ['nombre'=>"CONCAT_WS(' ',t.nombre,t.appat,t.apmat,t.usuario)"] + $walletFilters + $companyFilters, ['c.empresa','t.empresa_asignada'],
+                ['nombre'=>"CONCAT_WS(' ',t.nombre,t.appat,t.apmat,t.usuario)"] + $walletFilters + $companyFilters,
             ],
             'fondeadoras' => [
                 "b.nombre_corto AS nombre, b.id AS banco_id, {$account} AS cuenta, {$clabe} AS clabe,
                  e.id AS empresa_id, e.razon AS empresa, t.minuto_ejecucion",
                 $bank . 't.id_empresa ' . $company . 'b.razon',
-                ['nombre'=>'b.nombre_corto'] + $companyFilters, ['b.razon'],
+                ['nombre'=>'b.nombre_corto'] + $companyFilters,
             ],
             'cuentas-especiales' => [
                 't.nombre, c.id AS cartera_id, c.nombre AS cartera, b.nombre_corto AS banco, '
                     . self::masked('t.cuenta') . ' AS cuenta, e.id AS empresa_id, e.razon AS empresa',
                 $wallet . 't.id_cliente ' . $bank . 't.banca ' . $company . 'b.razon',
-                ['nombre'=>'t.nombre'] + $walletFilters + $companyFilters, ['c.empresa','b.razon'],
+                ['nombre'=>'t.nombre'] + $walletFilters + $companyFilters,
             ],
             'contactos' => [
                 't.nombre, t.alias, c.id AS cartera_id, c.nombre AS cartera, '
                     . self::masked('t.numero') . ' AS cuenta, ' . self::masked('t.clabe_inter') . ' AS clabe',
                 $wallet . 't.cliente',
-                ['nombre'=>"CONCAT_WS(' ',t.nombre,t.alias)"] + $walletFilters, ['c.empresa'],
+                ['nombre'=>"CONCAT_WS(' ',t.nombre,t.alias)"] + $walletFilters,
             ],
         };
 
@@ -471,7 +472,7 @@ final class ChatCatalogs
             if (($filters['contar'] ?? false) || array_intersect_key($filters, ['id'=>true,'nombre'=>true,'codigo'=>true,'rfc'=>true]) === []) {
                 throw new ChatException('Identifica el registro cuya configuración quieres consultar.');
             }
-            $fields = self::configurationFields($catalog, $filters['configuracion'], $access, $params);
+            $fields = self::configurationFields($catalog, $filters['configuracion']);
         }
         if ($filters['telefono'] ?? false) {
             self::requireWallets($catalog, 'El teléfono de cartera solo está disponible en el catálogo de carteras.');
@@ -484,9 +485,6 @@ final class ChatCatalogs
         $alias = $catalog === 'carteras' ? 'c' : 't';
         $columns += ['id' => "{$alias}.id"];
         $where = [];
-        foreach ($companies as $companyColumn) {
-            $where[] = $access->optionalCompany($companyColumn, $params);
-        }
         if ($filters['panel'] ?? false) {
             self::requireWallets($catalog, 'El filtro del panel solo corresponde a carteras.');
             $where[] = $access->walletConditions($params);

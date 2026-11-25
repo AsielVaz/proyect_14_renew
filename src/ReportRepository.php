@@ -65,7 +65,6 @@ final class ReportRepository
         $company = 'COALESCE(NULLIF(c.razon, 0), NULLIF(CAST(p.empresa AS UNSIGNED), 0))';
         $dateColumn = $conta ? "COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura)" : 'p.fecha_banco';
         $where = ' AND ' . $access->conditions($company, 'CAST(p.nombre AS UNSIGNED)', $params, false);
-        $where .= ' AND ' . $access->optionalCompany('CAST(p.empresa AS UNSIGNED)', $params);
         foreach ($conta ? ['f', 'fc', 'legacy_response'] : ['chat_factura', 'chat_complemento'] as $alias) {
             $where .= " AND ({$alias}.id IS NULL OR ("
                 . $access->conditions("{$alias}.razon", "{$alias}.nombre", $params, false) . '))';
@@ -181,7 +180,7 @@ final class ReportRepository
                 FROM facturas_correo l LEFT JOIN facturas f ON f.id = l.id_factura
                 LEFT JOIN empresas e ON e.id = {$company}
                 LEFT JOIN clientes receiver ON receiver.id = {$client}";
-            $where = 'COALESCE(l.id_factura, 0) >= 0 AND ' . $access->optionalCompany('l.empresa_origen', $params);
+            $where = 'COALESCE(l.id_factura, 0) >= 0';
         }
         $where .= ' AND ' . $access->conditions($company, $client, $params, false)
             . ' AND (f.id IS NULL OR (' . $access->conditions('f.razon', 'f.nombre', $params, false) . '))';

@@ -110,10 +110,10 @@ $run = static function (string $tool, array $args, ChatAccess $access) use ($que
 $ids = static fn (array $result): array => array_map('intval', array_column($result['filas'], 'id'));
 
 $check($run('detalle_factura', ['id' => 12], $client)['mensaje'] === ChatQueries::NOT_FOUND, 'Factura de otra cartera.');
-$check($run('detalle_factura', ['id' => 16], $client)['mensaje'] === ChatQueries::NOT_FOUND, 'Empresa 132 restringida para clientes.');
+$check($ids($run('detalle_factura', ['id' => 16], $client)) === [16], 'La empresa 132 está disponible dentro de la cartera del cliente.');
 $check($run('detalle_movimiento', ['id' => 33], $client)['filas'] === [], 'Movimiento de otra cartera.');
 $check($run('consultar_banco', ['id' => 52], $client)['filas'] === [], 'Línea de otra cartera.');
-$check($run('detalle_factura', ['id' => 10], ChatAccess::load($pdo, 45))['filas'] === [], 'Emisor fuera de la asignación.');
+$check($ids($run('detalle_factura', ['id' => 10], ChatAccess::load($pdo, 45))) === [10], 'El capturista consulta facturas de cualquier empresa.');
 $noCapture = $run('detalle_movimiento', ['id' => 31], $client);
 $check($ids($noCapture) === [31] && $noCapture['filas'][0]['linea_bancaria_id'] === null, 'Debe aparecer el movimiento sin captura.');
 $check((bool) $noCapture['filas'][0]['sin_documento'] && $noCapture['secciones']['facturas']['filas'] === [], 'La bandera 2 no es una factura.');
@@ -312,8 +312,8 @@ foreach ([44, 46] as $operator) {
         && $admin->allows('generar_reporte'), 'Administración consulta datos de otras empresas y carteras.');
 }
 $limitedAdmin = ChatAccess::load($pdo, 47);
-$check($limitedAdmin->previousSignatures() === [] && $run('consultar_stp', ['id' => 119312], $limitedAdmin)['filas'] === [],
-    'Administración delegada conserva el alcance de su empresa.');
+$check($limitedAdmin->previousSignatures() !== [] && $ids($run('consultar_stp', ['id' => 119312], $limitedAdmin)) === [119312],
+    'La administración delegada consulta movimientos de empresas no vinculadas.');
 $companyFilters = ['empresa_id' => 132];
 $check($ids($run('buscar_facturas', $companyFilters, $staff)) === [16]
     && $ids($run('consultar_stp', $companyFilters, $staff)) === [119314],
@@ -322,20 +322,14 @@ $queries->assertDocument('factura', 16, $staff);
 $check($ids($run('detalle_factura', ['id' => 16], ChatAccess::load($pdo, 1))) === [16],
     'Un administrador autorizado anteriormente conserva el acceso.');
 $delegated132 = ChatAccess::load($pdo, 82);
-$check($delegated132->previousSignatures() === []
-    && $run('buscar_facturas', $companyFilters, $delegated132)['filas'] === []
-    && $run('consultar_stp', $companyFilters, $delegated132)['filas'] === [],
-    'La empresa 132 se restringe para otros roles incluso con asignación y excepción anterior.');
-try {
-    $queries->assertDocument('factura', 16, $delegated132);
-    throw new RuntimeException('El documento de empresa 132 no debe abrirse con otro rol.');
-} catch (ChatException $error) {
-    $check($error->status === 404, 'El documento de empresa 132 respeta la restricción.');
-}
+$check($ids($run('buscar_facturas', $companyFilters, $delegated132)) === [16]
+    && $ids($run('consultar_stp', $companyFilters, $delegated132)) === [119314],
+    'La empresa 132 está disponible para la administración delegada.');
+$queries->assertDocument('factura', 16, $delegated132);
 $delegatedOldScope = hash('sha256', json_encode(['administrador_b', 82, null, [132], true], JSON_THROW_ON_ERROR));
 $delegatedOldThread = $chatRepository->create(82, $delegatedOldScope, bin2hex(random_bytes(16)));
 $check($chatRepository->conversations(82, $delegated132->signature(), 0, $delegated132->previousSignatures())['conversaciones'] === [],
-    'Un alcance histórico más amplio se mantiene fuera del historial accesible del rol restringido.');
+    'Un alcance histórico incompatible no se usa para migrar conversaciones.');
 
 $oldThread = $chatRepository->create(44, $previousAdminScope, bin2hex(random_bytes(16)));
 $oldConversation = $chatRepository->conversation($oldThread, 44, $previousAdminScope);
@@ -424,8 +418,8 @@ $check($ids($log) === [802,801] && $log['filas'][0]['estado'] === 'Aceptado o en
 $contextMail = $run('consultar_correos', ['tipo_correo'=>'contextual','factura_id'=>10], $staff);
 $check($ids($contextMail) === [901] && $contextMail['filas'][0]['estado'] === 'Pendiente de envío'
     && isset($contextMail['filas'][0]['fecha_programada']), 'Una fecha programada del correo contextual no prueba un envío.');
-$check($run('consultar_correos', ['tipo_correo'=>'factura','factura_id'=>10], $limitedAdmin)['filas'] === [],
-    'El log de correo respeta el alcance de empresa.');
+$check($ids($run('consultar_correos', ['tipo_correo'=>'factura','factura_id'=>10], $limitedAdmin)) === [802,801],
+    'El log de correo incluye las empresas no vinculadas para los roles con acceso al módulo.');
 $check(str_contains($lookupAsk('¿Se envió el correo de la factura #10?', 44, $oldThread), 'Aceptado o en cola'),
     'La pregunta por correo usa el registro más reciente de Dev.');
 
@@ -443,8 +437,8 @@ $bankingArgs = ['reporte'=>'banking','empresa_id'=>24,'desde'=>'2026-01-04','has
 $banking = $run('generar_reporte', $bankingArgs, $staff);
 $check(array_map('floatval', array_column($banking['filas'], 'porcentaje_real')) === [75.0,25.0],
     'Banking devuelve las desviaciones calculadas por el reporte original.');
-$check($run('generar_reporte', $bankingArgs, $limitedAdmin)['filas'] === [],
-    'Una empresa de origen autorizada no revela cifras de proveedores fuera del alcance.');
+$check($run('generar_reporte', $bankingArgs, $limitedAdmin)['filas'] === $banking['filas'],
+    'Banking incluye las empresas de origen y proveedor para ambos roles administrativos.');
 
 $pdo->exec("UPDATE facturas SET uuid='a1234567-abcd-1234-ab12-123456789abc' WHERE id=10");
 $check($ids($run('buscar_facturas', ['uuid'=>'A1234567-ABCD-1234-AB12-123456789ABC'], $staff)) === [10]
@@ -517,8 +511,8 @@ $walletCompany = $run($walletTool, ['grupo_id'=>2], $client)['totales'];
 $walletUser = $run($walletTool, ['cartera_nombre'=>'JIMMY'], $client)['totales'];
 $check($walletCompany === $walletUser && $walletCompany['registros'] === 1
     && $walletCompany['saldo_acreditable'] === (float) $pdo->query(
-        "SELECT SUM(saldo_acreditable) FROM pagos WHERE nombre='101' AND empresa='23'"
-    )->fetchColumn(), 'La suma de un cliente excluye otras carteras y otras empresas.');
+        "SELECT SUM(saldo_acreditable) FROM pagos WHERE nombre='101'"
+    )->fetchColumn(), 'La suma de un cliente incluye todas las empresas de su propia cartera.');
 $check(str_contains($lookupAsk('cuando saldo tiene el grupo de calle ley (2)', 44, $oldThread), 'Grupo Calle Ley (#2)')
     && str_contains($lookupAsk('Saldo del grupo Calle Ley 2024', 44, $oldThread), 'Grupo Calle Ley 2024 (#4)')
     && str_contains($lookupAsk('suma todas las carteas que tengan JYMMY en su nombre', 44, $oldThread), '«JYMMY»')
@@ -530,6 +524,7 @@ $pdo->exec("UPDATE empresas SET rfc='DUBE800923E41' WHERE id=23");
 $pdo->exec("UPDATE claves_cortas SET rfc='MOAF580320PJ1' WHERE id=3");
 $pdo->exec("UPDATE facturas SET uuid='856CAF56-E0B9-4A96-B0E8-7C7C2EC5C534', sello_cfd='rH8/bw==',
     xml_total=100.25, xml_firmado=NULL WHERE id IN (11,16)");
+$pdo->exec('UPDATE facturas SET nombre=102 WHERE id=16');
 $stamp = '<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Total="999.250000" Sello="aBcD+/==">'
     . '<cfdi:Emisor Rfc="DUBE800923E41"/><cfdi:Receptor Rfc="MOAF580320PJ1"/>'
     . '<cfdi:Complemento><tfd:TimbreFiscalDigital UUID="a1234567-abcd-1234-ab12-123456789abc"/></cfdi:Complemento></cfdi:Comprobante>';
@@ -741,6 +736,52 @@ $withdrawalChat = $lookupAsk('Enumera los últimos 5 retiros de la cartera #101'
 $check(str_contains($withdrawalChat,'Traspaso de salida · Movimiento #9303')
     && str_contains($withdrawalChat,'Retiro STP · Movimiento #9307'),
     'El chat dirige una pregunta de retiros de cartera al listado con los tipos correctos.');
+
+$pdo->exec("INSERT INTO usuarios (id,tipo,cliente,empresa_asignada) VALUES (85,'supercapturista',0,24)");
+$pdo->exec("INSERT INTO pagos (id,nombre,monto,saldo_acreditable,empresa,banco,tipo_movimiento,fecha_banco)
+    VALUES (99001,'102',80,80,'24','Banco QA','Deposito','2026-09-15')");
+$limitedTools = ['buscar_facturas','detalle_factura','consultar_estatus_sat','buscar_complementos','detalle_complemento',
+    'consultar_pagos','detalle_movimiento','consultar_banco','consultar_stp','consultar_traspasos','pendientes_ppd'];
+foreach ([45 => 'capturista', 85 => 'supercapturista'] as $operator => $role) {
+    $scoped = ChatAccess::load($pdo, $operator);
+    $tools = array_column(array_column(ChatQueries::tools($scoped),'function'),'name');
+    $check(array_diff($tools,$limitedTools) === [] && array_diff($limitedTools,$tools) === [],
+        'Capturista y supercapturista disponen únicamente de Facturación y Movimientos.');
+    $check($ids($run('buscar_facturas',['id'=>17],$scoped)) === [17]
+        && $ids($run('buscar_facturas',['id'=>16],$scoped)) === [16],
+        'Los capturistas consultan facturas de todas las empresas, incluida la 132.');
+    $oldScope = hash('sha256',json_encode([$role,$operator,null,[24],false],JSON_THROW_ON_ERROR));
+    $oldCapture = $chatRepository->create($operator,$oldScope,bin2hex(random_bytes(16)));
+    $check($scoped->signature() !== $oldScope && $scoped->previousSignatures() !== []
+        && !in_array($oldScope,$scoped->previousSignatures(),true)
+        && $chatRepository->conversations($operator,$scoped->signature(),0,$scoped->previousSignatures())['conversaciones'] === [],
+        'El nuevo alcance protege conversaciones que podían contener datos ya restringidos.');
+    try {
+        $chatRepository->thread($oldCapture,$operator,$scoped->signature(),0);
+        throw new RuntimeException('El historial del alcance anterior no debe abrirse.');
+    } catch (ChatException $error) {
+        $check($error->status === 404,'El historial anterior tampoco se puede abrir directamente.');
+    }
+    $previousCaptureScope = hash('sha256',json_encode([$role,$operator,null,[24],false,'facturas_movimientos'],JSON_THROW_ON_ERROR));
+    $previousCapture = $chatRepository->create($operator,$previousCaptureScope,bin2hex(random_bytes(16)));
+    $check($chatRepository->conversation($previousCapture,$operator,$scoped->signature(),$scoped->previousSignatures())['id'] === $previousCapture,
+        'La ampliación por empresa permite retomar conversaciones con los mismos módulos autorizados.');
+    $newCapture = $chatRepository->create($operator,$scoped->signature(),bin2hex(random_bytes(16)));
+    foreach (['¿Cuántas carteras activas hay?','¿Qué proveedores quedaron fuera de rango?',
+              '¿Se envió el correo de la factura #17?','Saldo del grupo #2'] as $prompt) {
+        $check(str_contains($lookupAsk($prompt,$operator,$newCapture),'no tiene permiso'),
+            'Las rutas directas rechazan catálogos, reportes, logs y saldos de grupos para capturistas.');
+    }
+    $check(str_contains($lookupAsk('Enumera las últimas 5 facturas',$operator,$newCapture),'Factura #17')
+        && str_contains($lookupAsk('Enumera los últimos 5 movimientos contables',$operator,$newCapture),'Movimiento contable #99001'),
+        'Las rutas directas de facturas y movimientos permanecen accesibles.');
+}
+$check(!$limitedAdmin->allows('consultar_catalogos') && $limitedAdmin->allows('generar_reporte')
+    && $limitedAdmin->allows('consultar_pagos') && $staff->allows('consultar_catalogos'),
+    'administrador_b mantiene sus herramientas autorizadas salvo catálogos.');
+$params = [];
+$check($staff->conditions('empresa','cartera',$params,false) === '1=1' && $params === [],
+    'El administrador pleno no filtra por empresa, cartera o ausencia de empresa.');
 
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

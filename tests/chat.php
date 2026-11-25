@@ -41,11 +41,11 @@ $expectError = static function (int $status, callable $action) use ($assert): vo
 $access = ChatAccess::load($pdo, 42);
 $otherAccess = ChatAccess::load($pdo, 43);
 $staff = ChatAccess::load($pdo, 44);
-$assert(!$access->allows('generar_reporte') && $staff->allows('generar_reporte'), 'Acceso a reportes por rol.');
+$assert(!$access->allows('generar_reporte') && !$staff->allows('generar_reporte'), 'Los reportes exigen un rol administrativo.');
 $params = [];
 $where = $access->conditions('empresa', 'cliente', $params, false);
-$assert(str_contains($where, '<> 132') && in_array(23, $params, true) && in_array(7001, $params, true),
-    'El cliente debe quedar limitado por cartera, empresa y la restricción existente.');
+$assert(str_contains($where, 'cliente = ') && array_values($params) === [7001],
+    'El cliente consulta cualquier empresa dentro de su cartera.');
 
 $repository = new ChatRepository($pdo);
 $queries = new ChatQueries($pdo);
@@ -107,13 +107,13 @@ $pdo->exec('CREATE TEMPORARY TABLE facturas (
 $pdo->exec("INSERT INTO facturas VALUES
     (701001,23,7001,'QA','105',NULL,'2026-03-01',120,'MXN',1,'Vigente','Pendiente',0,99),
     (701002,23,7002,'QA','105',NULL,'2026-03-01',920,'MXN',1,'Vigente','Pendiente',0,99),
-    (701003,132,7001,'QA','105',NULL,'2026-03-01',820,'MXN',1,'Vigente','Pendiente',0,99)");
+    (701003,132,7001,'QA','105',NULL,'2026-02-01',820,'MXN',1,'Vigente','Pendiente',0,99)");
 $round = 0;
 $fixture = static function (array $messages) use (&$round, $assert): array {
     $round++;
     if ($round === 1) {
         return ['tool_calls' => [['id' => 'fixture-2', 'type' => 'function', 'function' => [
-            'name' => 'buscar_facturas', 'arguments' => '{"folio":"QA105"}',
+            'name' => 'buscar_facturas', 'arguments' => '{"id":701001}',
         ]]]];
     }
     if ($round === 2) {
@@ -148,8 +148,8 @@ $numbered = $ask('Enumera las últimas 2 facturas');
 $assert(str_contains($numbered, '1. Factura #701005') && str_contains($numbered, '2. Factura #701004')
     && str_contains($numbered, 'siguiente página'), 'El listado debe numerar y anunciar su continuación.');
 $assert(str_contains($ask('Siguiente página'), '3. Factura #701001'), 'La continuación debe mantener los filtros y la numeración.');
-$assert(str_contains($ask('¿Cuántas facturas hay?'), 'Total de facturas en tu alcance: 3.'), 'El total debe contar todas las facturas autorizadas.');
-$assert(str_contains($ask('Cuál es la primera factura'), 'Factura #701001'), 'Se puede ordenar de antiguo a reciente.');
+$assert(str_contains($ask('¿Cuántas facturas hay?'), 'Total de facturas en tu alcance: 4.'), 'El total debe contar todas las facturas autorizadas.');
+$assert(str_contains($ask('Cuál es la primera factura'), 'Factura #701003'), 'La primera factura puede ser de la empresa 132.');
 $filtered = $queries->filters('buscar_facturas', ['desde' => '1999-01-01', 'hasta' => '1999-01-02', 'contar' => true], $access);
 $zero = $queries->run('buscar_facturas', $filtered, $access);
 $assert($zero['totales']['registros'] === 0 && !isset($zero['mensaje']), 'Cero es un conteo válido.');
@@ -158,7 +158,9 @@ $assert(isset($period['filtros']['desde'], $period['filtros']['hasta']), 'Se con
 $assert(App\ChatCollection::request('¿Cuántos pagos STP hay?', [])['herramienta'] === 'consultar_stp', 'El conteo STP usa su fuente.');
 
 $pdo->exec('UPDATE cliente_empresa SET id_empresa = 24 WHERE id_usuario = 42');
-$expectError(404, static fn () => $service->ask(42, $id, str_repeat('c', 32), 'Otra pregunta'));
+$assert(ChatAccess::load($pdo, 42)->signature() === $scope
+    && count($repository->thread($id, 42, $scope, 0)['mensajes']) > 0,
+    'Cambiar las empresas vinculadas no altera el alcance del chat.');
 $pdo->exec('UPDATE cliente_empresa SET id_empresa = 23 WHERE id_usuario = 42');
 $repository->withUserLock(42, static fn () => $repository->close($id, 42, $scope));
 $expectError(409, static fn () => $service->ask(42, $id, str_repeat('d', 32), 'Otra pregunta'));

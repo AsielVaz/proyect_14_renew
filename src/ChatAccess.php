@@ -9,14 +9,13 @@ use PDO;
 final class ChatAccess
 {
     private const STAFF = ['administrador', 'administrador_b', 'supercapturista', 'capturista', 'archivo'];
-    private const REPORT_ROLES = ['administrador', 'administrador_b', 'supercapturista'];
+    private const CAPTURE_ROLES = ['supercapturista', 'capturista'];
+    private const REPORT_ROLES = ['administrador', 'administrador_b'];
 
     private function __construct(
         private readonly string $role,
         private readonly int $operator,
         private readonly ?int $client,
-        private readonly array $companies,
-        private readonly bool $restrictedCompanyAllowed,
         private readonly array $previousCompanies,
         private readonly bool $previousRestrictedCompanyAllowed,
     ) {}
@@ -43,21 +42,21 @@ final class ChatAccess
 
         $isAdministrator = $role === 'administrador';
         return new self(
-            $role, $operator, $client, $isAdministrator ? [] : $companies,
-            $isAdministrator, $isAdministrator ? $companies : [],
-            CompanyPanelRepository::canAccessCompany(CompanyPanelRepository::RESTRICTED_COMPANY, $operator)
+            $role, $operator, $client, $companies,
+            $isAdministrator && CompanyPanelRepository::canAccessCompany(CompanyPanelRepository::RESTRICTED_COMPANY, $operator)
         );
     }
 
     public function signature(): string
     {
-        return $this->signatureForScope($this->companies, $this->restrictedCompanyAllowed);
+        return $this->signatureForScope([], true);
     }
 
     public function previousSignatures(): array
     {
-        if (!$this->restrictedCompanyAllowed) {
-            return [];
+        if ($this->role !== 'administrador') {
+            // Solo se retoma el alcance anterior que tenía los mismos permisos de módulos.
+            return [$this->signatureForScope($this->previousCompanies, false)];
         }
         // Los dos alcances anteriores del administrador son subconjuntos del actual.
         $previous = $this->signatureForScope([], $this->previousRestrictedCompanyAllowed);
@@ -67,9 +66,12 @@ final class ChatAccess
 
     private function signatureForScope(array $companies, bool $restrictedCompanyAllowed): string
     {
-        return hash('sha256', json_encode([
-            $this->role, $this->operator, $this->client, $companies, $restrictedCompanyAllowed,
-        ], JSON_THROW_ON_ERROR));
+        $scope = [$this->role, $this->operator, $this->client, $companies, $restrictedCompanyAllowed];
+        if (in_array($this->role, self::CAPTURE_ROLES, true)) {
+            // Los hilos del alcance anterior pueden contener reportes o saldos de catálogo.
+            $scope[] = 'facturas_movimientos';
+        }
+        return hash('sha256', json_encode($scope, JSON_THROW_ON_ERROR));
     }
 
     public function canSeeBankBalance(): bool
@@ -84,7 +86,7 @@ final class ChatAccess
             'buscar_facturas', 'detalle_factura', 'consultar_estatus_sat', 'buscar_complementos', 'detalle_complemento', 'pendientes_ppd' => true,
             'consultar_pagos', 'detalle_movimiento', 'consultar_banco' => isset($movements['totales']),
             'consultar_stp' => isset($movements['stp']),
-            'consultar_saldos_carteras' => true,
+            'consultar_saldos_carteras' => !in_array($this->role, self::CAPTURE_ROLES, true),
             'consultar_catalogos' => Catalogs::isAllowed($this->role),
             'consultar_traspasos' => isset($movements['traspasos']),
             'generar_reporte', 'consultar_correos' => in_array($this->role, self::REPORT_ROLES, true),
@@ -100,7 +102,7 @@ final class ChatAccess
             $params['operator_restricted'] = $this->operator;
             $scope = DashboardRepository::ACTIVE_WALLET_SCOPE;
         }
-        $conditions = [$scope, $this->optionalCompany('c.empresa', $params)];
+        $conditions = [$scope];
         if ($this->client !== null) {
             $conditions[] = 'c.id = ' . self::bind($params, $this->client);
         } elseif ($this->role !== 'administrador') {
@@ -112,37 +114,11 @@ final class ChatAccess
     /** The expressions are fixed column references provided by the PHP repositories. */
     public function conditions(string $company, string $client, array &$params, bool $allowUnknownCompany = true): string
     {
-        $conditions = $this->companyConditions($company, $params, $allowUnknownCompany);
+        $conditions = !$allowUnknownCompany && $this->client !== null ? [$company . ' > 0'] : [];
         if ($this->client !== null) {
             $conditions[] = $client . ' = ' . self::bind($params, $this->client);
         }
         return $conditions === [] ? '1=1' : implode(' AND ', $conditions);
-    }
-
-    private function companyConditions(string $company, array &$params, bool $allowUnknownCompany): array
-    {
-
-        $conditions = [];
-        if (!$this->restrictedCompanyAllowed) {
-            $conditions[] = 'COALESCE(' . $company . ', 0) <> ' . CompanyPanelRepository::RESTRICTED_COMPANY;
-        }
-        if ($this->companies !== []) {
-            $ids = [];
-            foreach ($this->companies as $id) {
-                $ids[] = self::bind($params, $id);
-            }
-            $conditions[] = $company . ' IN (' . implode(', ', $ids) . ')';
-        } elseif (!$allowUnknownCompany && (!$this->restrictedCompanyAllowed || !$this->previousRestrictedCompanyAllowed || $this->client !== null)) {
-            $conditions[] = $company . ' > 0';
-        }
-        return $conditions;
-    }
-
-    public function optionalCompany(string $company, array &$params): string
-    {
-        $conditions = $this->companyConditions($company, $params, true);
-        return $conditions === [] ? '1=1' : '(NULLIF(' . $company . ', 0) IS NULL OR ('
-            . implode(' AND ', $conditions) . '))';
     }
 
     public static function bind(array &$params, string|int $value): string

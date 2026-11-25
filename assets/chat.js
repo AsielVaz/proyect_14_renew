@@ -74,6 +74,8 @@
                 resetThread();
                 threads.replaceChildren();
                 moreThreads.hidden = true;
+                find('report').hidden = true;
+                find('scope').textContent = 'Facturas y movimientos · Solo lectura';
                 hydrated = false;
                 retry = null;
             }
@@ -171,6 +173,9 @@
         offset += data.conversaciones.length;
         moreThreads.hidden = !data.hay_mas;
         find('report').hidden = !data.reportes;
+        find('scope').textContent = data.reportes
+            ? 'Facturas, movimientos y reportes · Solo lectura'
+            : 'Facturas y movimientos · Solo lectura';
     }
 
     function focusInput() {

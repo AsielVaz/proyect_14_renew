@@ -569,7 +569,6 @@ final class ChatQueries
         $bankCode = "UPPER(TRIM(COALESCE(p.banco,'')))";
         $bankCompany = self::BANK_COMPANY;
         $bankScope = $access->conditions($bankCompany, self::BANK_CLIENT, $params, false);
-        $bankScope .= ' AND ' . $access->optionalCompany('b.razon', $params);
         $where = $this->paymentScope($access, $params) . self::condition($filters, [
             'id' => 'p.id', 'empresa_id' => $company, 'empresa' => 'e.razon', 'cliente' => 'cl.nombre', 'cliente_id' => 'CAST(p.nombre AS UNSIGNED)', 'fecha' => $date, 'monto' => ['p.monto'],
             'texto' => ['p.descripcion', 'p.descripcion_detallada', 'p.detalle', 'ce.referencia'],
@@ -928,8 +927,7 @@ final class ChatQueries
     private function paymentScope(ChatAccess $access, array &$params, bool $allowUnknownCompany = false, string $captureAlias = 'c'): string
     {
         $company = str_replace('c.razon', $captureAlias . '.razon', self::PAYMENT_COMPANY);
-        return $access->conditions($company, 'CAST(p.nombre AS UNSIGNED)', $params, $allowUnknownCompany)
-            . ' AND ' . $access->optionalCompany('CAST(p.empresa AS UNSIGNED)', $params);
+        return $access->conditions($company, 'CAST(p.nombre AS UNSIGNED)', $params, $allowUnknownCompany);
     }
 
     private function invoicePaymentSources(int $id, ChatAccess $access, array &$params): array
@@ -964,7 +962,6 @@ final class ChatQueries
         $company = self::BANK_COMPANY;
         $payment = $this->paymentScope($access, $params);
         $where = $access->conditions($company, self::BANK_CLIENT, $params, false)
-            . ' AND ' . $access->optionalCompany('b.razon', $params)
             . self::condition($filters, [
                 'id' => 'ce.id', 'empresa_id' => $company, 'empresa' => 'e.razon', 'cliente' => 'cl.nombre', 'fecha' => 'COALESCE(ce.fecha, ce.fecha_operacion, ce.fecha_sistema)',
                 'monto' => ['ce.deposito', 'ce.retiro'], 'texto' => ['ce.referencia', 'ce.descripcion', 'ce.descrip_det'],
@@ -998,9 +995,6 @@ final class ChatQueries
         $company = self::STP_COMPANY;
 
         $where = $access->conditions($company, 's.cliente', $params, false);
-        foreach (['sc.razon', 'b.razon', 'c.razon', 'CAST(p.empresa AS UNSIGNED)'] as $origin) {
-            $where .= ' AND ' . $access->optionalCompany($origin, $params);
-        }
         if (isset($filters['folio'])) {
             $filters['folio'] = strtoupper($filters['folio']);
         }
