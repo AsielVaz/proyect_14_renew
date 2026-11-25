@@ -16,6 +16,29 @@ final class ChatCatalogs
 
     public static function request(string $text, array $reference): ?array
     {
+        $phone = self::phoneRequest($text, $reference);
+        if ($phone !== null) {
+            return $phone;
+        }
+        $article = '(?:la |las |el |los )?';
+        $wallet = '(?:carteras?|clientes?)';
+        $patterns = [
+            "~^(?:(?:cual es|dime|dame|muestra|consulta|que) )?(?:(?:el|un) )?(?:estado|estatus|reporte|saldo(?: acreditable)?)(?: (?:tiene|tienen|de|del))? {$article}{$wallet} (.+)$~",
+            "~^cuanto saldo (?:tiene|tienen) {$article}{$wallet} (.+)$~",
+            "~^(?:esta|estan|sigue|siguen) (?:activ[oa]s?|inactiv[oa]s?) {$article}{$wallet} (.+)$~",
+            "~^{$article}{$wallet} (.+?) (?:esta|estan|sigue|siguen) (?:activ[oa]s?|inactiv[oa]s?)$~",
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text, $match)
+                && !preg_match('/^(?:(?:activas?|inactivas?)$|activas? |inactivas? |visibles |que |con |del? |en )/', $match[1])) {
+                return self::request('cartera ' . $match[1], $reference);
+            }
+        }
+        if (preg_match("~^(?:(?:cual es|dime|dame|muestra|consulta) )?(?:el )?(?:estado|estatus|reporte|saldo) de (?:esta|esa) cartera$~", $text)) {
+            return isset($reference['cartera_id'])
+                ? self::request('cartera #' . (int) $reference['cartera_id'], $reference)
+                : ['modo' => 'aclarar_catalogo', 'mensaje' => 'Indica el nombre o ID de la cartera.'];
+        }
         if (preg_match('/\b(?:saldo|saldos|ppd|pendientes de pago|depositos|retiros|movimientos|facturas|pagos)\b/', $text)) {
             return null;
         }
@@ -110,9 +133,31 @@ final class ChatCatalogs
         return null;
     }
 
+    private static function phoneRequest(string $text, array $reference): ?array
+    {
+        $ask = '(?:(?:cual es|que|dime|dame|muestra|muestrame|consulta|busca|me puedes dar) )?(?:el )?telefono';
+        $relation = '(?: (?:asignado|registrado))? (?:de|del|a|en|tiene)? ?';
+        if (preg_match("~^{$ask}{$relation}(?:esta|esa) cartera$~", $text)) {
+            $selection = isset($reference['cartera_id'])
+                ? ['filtros' => ['catalogo' => 'carteras', 'id' => (int) $reference['cartera_id']], 'modo' => 'catalogo', 'herramienta' => 'consultar_catalogos']
+                : null;
+        } elseif (preg_match("~^{$ask}{$relation}(?:la |el )?(?:cartera|cliente) (.+)$~", $text, $match)
+            || preg_match('~^(?:la |el )?(?:cartera|cliente) (.+?) (?:que telefono tiene|tiene telefono)$~', $text, $match)) {
+            $selection = self::request('cartera ' . $match[1], $reference);
+        } else {
+            return null;
+        }
+        if ($selection === null || array_intersect_key($selection['filtros'] ?? [], ['id'=>true,'nombre'=>true,'rfc'=>true]) === []) {
+            return ['modo' => 'aclarar_catalogo', 'mensaje' => 'Indica el nombre o ID de la cartera cuyo teléfono quieres consultar.'];
+        }
+        $selection['filtros']['telefono'] = true;
+        return $selection;
+    }
+
     public static function reply(array $request, array $result): string
     {
         $type = self::NAMES[$result['catalogo']];
+        $summary = $result['resumen_carteras'] ?? null;
         $filters = $request['filtros'];
         if (isset($filters['estado'])) {
             $type .= match ($filters['estado']) {
@@ -123,24 +168,36 @@ final class ChatCatalogs
         if (!empty($filters['panel'])) {
             $type .= ' visibles en el panel principal';
         }
-        if (isset($result['totales'])) {
+        if ($summary === null && isset($result['totales'])) {
             return 'Total de ' . $type . ' en tu alcance: ' . number_format($result['totales']['registros']) . '.';
         }
         if ($result['filas'] === []) {
             return $request['modo'] === 'pagina' ? 'No hay más ' . $type . ' en ese listado.' : ChatQueries::NOT_FOUND;
         }
+        if (!empty($result['detalle_telefono'])) {
+            $lines = [];
+            foreach ($result['filas'] as $row) {
+                $lines[] = $row['nombre'] . ' (#' . (int) $row['id'] . ') · ' . $row['estado'];
+                $lines[] = 'Teléfono registrado · ' . ($row['telefono'] ?? 'Sin teléfono asignado');
+            }
+            if ($result['hay_mas']) {
+                $lines[] = 'Escribe «siguiente página» para ver más coincidencias.';
+            }
+            return implode("\n", $lines);
+        }
         $labels = ['rfc'=>'RFC','cp'=>'CP','clave_sat'=>'Clave SAT','lider'=>'Líder','lider_id'=>'ID líder',
             'regimen_fiscal'=>'Régimen fiscal','aplica_iva'=>'Aplica IVA','porcentaje_iva'=>'IVA (%)',
             'facturacion_automatica'=>'Facturación automática','cartera_id'=>'ID cartera','empresa_id'=>'ID empresa',
             'grupo_id'=>'ID grupo','banco_id'=>'ID cuenta bancaria','clabe'=>'CLABE','codigo'=>'Clave',
-            'minuto_ejecucion'=>'Minuto programado'];
+            'minuto_ejecucion'=>'Minuto programado','saldo_acreditable'=>'Saldo acreditable'];
         $position = ($result['pagina'] - 1) * $result['limite'];
         $lines = [ucfirst($type) . ' · Página ' . $result['pagina']];
         foreach ($result['filas'] as $row) {
             $parts = [(trim((string) ($row['nombre'] ?? '')) ?: 'Sin nombre') . ' (#' . (int) $row['id'] . ')'];
             foreach (array_diff_key($row, ['id'=>true,'nombre'=>true]) as $key => $value) {
                 if ($value !== null && $value !== '') {
-                    $parts[] = ($labels[$key] ?? ucfirst(str_replace('_', ' ', $key))) . ' ' . $value;
+                    $formatted = $key === 'saldo_acreditable' && $summary !== null ? self::amount($value, $summary) : $value;
+                    $parts[] = ($labels[$key] ?? ucfirst(str_replace('_', ' ', $key))) . ' ' . $formatted;
                 }
             }
             $lines[] = ++$position . '. ' . implode(' · ', $parts);
@@ -148,7 +205,23 @@ final class ChatCatalogs
         if ($result['hay_mas']) {
             $lines[] = 'Escribe «siguiente página» para ver más.';
         }
+        if ($summary !== null && $summary['registros'] > 1) {
+            $lines[] = '';
+            if ($summary['activas'] > 0 && $summary['activas'] < $summary['registros']) {
+                $lines[] = 'Saldo conjunto de carteras activas (' . number_format($summary['activas']) . ') · '
+                    . self::amount($summary['saldo_activas'], $summary);
+            }
+            $wallets = number_format($summary['registros']) . ' carteras'
+                . ($summary['activas'] === $summary['registros'] ? ' activas' : '');
+            $lines[] = 'Saldo conjunto de todas las coincidencias (' . $wallets . ') · '
+                . self::amount($summary['saldo_acreditable'], $summary);
+        }
         return implode("\n", $lines);
+    }
+
+    private static function amount(string|int|float $value, array $summary): string
+    {
+        return number_format((float) $value, 2, '.', ',') . ' ' . $summary['moneda'];
     }
 
     public static function properties(): array
@@ -168,6 +241,7 @@ final class ChatCatalogs
             'moneda' => ['type' => 'string', 'description' => 'Código de moneda de la cuenta bancaria'],
             'estado' => ['type' => 'string', 'enum' => ['activo', 'inactivo']],
             'panel' => ['type' => 'boolean', 'description' => 'Solo carteras visibles en el panel principal'],
+            'telefono' => ['type' => 'boolean', 'description' => 'Devuelve el teléfono de la cartera solo cuando se solicita expresamente. Requiere ID, nombre o RFC.'],
             'lider' => ['type' => 'boolean', 'description' => 'Solo carteras marcadas como líderes o designadas como cartera padre del grupo'],
         ];
     }
@@ -261,6 +335,14 @@ final class ChatCatalogs
             ],
         };
 
+        if ($filters['telefono'] ?? false) {
+            self::requireWallets($catalog, 'El teléfono de cartera solo está disponible en el catálogo de carteras.');
+            if (($filters['contar'] ?? false) || array_intersect_key($filters, ['id'=>true,'nombre'=>true,'rfc'=>true]) === []) {
+                throw new ChatException('Indica el nombre, ID o RFC de la cartera cuyo teléfono quieres consultar.');
+            }
+            $fields = "c.nombre, IF(c.activo=1,'Activa','Inactiva') AS estado,
+                NULLIF(TRIM(REPLACE(REPLACE(c.telefono, CHAR(13), ' '), CHAR(10), ' ')), '') AS telefono";
+        }
         $alias = $catalog === 'carteras' ? 'c' : 't';
         $columns += ['id' => "{$alias}.id"];
         $where = [];
@@ -276,7 +358,7 @@ final class ChatCatalogs
             $where[] = '(c.lidera=1 OR g.cliente_padre=c.id)';
         }
         foreach (array_intersect_key($filters, self::properties()) as $key => $value) {
-            if (in_array($key, ['catalogo','panel','lider'], true)) {
+            if (in_array($key, ['catalogo','panel','lider','telefono'], true)) {
                 continue;
             }
             $column = $columns[$key] ?? throw new ChatException('Ese filtro no corresponde a ' . self::NAMES[$catalog] . '.');

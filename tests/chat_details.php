@@ -612,5 +612,41 @@ $check(str_contains($lookupAsk('¿Cuántas hay?',44,$oldThread),'en tu alcance: 
     && str_contains($lookupAsk('¿Cuántas carteras activas hay?',42,$lookupChat),'no tiene permiso'),
     'Conserva filtros para contar toda la colección y deniega el catálogo a no administradores.');
 
+$walletReport = $catalogRun(['catalogo'=>'carteras','nombre'=>'jimmy','limite'=>2]);
+$walletRows = $catalogRun(['catalogo'=>'carteras','nombre'=>'jimmy','limite'=>10])['filas'];
+$inactive = array_values(array_filter($walletRows, static fn (array $row): bool => $row['estado'] === 'Inactiva'));
+$check($walletReport['hay_mas'] && $walletReport['resumen_carteras']['registros'] === count($walletRows)
+    && $inactive[0]['id'] === 222 && (float) $inactive[0]['saldo_acreditable'] === 700000.0
+    && $walletReport['resumen_carteras']['saldo_acreditable'] - $walletReport['resumen_carteras']['saldo_activas'] === 700000.0,
+    'El estado viene de clientes.activo y el consolidado incluye las coincidencias de todas las páginas.');
+$namedWallet = $lookupAsk('¿Cuál es el estado de la cartera Jimmy?',44,$oldThread);
+$check(str_contains($namedWallet, 'Jimmy inactivo (#222) · Estado Inactiva')
+    && str_contains($namedWallet, 'Saldo conjunto de carteras activas')
+    && str_contains($namedWallet, 'Saldo conjunto de todas las coincidencias'),
+    'El chat reporta las carteras por separado y muestra los saldos consolidados.');
+
+$pdo->exec('ALTER TABLE clientes ADD COLUMN telefono VARCHAR(30)');
+$pdo->exec("INSERT INTO clientes (id,nombre,activo,telefono)
+    VALUES (301,'10H',1,'5551234567'),(302,'10H-Histórica',0,'5552345678'),(303,'Sin número',0,' ')");
+$phoneRows = $catalogRun(['catalogo'=>'carteras','nombre'=>'10h','telefono'=>true]);
+$check($ids($phoneRows) === [301] && $phoneRows['filas'][0]['telefono'] === '5551234567',
+    'El teléfono se obtiene de la coincidencia exacta sin mezclar las carteras de nombre parecido.');
+$wallet = $catalogRun(['catalogo'=>'carteras','id'=>301])['filas'][0];
+$check(!array_key_exists('telefono', $wallet) && str_contains(
+    $lookupAsk('¿Cuál es el teléfono asignado a la cartera 10H?',44,$oldThread),'Teléfono registrado · 5551234567'
+), 'El teléfono solo aparece ante una consulta expresa.');
+$check(str_contains($lookupAsk('¿Qué teléfono tiene la cartera #302?',44,$oldThread),'Inactiva')
+    && str_contains($lookupAsk('Teléfono de la cartera #303',44,$oldThread),'Sin teléfono asignado')
+    && str_contains($lookupAsk('Teléfono de la cartera 10H',42,$lookupChat),'no tiene permiso'),
+    'Se incluyen inactivas, se identifica un teléfono vacío y se aplican permisos de Catálogos.');
+$lookupAsk('Teléfono registrado de la cartera 10H',44,$oldThread);
+$privacyChat = new App\ChatService($pdo, $chatRepository, $queries, static function (array $messages) use ($check): array {
+    $context = implode("\n", array_column($messages, 'content'));
+    $check(!str_contains($context, '5551234567') && str_contains($context, 'Teléfono registrado · [dato omitido]'),
+        'El historial enviado al modelo omite el teléfono consultado.');
+    return ['content'=>'Entendido.'];
+});
+$privacyChat->ask(44,$oldThread,bin2hex(random_bytes(16)),'Gracias por la orientación');
+
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

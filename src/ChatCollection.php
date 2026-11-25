@@ -597,6 +597,12 @@ final class ChatCollection
 
     private static function walletBalanceReply(array $filters, array $result): string
     {
+        if (isset($result['resumen_carteras']) || (($filters['pagina'] ?? 1) > 1 && isset($result['pagina']) && $result['filas'] === [])) {
+            return ChatCatalogs::reply(
+                ['filtros' => ['estado' => 'activo'], 'modo' => ($filters['pagina'] ?? 1) > 1 ? 'pagina' : 'catalogo'],
+                ['catalogo' => 'carteras'] + $result
+            );
+        }
         if (isset($result['grupos'])) {
             $groups = array_map(static fn (array $group): string => $group['nombre'] . ' (#' . $group['id'] . ')', $result['grupos']);
             return 'Encontré varios grupos: ' . implode(', ', $groups) . '. Escribe «Saldo del grupo #ID» con el número que corresponda.';

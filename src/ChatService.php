@@ -53,6 +53,18 @@ final class ChatService
                 isset($context['referencia']['factura_id']) ? (int) $context['referencia']['factura_id'] : null,
                 $context['referencia'] ?? []
             );
+            if ($collection === null && $access->allows('consultar_catalogos')) {
+                $name = null;
+                if (preg_match('/^[\p{L}][\p{L}\p{N}-]{2,39}$/uD', $text)) {
+                    $name = $text;
+                } elseif (preg_match('/^[¿]?(?:(?:dame|muestra|consulta|dime|cual es|cuál es) )?(?:el )?(?:reporte|estatus|estado|saldo) de ([\p{L}][\p{L}\p{N} -]{1,59})[?.!]?$/iuD', $text, $match)) {
+                    $name = trim($match[1]);
+                }
+                if ($name !== null && $this->queries->hasExactWalletName($name, $access)) {
+                    $collection = ['herramienta' => 'consultar_catalogos', 'modo' => 'catalogo',
+                        'filtros' => ['catalogo' => 'carteras', 'nombre' => $name]];
+                }
+            }
             unset($context['pregunta_stp']);
             if (($collection['modo'] ?? null) === 'aclarar_catalogo') {
                 $answer = $access->allows('consultar_catalogos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
@@ -130,7 +142,7 @@ Para depósitos y retiros usa consultar_pagos o detalle_movimiento. Usa vista=as
 Para traspasos entre carteras usa consultar_traspasos. Consulta el banco 99 y muestra cada movimiento con su ID y el saldo acreditable con signo. El origen lleva saldo negativo y el destino lleva saldo positivo. Si falta un lado, informa que no hay contrapartida verificable en el alcance.
 Para depósitos pendientes de conciliar, consulta movimientos con pendientes_documento=true. Movimiento sin documento (id_factura=2) queda fuera. Usa Conta14 para verificar documentación relacionada y Relación depósitos documentos con con_diferencia=true para los depósitos vinculados con diferencia. No combines sus cifras como si fueran el mismo conjunto.
 Para sumar el saldo actual de las carteras de un grupo o de todas las carteras que contienen texto en su nombre, usa consultar_saldos_carteras. Presenta el saldo acreditable y la cantidad de carteras del resultado. Si hay varios grupos posibles, pide su ID.
-Para consultar catálogos de solo lectura usa consultar_catalogos. Las claves cortas por cartera se buscan por su ID de cartera. Para PPD por emisor y RFC usa pendientes_ppd. Para saldos de carteras usa consultar_saldos_carteras. Si un nombre, RFC o clave tiene varias coincidencias, muestra las opciones con ID y relación.
+Para consultar catálogos de solo lectura usa consultar_catalogos. Las carteras pueden estar activas o inactivas. Si piden expresamente el teléfono de una cartera, usa catalogo=carteras, telefono=true y su ID, nombre o RFC. Si preguntan por el estado, el reporte o el saldo de una cartera por nombre, usa consultar_catalogos con catalogo=carteras y nombre. El estado se lee de clientes.activo. Presenta cada coincidencia por separado y después el saldo conjunto. Si hay carteras activas e inactivas, muestra también el subtotal de las activas. Las claves cortas por cartera se buscan por su ID de cartera. Para PPD por emisor y RFC usa pendientes_ppd. Para saldos de carteras usa consultar_saldos_carteras. Si un nombre, RFC o clave tiene varias coincidencias, muestra las opciones con ID y relación.
 Para explicar por qué cambió el saldo de una cartera, usa consultar_pagos con vista=cartera y fecha de asignación. Consulta los movimientos y totaliza el saldo acreditable por tipo para el periodo. El importe del depósito y el cambio acreditado pueden diferir. Para saldo bancario usa consultar_banco y la fecha del estado de cuenta.
 Para PPD pendientes usa pendientes_ppd con la empresa emisora y la clave corta correspondiente al RFC. Incluye coincidencias del mismo RFC en otras carteras accesibles.
 Para proveedores fuera de rango usa generar_reporte con reporte=banking y el periodo pedido. Usa el porcentaje real y el rango devueltos.
@@ -143,7 +155,8 @@ TEXT;
         foreach ($history as $row) {
             $messages[] = [
                 'role' => $row['rol'] === 'asistente' ? 'assistant' : 'user',
-                'content' => mb_substr(self::redact($row['contenido']), 0, 3800),
+                'content' => mb_substr(self::redact(preg_replace('/^Teléfono registrado · [^\r\n]*/mu',
+                    'Teléfono registrado · [dato omitido]', $row['contenido']) ?? $row['contenido']), 0, 3800),
             ];
         }
         return $messages;
@@ -185,6 +198,10 @@ TEXT;
                 $result = $remaining-- > 0
                     ? $this->execute($call['function'], $current, $context, $messageId)
                     : ['error' => 'Se alcanzó el límite de consultas de este turno.'];
+                if ($call['function']['name'] === 'consultar_catalogos'
+                    && (!empty($result['detalle_telefono']) || (count($calls) === 1 && isset($result['resumen_carteras'])))) {
+                    return ChatCatalogs::reply(['modo' => 'catalogo', 'filtros' => []], $result);
+                }
                 $found = $found || !empty($result['filas']) || isset($result['totales']);
                 $notFound = $notFound || ($result['mensaje'] ?? null) === ChatQueries::NOT_FOUND;
                 $messages[] = [

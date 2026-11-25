@@ -93,7 +93,7 @@ final class ChatQueries
                 'cartera_nombre' => ['type' => 'string', 'description' => 'Texto literal que debe aparecer en el nombre de la cartera'],
                 'todas_activas' => ['type' => 'boolean', 'description' => 'Suma todas las carteras activas autorizadas'],
                 'panel' => ['type' => 'boolean', 'description' => 'Para todas_activas, limita la suma a las carteras visibles en el panel'],
-            ], []],
+            ] + array_intersect_key($listing, ['limite'=>true,'pagina'=>true]), []],
             'consultar_traspasos' => ['Traspasos entre carteras (banco 99). Busca por ID de cualquiera de los movimientos, importe, cartera o fecha. Muestra origen negativo y destino positivo si ambos son accesibles.', [
                 'cliente_id' => ['type' => 'integer', 'description' => 'ID de la cartera de origen o destino'],
             ] + $noFolio + $amount + $listing + $text, []],
@@ -713,6 +713,18 @@ final class ChatQueries
         return $this->rows($sql, 'fecha DESC, id DESC', $params, $filters, 'traspaso');
     }
 
+    public function hasExactWalletName(string $name, ChatAccess $access): bool
+    {
+        if (!$access->allows('consultar_catalogos')) {
+            return false;
+        }
+        $params = [];
+        $selection = ChatCatalogs::query(['catalogo' => 'carteras', 'nombre' => $name], $access, $params);
+        $exact = ChatAccess::bind($params, mb_strtolower($name));
+        return $this->fetch("SELECT id FROM ({$selection}) candidatas
+            WHERE REGEXP_REPLACE(LOWER(nombre), '^[^[:alnum:]]+|[^[:alnum:]]+$', '') = {$exact} LIMIT 1", $params) !== [];
+    }
+
     private function catalogs(array $filters, ChatAccess $access): array
     {
         $params = [];
@@ -721,6 +733,19 @@ final class ChatQueries
         if ($filters['contar'] ?? false) {
             return $this->countRows($sql, $params, $filters) + $catalog;
         }
+        if ($filters['telefono'] ?? false) {
+            $catalog['detalle_telefono'] = true;
+            if (isset($filters['nombre'])) {
+                $exact = ChatAccess::bind($params, mb_strtolower(trim($filters['nombre'])));
+                $sql = "WITH candidatas AS ({$sql}), marcadas AS (
+                        SELECT candidatas.*, LOWER(TRIM(nombre)) = {$exact} AS exacta FROM candidatas
+                    ), elegibles AS (
+                        SELECT marcadas.*, MAX(exacta) OVER() AS hay_exacta FROM marcadas
+                    ) SELECT id,nombre,estado,telefono FROM elegibles WHERE exacta=hay_exacta";
+            }
+        } elseif ($filters['catalogo'] === 'carteras' && (isset($filters['nombre']) || isset($filters['id']) || isset($filters['rfc']))) {
+            return $this->walletReport($sql, $params, $filters, $access) + $catalog;
+        }
         [$order, $page, $size, $offset] = self::window($filters, 'nombre ASC, id ASC');
         $limit = $size + 1;
         $rows = $this->fetch("{$sql} ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}", $params);
@@ -728,19 +753,70 @@ final class ChatQueries
             'pagina' => $page, 'limite' => $size];
     }
 
+    private function walletReport(string $selection, array $params, array $filters, ChatAccess $access): array
+    {
+        $scope = $this->paymentScope($access, $params, true, 'cap');
+        [, $page, $size, $offset] = self::window($filters, 'nombre ASC, id ASC');
+        $limit = $size + 1;
+        $name = $filters['nombre'] ?? $filters['cartera_nombre'] ?? null;
+        $exact = $name !== null
+            ? "(REGEXP_REPLACE(LOWER(nombre), '^[^[:alnum:]]+|[^[:alnum:]]+$', '') = "
+                . ChatAccess::bind($params, mb_strtolower($name)) . ') DESC, '
+            : '';
+        $rows = $this->fetch("WITH fichas AS ({$selection}), saldos AS (
+                SELECT w.*, (SELECT ROUND(COALESCE(SUM(p.saldo_acreditable),0), 2)
+                    FROM pagos p LEFT JOIN captura cap ON cap.id=p.id_captura
+                    WHERE p.nombre=CAST(w.id AS CHAR) AND {$scope}) AS saldo_acreditable
+                FROM fichas w
+            )
+            SELECT saldos.*, COUNT(*) OVER() AS reporte_registros,
+                SUM(estado='Activa') OVER() AS reporte_activas,
+                SUM(saldo_acreditable) OVER() AS reporte_total,
+                SUM(CASE WHEN estado='Activa' THEN saldo_acreditable ELSE 0 END) OVER() AS reporte_saldo_activas
+            FROM saldos ORDER BY (estado='Activa') DESC, {$exact}nombre ASC, id ASC LIMIT {$limit} OFFSET {$offset}", $params);
+        $result = ['filas' => [], 'hay_mas' => false, 'pagina' => $page, 'limite' => $size];
+        if ($rows === []) {
+            return $result;
+        }
+        $summary = [
+            'registros' => (int) $rows[0]['reporte_registros'],
+            'activas' => (int) $rows[0]['reporte_activas'],
+            'saldo_acreditable' => round((float) $rows[0]['reporte_total'], 2),
+            'saldo_activas' => round((float) $rows[0]['reporte_saldo_activas'], 2),
+            'moneda' => 'MXN',
+        ];
+        $internal = array_flip(['reporte_registros','reporte_activas','reporte_total','reporte_saldo_activas']);
+        $result['filas'] = array_map(static fn (array $row): array => array_diff_key($row, $internal), array_slice($rows, 0, $size));
+        $result['hay_mas'] = count($rows) > $size;
+        $result['resumen_carteras'] = $summary;
+        return $result;
+    }
+
     private function walletBalances(array $filters, ChatAccess $access): array
     {
         $params = [];
-        $paymentScope = $this->paymentScope($access, $params, true, 'cap');
         $allActive = $filters['todas_activas'] ?? false;
         if ($allActive && !$access->allows('consultar_catalogos')) {
             throw new ChatException('Tu cuenta no tiene permiso para esta consulta.', 403);
         }
-        $conditions = [$access->walletConditions($params, !$allActive || ($filters['panel'] ?? false))];
         $groupId = $filters['grupo_id'] ?? null;
         $groupName = $filters['grupo_nombre'] ?? null;
         $walletName = $filters['cartera_nombre'] ?? null;
         $byGroup = $groupId !== null || $groupName !== null;
+        // Las carteras del subtotal por nombre conservan el alcance y la visibilidad del panel.
+        if ($walletName !== null && !$byGroup && $access->allows('consultar_catalogos')) {
+            $condition = $access->walletConditions($params, !$allActive || ($filters['panel'] ?? false));
+            $name = self::contains('LOWER(c.nombre)', mb_strtolower($walletName), $params);
+            $result = $this->walletReport("SELECT c.id, c.nombre, 'Activa' AS estado, g.nombre AS grupo
+                FROM clientes c LEFT JOIN grupo g ON g.id=c.grupo WHERE {$condition} AND {$name}", $params, $filters, $access);
+            if (isset($result['resumen_carteras'])) {
+                return $result + ['totales' => array_intersect_key($result['resumen_carteras'],
+                    array_flip(['registros','saldo_acreditable','moneda']))];
+            }
+            return $result + ['mensaje' => 'No encontré carteras activas accesibles con «' . $walletName . '» en el nombre.'];
+        }
+        $paymentScope = $this->paymentScope($access, $params, true, 'cap');
+        $conditions = [$access->walletConditions($params, !$allActive || ($filters['panel'] ?? false))];
         if ($groupId !== null) {
             $conditions[] = 'g.id = ' . ChatAccess::bind($params, $groupId);
         }
