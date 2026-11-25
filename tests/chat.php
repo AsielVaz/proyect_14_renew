@@ -171,16 +171,26 @@ $reviewSnapshot = static function (int $conversation) use ($pdo): array {
     return $select->fetch();
 };
 $beforeReview = $reviewSnapshot($id);
-$expectError(404, static fn () => $repository->markForReview($id, 43, $otherAccess->signature()));
-$expectError(404, static fn () => $repository->markForReview($id, 42, str_repeat('0', 64)));
-$assert($reviewSnapshot($id) === $beforeReview, 'Ningún intento fuera del usuario o alcance cambia la conversación.');
-$repository->withUserLock(42, static fn () => $repository->markForReview($id, 42, $scope));
+$notifications = [];
+$notify = static function (int $conversation) use (&$notifications): void { $notifications[] = $conversation; };
+$expectError(404, static fn () => $repository->markForReview($id, 43, $otherAccess->signature(), $notify));
+$expectError(404, static fn () => $repository->markForReview($id, 42, str_repeat('0', 64), $notify));
+$assert($reviewSnapshot($id) === $beforeReview && $notifications === [], 'Una solicitud fuera del alcance no marca ni notifica.');
+$expectError(502, static fn () => $repository->withUserLock(42, static fn () =>
+    $repository->markForReview($id, 42, $scope, static function (int $conversation) use ($reviewSnapshot, $pdo, $assert): never {
+        $assert((int) $reviewSnapshot($conversation)['revision'] === 1 && !$pdo->inTransaction(),
+            'El webhook puede leer la bandera cuando se llama.');
+        throw new ChatException('Webhook de prueba no disponible', 502);
+    })
+));
+$assert($reviewSnapshot($id) === $beforeReview, 'Si falla el webhook, la revisión queda disponible para reintentar.');
+$repository->withUserLock(42, static fn () => $repository->markForReview($id, 42, $scope, $notify));
 $afterReview = $reviewSnapshot($id);
 $assert((int) $afterReview['revision'] === 1
     && array_diff_assoc($afterReview, $beforeReview) === ['revision' => $afterReview['revision']],
     'Enviar a revisión cambia únicamente la bandera, incluso en una conversación cerrada.');
-$repository->withUserLock(42, static fn () => $repository->markForReview($id, 42, $scope));
-$assert($reviewSnapshot($id) === $afterReview
+$repository->withUserLock(42, static fn () => $repository->markForReview($id, 42, $scope, $notify));
+$assert($reviewSnapshot($id) === $afterReview && $notifications === [$id]
     && (int) $repository->thread($id, 42, $scope, 0)['conversacion']['revision'] === 1,
     'Reintentar es seguro y el historial muestra el estado de revisión.');
 

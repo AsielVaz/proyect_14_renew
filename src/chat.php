@@ -6,6 +6,7 @@ use App\ChatAccess;
 use App\ChatException;
 use App\ChatQueries;
 use App\ChatRepository;
+use App\ChatReviewWebhook;
 use App\ChatService;
 use App\DeepSeekChatClient;
 
@@ -57,7 +58,7 @@ function handle_chat_endpoint(string $route): never
             }),
             'review' => $repository->withUserLock($user, static function () use ($repository, $user, $scope, $previousScopes): array {
                 $id = chat_number($_POST['id'] ?? null);
-                $repository->markForReview($id, $user, $scope, $previousScopes);
+                $repository->markForReview($id, $user, $scope, (new ChatReviewWebhook())->send(...), $previousScopes);
                 return ['revision' => 1];
             }),
             'send' => (new ChatService($pdo, $repository, new ChatQueries($pdo), (new DeepSeekChatClient())->complete(...)))

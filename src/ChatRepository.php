@@ -108,16 +108,31 @@ final class ChatRepository
         $query->execute([$id]);
     }
 
-    public function markForReview(int $id, int $user, string $scope, array $previousScopes = []): void
+    public function markForReview(int $id, int $user, string $scope, callable $notify, array $previousScopes = []): void
     {
+        $conversation = $this->conversation($id, $user, $scope, $previousScopes);
+        if ((int) $conversation['revision'] === 1) {
+            return;
+        }
+
         // Conserva la fecha de actividad administrada por ON UPDATE.
-        $query = $this->pdo->prepare("UPDATE s14_chat_conversaciones
-            SET revision = 1, actualizado_en = actualizado_en
-            WHERE id = ? AND usuario_id = ? AND JSON_VALUE(contexto_json, '$.alcance') IN (?, ?, ?)
-                AND COALESCE(revision, 0) <> 1");
-        $query->execute([$id, $user, ...self::scopes($scope, $previousScopes)]);
+        $update = "UPDATE s14_chat_conversaciones SET revision = ?, actualizado_en = actualizado_en
+            WHERE id = ? AND usuario_id = ? AND JSON_VALUE(contexto_json, '$.alcance') IN (?, ?, ?)";
+        $params = [$id, $user, ...self::scopes($scope, $previousScopes)];
+        $query = $this->pdo->prepare($update . ' AND COALESCE(revision, 0) <> 1');
+        $query->execute([1, ...$params]);
         if ($query->rowCount() === 0) {
             $this->conversation($id, $user, $scope, $previousScopes);
+            return;
+        }
+
+        // El webhook ya puede leer la marca. Si falla, la conversación queda disponible para reintentar.
+        try {
+            $notify($id);
+        } catch (Throwable $error) {
+            $restore = $this->pdo->prepare($update . ' AND revision = 1');
+            $restore->execute([$conversation['revision'], ...$params]);
+            throw $error;
         }
     }
 
