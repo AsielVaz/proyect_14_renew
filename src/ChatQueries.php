@@ -14,6 +14,10 @@ final class ChatQueries
     public const DEFAULT_LIMIT = 10;
     public const MAX_LIMIT = 25;
     public const MAX_PAGE = 10000;
+    private const INVOICE_CREATOR_NAME = "NULLIF(TRIM(CONCAT_WS(' ',
+        NULLIF(NULLIF(TRIM(u.nombre),''),'0'),
+        NULLIF(NULLIF(TRIM(u.appat),''),'0'),
+        NULLIF(NULLIF(TRIM(u.apmat),''),'0'))),'')";
     private const PAYMENT_DATE = "COALESCE(NULLIF(p.fecha_banco, ''), p.fecha_operacion, p.fecha_captura)";
     private const PAYMENT_COMPANY = 'COALESCE(NULLIF(c.razon, 0), NULLIF(CAST(p.empresa AS UNSIGNED), 0))';
     private const BANK_CLIENT = "COALESCE(NULLIF(CAST(ce.cliente_asignado AS UNSIGNED), 0),
@@ -70,11 +74,14 @@ final class ChatQueries
         $id = ['id' => $common['id']];
         $uuid = ['uuid' => ['type' => 'string', 'description' => 'UUID fiscal exacto, distinto del folio y del ID interno']];
         return [
-            'buscar_facturas' => ['Lista, cuenta o busca facturas por ID, folio, UUID, importe o filtros. Para la factura más reciente usa limite=1 y orden=recientes sin fechas, salvo que el usuario indique un periodo.', $common + $uuid + $amount + $listing, []],
+            'buscar_facturas' => ['Lista, cuenta o busca facturas por ID, folio, UUID, importe o filtros. Para saber quién creó la factura usa creador=true. Para la factura más reciente usa limite=1 y orden=recientes sin fechas, salvo que el usuario indique un periodo.', [
+                'creador' => ['type' => 'boolean', 'description' => 'Incluye el usuario que creó la factura'],
+                'referencia_factura' => ['type' => 'string', 'description' => 'Número sin etiqueta. Busca tanto el ID interno como el folio numérico y conserva las coincidencias ambiguas'],
+            ] + $common + $uuid + $amount + $listing, []],
             'consultar_estatus_sat' => ['Verifica en el SAT el estado fiscal actual de una o varias facturas autorizadas. Usa referencias para IDs, folios o UUID. Para las últimas facturas usa orden=recientes y limite. Admite hasta 10 por consulta.', [
                 'referencias' => ['type' => 'string', 'description' => 'Hasta 10 referencias separadas por comas. Escribe id:123, folio:A42 o uuid:... según el identificador indicado.'],
             ] + array_diff_key($common, ['folio' => true]) + $uuid + array_diff_key($listing, ['contar' => true, 'totalizar' => true]), []],
-            'detalle_factura' => ['Factura exacta, conceptos, tratamiento fiscal, complementos, pagos y saldo PPD si es verificable.', $id, ['id']],
+            'detalle_factura' => ['Factura exacta, usuario creador, conceptos, tratamiento fiscal, complementos, pagos y saldo PPD si es verificable.', $id, ['id']],
             'buscar_complementos' => ['Busca complementos de pago por ID, folio, UUID, importe o filtros.', $common + $uuid + $amount + $listing, []],
             'detalle_complemento' => ['Complemento exacto, facturas, montos aplicados y movimiento asociado.', $id, ['id']],
             'consultar_pagos' => ['Busca depósitos, retiros y comisiones en Movimientos por ID de pago, referencia, cartera o documento autorizado.', [
@@ -435,7 +442,16 @@ final class ChatQueries
             'id' => 'f.id', 'empresa_id' => 'f.razon', 'uuid' => 'UPPER(TRIM(f.uuid))', 'folio' => ["CONCAT_WS('', f.serie, f.folio)", 'CAST(f.folio AS CHAR)', "CONCAT_WS('-', f.serie, f.folio)"],
             'empresa' => 'e.razon', 'cliente' => 'c.nombre', 'fecha' => 'f.fecha', 'monto' => ['f.total_iva'],
         ], $params);
-        $useInvoiceCatalogs = !$pending && !isset($filters['id']) && !isset($filters['folio']) && !isset($filters['uuid']);
+        if (isset($filters['referencia_factura'])) {
+            $reference = $filters['referencia_factura'];
+            if (!ctype_digit($reference) || strlen($reference) > 10) {
+                throw new ChatException('Indica un número de factura válido.');
+            }
+            $where .= ' AND (f.id = ' . ChatAccess::bind($params, (int) $reference)
+                . ' OR f.folio = ' . ChatAccess::bind($params, (int) $reference) . ')';
+        }
+        $useInvoiceCatalogs = !$pending && !isset($filters['id']) && !isset($filters['folio'])
+            && !isset($filters['uuid']) && !isset($filters['referencia_factura']);
         $narrow = 'FROM facturas f ' . ($useInvoiceCatalogs
             ? InvoiceRepository::catalogJoins()
             : (isset($filters['cliente']) ? ' LEFT JOIN clientes c ON c.id = f.nombre' : '')
@@ -464,6 +480,19 @@ final class ChatQueries
                 . " AND f.metodo_pago = 2 AND TRIM(COALESCE(f.uuid, '')) <> ''
                     AND COALESCE(f.status, '') NOT IN ('Cancelado', 'CAPDEL')
                     AND COALESCE(f.cancelado, 0) = 0 AND COALESCE(f.desactivado, 0) = 0";
+        }
+        if ($filters['creador'] ?? false) {
+            $creator = self::INVOICE_CREATOR_NAME;
+            $result = $this->rows("SELECT f.id, CONCAT_WS('', f.serie, f.folio) AS folio, f.uuid, f.fecha,
+                    e.razon AS empresa, NULLIF(f.usuario_crea,0) AS creador_id, {$creator} AS creador
+                FROM {$source}
+                LEFT JOIN empresas e ON e.id=f.razon
+                LEFT JOIN usuarios u ON u.id=f.usuario_crea
+                WHERE {$where}", 'fecha DESC, id DESC', $params, $filters, 'factura', [], [], $paginationInSource);
+            if (isset($filters['referencia_factura']) && (count($result['filas']) > 1 || $result['hay_mas'])) {
+                $result['varias_coincidencias'] = true;
+            }
+            return $result;
         }
         $linkedScope = $access->conditions('fc.razon', 'fc.nombre', $params, false);
 
@@ -1048,12 +1077,16 @@ final class ChatQueries
         $params = [];
         $scope = $access->conditions('f.razon', 'f.nombre', $params, false);
         $key = ChatAccess::bind($params, $id);
+        $creator = self::INVOICE_CREATOR_NAME;
         $fiscal = $this->fetch("SELECT f.id, f.xml_firmado, f.xml_total, f.xml_subtotal, f.total_iva,
-            f.retencion_transporte, f.retencion_iva_tasa, f.uuid FROM facturas f WHERE f.id = {$key} AND {$scope}", $params)[0] ?? null;
+            f.retencion_transporte, f.retencion_iva_tasa, f.uuid, NULLIF(f.usuario_crea,0) AS creador_id, {$creator} AS creador
+            FROM facturas f LEFT JOIN usuarios u ON u.id=f.usuario_crea WHERE f.id = {$key} AND {$scope}", $params)[0] ?? null;
         if ($fiscal === null) {
             return ['filas' => [], 'hay_mas' => false];
         }
 
+        $result['filas'][0]['creador_id'] = $fiscal['creador_id'];
+        $result['filas'][0]['creador'] = $fiscal['creador'];
         $tax = new PaymentComplementRepository($this->pdo);
         $result['filas'][0]['tratamiento_fiscal'] = $tax->taxTreatmentLabel($fiscal) ?? 'No determinado';
         $result['filas'][0]['tratamiento_iva_en_xml'] = $tax->stampedTaxTreatmentLabel($fiscal);

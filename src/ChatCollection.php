@@ -120,6 +120,10 @@ final class ChatCollection
                 return self::make('detalle_factura', ['id'=>$invoice], 'iva_factura');
             }
         }
+        $creator = self::invoiceCreatorRequest($text, $period + $company, $recentInvoice);
+        if ($creator !== null) {
+            return $creator;
+        }
         $transfer = self::RESOURCES['consultar_traspasos'][0];
         if (preg_match("~^(?:(?:consulta(?:r)?|muestra|busca|ver) )?(?:el )?{$transfer} (?:#|(?:con )?id )([1-9][0-9]{0,9})$~", $text, $movement)
             && (int) $movement[1] <= 4294967295) {
@@ -180,6 +184,36 @@ final class ChatCollection
             }
         }
         return null;
+    }
+
+    private static function invoiceCreatorRequest(string $text, array $filters, ?int $recentInvoice): ?array
+    {
+        $verb = '(?:hizo|creo|capturo|registro|genero|elaboro|realizo|emitio)';
+        if (preg_match("~^(?:(?:dime|consulta) )?(?:quien {$verb}|quien es el creador de|creador de) (?:la |una )?factura(?:[: ]+(.+))?$~", $text, $match)) {
+            $reference = $match[1] ?? '';
+        } elseif (preg_match("~^(?:y )?quien (?:{$verb} (?:esta|esa) factura|la {$verb}|{$verb} la factura anterior)$~", $text)) {
+            $reference = '';
+        } elseif (preg_match("~^quien {$verb} la ultima factura$~", $text)) {
+            $reference = 'mas reciente';
+        } else {
+            return null;
+        }
+        if ($reference === 'mas reciente') {
+            return self::make('buscar_facturas', ['creador'=>true,'limite'=>1,'orden'=>'recientes'] + $filters, 'creador_ultima_factura');
+        }
+        if ($reference === '' && $recentInvoice !== null) {
+            $filters['id'] = $recentInvoice;
+        } else {
+            $reference = preg_replace('/^con (?=(?:id|folio|uuid)\b)/', '', $reference) ?? $reference;
+            $identifiers = ChatQueries::satReferences($reference);
+            if (count($identifiers ?? []) !== 1) {
+                return ['modo'=>'aclarar_creador_factura','mensaje'=>'Indica el ID interno, folio o UUID de la factura.'];
+            }
+            [$kind, $value] = $identifiers[0];
+            $key = $kind === 'numero' ? 'referencia_factura' : $kind;
+            $filters[$key] = $kind === 'id' ? (int) $value : $value;
+        }
+        return self::make('buscar_facturas', ['creador'=>true,'limite'=>5] + $filters, 'creador_factura');
     }
 
     private static function invoiceSatRequest(string $text, array $filters, ?string $lastTool, ?int $recentInvoice): ?array
@@ -435,6 +469,24 @@ final class ChatCollection
         }
         if ($tool === 'consultar_traspasos') {
             return self::transferReply($request, $result);
+        }
+        if (in_array($request['modo'], ['creador_factura','creador_ultima_factura'], true)) {
+            $row = $result['filas'][0] ?? null;
+            if ($row === null) {
+                return ChatQueries::NOT_FOUND;
+            }
+            if ($request['modo'] === 'creador_factura' && (!empty($result['varias_coincidencias']) || $result['hay_mas'])) {
+                $matches = array_map(static fn (array $match): string => 'ID #' . $match['id'] . ' · folio '
+                    . ($match['folio'] ?: 'sin folio') . ' · ' . ($match['empresa'] ?: 'Empresa sin identificar')
+                    . ' · ' . ($match['fecha'] ?: 'Sin fecha'), $result['filas']);
+                return "Encontré varias facturas. Indica el ID interno o el UUID de la que buscas.\n" . implode("\n", $matches);
+            }
+            $invoice = 'Factura #' . $row['id'] . (!empty($row['folio']) ? ' · Folio ' . $row['folio'] : '');
+            if (empty($row['creador'])) {
+                return $invoice . (empty($row['creador_id']) ? ' · Sin usuario creador registrado.'
+                    : ' · Usuario creador #' . $row['creador_id'] . ' sin nombre disponible.');
+            }
+            return $invoice . ' · Creada por ' . $row['creador'] . ' (usuario #' . $row['creador_id'] . ').';
         }
         if ($request['modo'] === 'iva_factura') {
             $row = $result['filas'][0] ?? null;

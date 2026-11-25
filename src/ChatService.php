@@ -66,7 +66,9 @@ final class ChatService
                 }
             }
             unset($context['pregunta_stp']);
-            if (($collection['modo'] ?? null) === 'aclarar_correo_factura') {
+            if (($collection['modo'] ?? null) === 'aclarar_creador_factura') {
+                $answer = $collection['mensaje'];
+            } elseif (($collection['modo'] ?? null) === 'aclarar_correo_factura') {
                 $answer = $access->allows('consultar_correos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
             } elseif (($collection['modo'] ?? null) === 'aclarar_catalogo') {
                 $answer = $access->allows('consultar_catalogos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
@@ -133,7 +135,7 @@ Cuando haya detalle, incluye conceptos, documentos, movimientos y montos aplicad
 Si saldo_ppd_registrado es nulo para un PPD, indica que el saldo total no está disponible para el alcance actual. No lo calcules con una muestra de complementos visibles.
 Para tratamiento fiscal, usa tratamiento_fiscal. Si es No determinado, dilo.
 Usa solamente las URL entregadas como enlace, pdf o xml; pon cada enlace relevante al final en su propia línea, sin Markdown.
-Para la factura más reciente usa buscar_facturas con limite=1 y orden=recientes. Usa el mismo patrón para otros registros.
+Para saber quién hizo, capturó o creó una factura, usa buscar_facturas con creador=true o el campo creador de detalle_factura. El usuario creador se obtiene de facturas.usuario_crea y es distinto del timbrador. Para la factura más reciente usa buscar_facturas con limite=1 y orden=recientes. Usa el mismo patrón para otros registros.
 Aplica fechas solo si el usuario pide un periodo. Si no pide fechas, consulta todo el historial autorizado.
 Cuando el usuario indique una empresa por número, por ejemplo «empresa 132», usa empresa_id con ese número.
 Para listar o enumerar, usa limite y pagina. Enumera cada registro en el mismo orden y usa su posición en la página. Si hay más, ofrece «siguiente página».

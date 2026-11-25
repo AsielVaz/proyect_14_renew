@@ -91,6 +91,11 @@ $pdo->exec('INSERT INTO relacion_factura_pago VALUES (1,32,10,21),(2,32,10,21)')
 $pdo->exec("INSERT INTO pre_ejecuta_plantilla VALUES
     (61,101,'REF-QA',20,'2026-05-01 10:00','2026-05-02 10:00','1','LQ','Liquidado',32,51,NULL,NULL)");
 
+$pdo->exec('ALTER TABLE facturas ADD COLUMN usuario_crea INT');
+$pdo->exec('ALTER TABLE usuarios ADD COLUMN nombre VARCHAR(50), ADD COLUMN appat VARCHAR(50), ADD COLUMN apmat VARCHAR(50)');
+$pdo->exec("UPDATE usuarios SET nombre='Ana',appat='Pérez',apmat='Ruiz' WHERE id=44");
+$pdo->exec('UPDATE facturas SET usuario_crea=44 WHERE id=10');
+
 $queries = new ChatQueries($pdo);
 $client = ChatAccess::load($pdo, 42);
 $staff = ChatAccess::load($pdo, 44);
@@ -701,6 +706,15 @@ $ambiguousEmail = $lookupAsk('Dame solo el correo del cliente Jimmy',44,$oldThre
 $check(str_contains($ambiguousEmail,'Indica el ID') && !str_contains($ambiguousEmail,'saldos@fixture.test')
     && str_contains($lookupAsk('Cartera 10H',44,$oldThread),'Saldo conjunto de todas las coincidencias'),
     'Un correo ambiguo pide un ID. El reporte general de cartera conserva todas las coincidencias.');
+
+$check(str_contains($lookupAsk('¿Quién hizo la factura #10?',44,$oldThread), 'Creada por Ana Pérez Ruiz (usuario #44)')
+    && str_contains($lookupAsk('¿Y quién la hizo?',44,$oldThread), 'Ana Pérez Ruiz')
+    && str_contains($lookupAsk('¿Quién creó la factura UUID a1234567-abcd-1234-ab12-123456789abc?',44,$oldThread), 'Ana Pérez Ruiz'),
+    'El chat resuelve el usuario creador por ID, UUID o referencia de conversación.');
+$check(str_contains($lookupAsk('¿Quién registró la factura folio A105?',44,$oldThread), 'Encontré varias facturas.')
+    && str_contains($lookupAsk('¿Quién hizo la factura #11?',44,$oldThread), 'Sin usuario creador registrado')
+    && $lookupAsk('¿Quién hizo la factura #12?',42,$lookupChat) === ChatQueries::NOT_FOUND,
+    'La consulta de creador respeta el alcance y distingue folios ambiguos y registros sin creador.');
 
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 
