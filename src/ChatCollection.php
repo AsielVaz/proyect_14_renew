@@ -73,6 +73,10 @@ final class ChatCollection
             $text = substr($text, 0, -strlen($companyMatch[0]));
         }
 
+        $withdrawals = self::walletWithdrawalsRequest($text, $period + $company, $reference['cartera_id'] ?? null);
+        if ($withdrawals !== null) {
+            return $withdrawals;
+        }
         $sat = self::invoiceSatRequest($text, $period + $company, $lastTool, $recentInvoice);
         if ($sat !== null) {
             return $sat;
@@ -184,6 +188,45 @@ final class ChatCollection
             }
         }
         return null;
+    }
+
+    private static function walletWithdrawalsRequest(string $text, array $filters, ?int $recentWallet): ?array
+    {
+        if (preg_match('/ (hoy|ayer)$/', $text, $day)) {
+            $text = substr($text, 0, -strlen($day[0]));
+            $filters += self::period('de ' . $day[1]);
+        }
+        $target = '(?:(?:la )?(?:cartera|cliente)(?: (.+))?|(?:esta|esa) cartera)';
+        $intent = '(?:cuantos|cuenta|contar|cuanto suman|cuanto fue el total de|total de|suma|'
+            . 'dime|muestra|muestrame|lista|enumera|consulta|cuales son|cual fue|que)';
+        $relation = '(?:de|del|en|para|tiene|tuvo|hizo|registro|hay en|hubo en|se hicieron en)';
+        if (preg_match("~^(?:({$intent}) )?(?:el |los )?(?:(ultim[oa]s?) )?(?:([1-9][0-9]{0,2}) )?retiros? {$relation} {$target}$~", $text, $match)) {
+            $action = $match[1] ?? '';
+            $name = trim($match[4] ?? '');
+            $size = !empty($match[3]) ? min(ChatQueries::MAX_LIMIT, (int) $match[3]) : (($match[2] ?? '') === 'ultimo' ? 1 : ChatQueries::DEFAULT_LIMIT);
+        } elseif (preg_match("~^cuanto(?: dinero)? (?:se retiro|retiro|ha retirado)(?: (?:de|en|para))? {$target}$~", $text, $match)) {
+            $action = 'suma';
+            $name = trim($match[1] ?? '');
+            $size = ChatQueries::DEFAULT_LIMIT;
+        } else {
+            return null;
+        }
+        $filters += ['vista'=>'cartera','tipo'=>'retiro','limite'=>$size];
+        if ($name === '' && $recentWallet !== null) {
+            $filters['cliente_id'] = $recentWallet;
+        } elseif (preg_match('/^(?:id |#)?([1-9][0-9]{0,9})$/', $name, $id) && (int) $id[1] <= 4294967295) {
+            $filters['cliente_id'] = (int) $id[1];
+        } elseif ($name !== '') {
+            $filters['cliente'] = preg_replace('/^[\s"\'«]+|[\s"\'»]+$/u', '', $name);
+        } else {
+            return ['modo'=>'aclarar_retiros_cartera','mensaje'=>'Indica el nombre o ID de la cartera cuyos retiros quieres consultar.'];
+        }
+        if (in_array($action, ['cuantos','cuenta','contar'], true)) {
+            $filters['contar'] = true;
+        } elseif (in_array($action, ['cuanto suman','cuanto fue el total de','total de','suma'], true)) {
+            $filters['totalizar'] = true;
+        }
+        return self::make('consultar_pagos', $filters, 'retiros_cartera');
     }
 
     private static function invoiceCreatorRequest(string $text, array $filters, ?int $recentInvoice): ?array
@@ -458,6 +501,10 @@ final class ChatCollection
             return $result['error'];
         }
         $tool = $request['herramienta'];
+        if ($tool === 'consultar_pagos' && ($request['filtros']['vista'] ?? null) === 'cartera'
+            && ($request['filtros']['tipo'] ?? null) === 'retiro') {
+            return self::walletWithdrawalsReply($request, $result);
+        }
         if ($tool === 'consultar_catalogos') {
             return ChatCatalogs::reply($request, $result);
         }
@@ -712,6 +759,42 @@ final class ChatCollection
         }
         if ($result['hay_mas'] && $result['limite'] > 1) {
             $lines[] = 'Escribe «siguiente página» para verificar más facturas.';
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function walletWithdrawalsReply(array $request, array $result): string
+    {
+        if (isset($result['totales'])) {
+            $total = $result['totales'];
+            $lines = ['Total de retiros de la cartera · ' . number_format($total['registros']) . '.'];
+            $byCurrency = [];
+            foreach ($total['por_moneda'] ?? [] as $group) {
+                $currency = $group['moneda'] ?: 'Moneda sin identificar';
+                $amount = abs((float) $group['saldo_acreditable']);
+                $byCurrency[$currency] = ($byCurrency[$currency] ?? 0) + $amount;
+                $lines[] = $group['tipo_movimiento'] . ' · ' . number_format($group['registros']) . ' movimientos · '
+                    . number_format($amount, 2, '.', ',') . ' ' . $currency;
+            }
+            foreach ($byCurrency as $currency => $amount) {
+                $lines[] = 'Salida total · ' . number_format($amount, 2, '.', ',') . ' ' . $currency;
+            }
+            return implode("\n", $lines);
+        }
+        if ($result['filas'] === []) {
+            return $request['modo'] === 'pagina' ? 'No hay más retiros en ese listado.' : 'No encontré retiros de la cartera en tu alcance.';
+        }
+        $position = ($result['pagina'] - 1) * $result['limite'];
+        $lines = ['Retiros de la cartera · Página ' . $result['pagina']];
+        foreach ($result['filas'] as $row) {
+            $lines[] = ++$position . '. ' . $row['tipo_movimiento'] . ' · Movimiento #' . $row['id']
+                . ' · ' . $row['fecha'] . ' · ' . $row['cliente'] . ' · Saldo acreditable '
+                . number_format((float) $row['saldo_acreditable'], 2, '.', ',')
+                . ' ' . ($row['moneda'] ?: 'Moneda sin identificar');
+            $lines[] = $row['enlace'];
+        }
+        if ($result['hay_mas']) {
+            $lines[] = 'Escribe «siguiente página» para ver más retiros.';
         }
         return implode("\n", $lines);
     }

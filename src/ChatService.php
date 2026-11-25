@@ -66,7 +66,9 @@ final class ChatService
                 }
             }
             unset($context['pregunta_stp']);
-            if (($collection['modo'] ?? null) === 'aclarar_creador_factura') {
+            if (($collection['modo'] ?? null) === 'aclarar_retiros_cartera') {
+                $answer = $access->allows('consultar_pagos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
+            } elseif (($collection['modo'] ?? null) === 'aclarar_creador_factura') {
                 $answer = $collection['mensaje'];
             } elseif (($collection['modo'] ?? null) === 'aclarar_correo_factura') {
                 $answer = $access->allows('consultar_correos') ? $collection['mensaje'] : 'Tu cuenta no tiene permiso para esta consulta.';
@@ -142,7 +144,7 @@ Para listar o enumerar, usa limite y pagina. Enumera cada registro en el mismo o
 Para una pregunta de cantidad («cuántas facturas», «cuántos pagos») usa contar=true en la herramienta correspondiente. Un conteo de 0 es válido.
 Cuando el usuario pide sumar importes usa totalizar=true y presenta cada moneda por separado. No sumes una página parcial.
 Un pago, un saldo PPD y el restante de un reporte son conceptos distintos. Conserva la etiqueta de la fuente.
-Para depósitos y retiros usa consultar_pagos o detalle_movimiento. Usa vista=asignados, sin-asignar o cartera según la consulta.
+Para depósitos y retiros usa consultar_pagos o detalle_movimiento. Usa vista=asignados, sin-asignar o cartera según la consulta. Solo si preguntan por retiros de una cartera, usa tipo=retiro, vista=cartera y cliente_id o cliente. Esa consulta incluye retiros ordinarios, retiros STP y salidas de traspasos de pagos. Para el total de salida usa el valor absoluto del saldo acreditable negativo y conserva el desglose por tipo y moneda.
 Para traspasos entre carteras usa consultar_traspasos. Consulta el banco 99 y muestra cada movimiento con su ID y el saldo acreditable con signo. El origen lleva saldo negativo y el destino lleva saldo positivo. Si falta un lado, informa que no hay contrapartida verificable en el alcance.
 Para depósitos pendientes de conciliar, consulta movimientos con pendientes_documento=true. Movimiento sin documento (id_factura=2) queda fuera. Usa Conta14 para verificar documentación relacionada y Relación depósitos documentos con con_diferencia=true para los depósitos vinculados con diferencia. No combines sus cifras como si fueran el mismo conjunto.
 Para sumar el saldo actual de las carteras de un grupo o de todas las carteras que contienen texto en su nombre, usa consultar_saldos_carteras. Presenta el saldo acreditable y la cantidad de carteras del resultado. Si hay varios grupos posibles, pide su ID.

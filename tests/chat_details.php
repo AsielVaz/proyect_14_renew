@@ -716,5 +716,31 @@ $check(str_contains($lookupAsk('¿Quién registró la factura folio A105?',44,$o
     && $lookupAsk('¿Quién hizo la factura #12?',42,$lookupChat) === ChatQueries::NOT_FOUND,
     'La consulta de creador respeta el alcance y distingue folios ambiguos y registros sin creador.');
 
+$pdo->exec("INSERT INTO pagos (id,nombre,monto,saldo_acreditable,empresa,banco,tipo_movimiento,fecha_asignacion)
+    VALUES (9301,'101',40,-40,'23','Banco QA','Retiro','2026-09-12'),
+           (9302,'101',25,-25,'23','STP','Retiro','2026-09-12'),
+           (9303,'101',15,-15,'23','99','Deposito','2026-09-12'),
+           (9304,'101',15,15,'23','99','Deposito','2026-09-12'),
+           (9305,'101',12,0,'23','STP','Retiro','2026-09-12'),
+           (9306,'101',20,-20,'23','STP','Deposito','2026-09-12'),
+           (9307,'101',30,-30,'23','STP','Retiro STP','2026-09-12'),
+           (9308,'102',50,-50,'23','STP','Retiro','2026-09-12')");
+$withdrawals = ['vista'=>'cartera','tipo'=>'retiro','cliente_id'=>101,'desde'=>'2026-09-12','hasta'=>'2026-09-12'];
+$withdrawalResult = $run('consultar_pagos', $withdrawals, $staff);
+$check($ids($withdrawalResult) === [9307,9303,9302,9301]
+    && array_column($withdrawalResult['filas'],'tipo_movimiento') === ['Retiro STP','Traspaso de salida','Retiro STP','Retiro'],
+    'Retiros de cartera lee salidas ordinarias, STP y traspasos, sin entradas, depósitos STP ni movimientos con saldo cero.');
+$totals = $run('consultar_pagos', $withdrawals + ['totalizar'=>true], $staff)['totales'];
+$check($totals['registros'] === 4 && array_sum(array_column($totals['por_moneda'],'saldo_acreditable')) === -110.0
+    && $run('consultar_pagos', $withdrawals + ['contar'=>true], $client)['totales']['registros'] === 4,
+    'El conteo y el total por cartera usan el saldo acreditable y conservan el alcance.');
+$check($ids($run('consultar_pagos', ['tipo'=>'retiro','cliente_id'=>101,'id'=>9302], $staff)) === []
+    && $ids($run('consultar_pagos', ['vista'=>'cartera','cliente_id'=>101,'id'=>9304], $staff)) === [9304],
+    'El filtro especial solo se aplica a retiros de cartera. Consultar otros movimientos conserva sus entradas.');
+$withdrawalChat = $lookupAsk('Enumera los últimos 5 retiros de la cartera #101',44,$oldThread);
+$check(str_contains($withdrawalChat,'Traspaso de salida · Movimiento #9303')
+    && str_contains($withdrawalChat,'Retiro STP · Movimiento #9307'),
+    'El chat dirige una pregunta de retiros de cartera al listado con los tipos correctos.');
+
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

@@ -90,7 +90,8 @@ final class ChatQueries
                 'vista' => ['type' => 'string', 'enum' => ['asignados', 'sin-asignar', 'cartera'],
                     'description' => 'En cartera usa fecha de asignación y saldo acreditable'],
                 'pendientes_documento' => ['type' => 'boolean', 'description' => 'Depósitos asignados o sin asignar que siguen sin documento relacionado'],
-                'tipo' => ['type' => 'string', 'enum' => ['deposito', 'retiro', 'comision']],
+                'tipo' => ['type' => 'string', 'enum' => ['deposito', 'retiro', 'comision'],
+                    'description' => 'Para retiros de una cartera usa retiro, vista=cartera y cliente_id o cliente. Incluye salidas STP y traspasos registrados en pagos.'],
             ] + $noFolio + $amount + $listing + $text, []],
             'consultar_catalogos' => ['Busca, enumera o cuenta registros autorizados de los catálogos del Sistema 14. Para miembros o líderes de un grupo, usa carteras con grupo_id o grupo. Para claves de una cartera, usa cartera_id o cartera. Código SAT y código de clave corta son distintos del ID interno. Para carteras visibles en el panel usa panel=true.', ChatCatalogs::properties()
                 + array_intersect_key($listing, array_flip(['limite','pagina','contar'])), ['catalogo']],
@@ -563,6 +564,9 @@ final class ChatQueries
         $params = [];
         $company = self::PAYMENT_COMPANY;
         $date = ($filters['vista'] ?? null) === 'cartera' ? 'p.fecha_asignacion' : self::PAYMENT_DATE;
+        $walletWithdrawal = ($filters['vista'] ?? null) === 'cartera' && ($filters['tipo'] ?? null) === 'retiro'
+            && (isset($filters['cliente_id']) || isset($filters['cliente']));
+        $bankCode = "UPPER(TRIM(COALESCE(p.banco,'')))";
         $bankCompany = self::BANK_COMPANY;
         $bankScope = $access->conditions($bankCompany, self::BANK_CLIENT, $params, false);
         $bankScope .= ' AND ' . $access->optionalCompany('b.razon', $params);
@@ -570,6 +574,11 @@ final class ChatQueries
             'id' => 'p.id', 'empresa_id' => $company, 'empresa' => 'e.razon', 'cliente' => 'cl.nombre', 'cliente_id' => 'CAST(p.nombre AS UNSIGNED)', 'fecha' => $date, 'monto' => ['p.monto'],
             'texto' => ['p.descripcion', 'p.descripcion_detallada', 'p.detalle', 'ce.referencia'],
         ], $params);
+        if ($walletWithdrawal && !isset($filters['cliente_id']) && isset($filters['cliente'])
+            && $this->hasExactWalletName($filters['cliente'], $access)) {
+            $exact = ChatAccess::bind($params, mb_strtolower($filters['cliente']));
+            $where .= " AND REGEXP_REPLACE(LOWER(cl.nombre), '^[^[:alnum:]]+|[^[:alnum:]]+$', '') = {$exact}";
+        }
         $unassigned = "((p.nombre = 0 OR p.nombre = '' OR p.nombre IS NULL)
             AND p.id <> 212733 AND p.monto NOT IN (7.5, 2.88, 8, 1.28, 1.2, 0.8, 5))";
         $assigned = "(p.status = 'asignado' AND p.tipo_movimiento <> 'Abono por comisión'
@@ -598,7 +607,11 @@ final class ChatQueries
         if (isset($filters['tipo'])) {
             $where .= match ($filters['tipo']) {
                 'deposito' => " AND LOWER(p.tipo_movimiento) IN ('deposito', 'depósito')",
-                'retiro' => " AND LOWER(p.tipo_movimiento) = 'retiro'",
+                'retiro' => $walletWithdrawal
+                    ? " AND p.saldo_acreditable < 0 AND (
+                        {$bankCode} = '99' OR LOWER(TRIM(p.tipo_movimiento)) = 'retiro'
+                        OR ({$bankCode} = 'STP' AND LOWER(TRIM(p.tipo_movimiento)) = 'retiro stp'))"
+                    : " AND LOWER(p.tipo_movimiento) = 'retiro' AND {$bankCode} NOT IN ('99','STP')",
                 'comision' => " AND LOWER(p.tipo_movimiento) LIKE 'abono por comisi%'",
             };
         }
@@ -615,9 +628,13 @@ final class ChatQueries
                 WHERE fc.id = {$key} AND {$scope}) ";
             $where .= ' AND (' . self::complementPaymentFilter() . ')';
         }
+        $type = $walletWithdrawal
+            ? "CASE {$bankCode} WHEN '99' THEN 'Traspaso de salida' WHEN 'STP' THEN 'Retiro STP' ELSE 'Retiro' END"
+            : 'p.tipo_movimiento';
+        $fallbackCurrency = $walletWithdrawal ? ", CASE WHEN {$bankCode} IN ('99','STP') THEN 'MXN' END" : '';
         return $this->rows("{$sources}SELECT p.id, {$date} AS fecha, e.razon AS empresa,
-            cl.nombre AS cliente, p.monto, COALESCE(NULLIF(pb.moneda, ''), NULLIF(b.moneda, '')) AS moneda,
-            p.saldo_acreditable, p.tipo_movimiento, p.status AS estado, p.id_factura = 2 AS sin_documento,
+            cl.nombre AS cliente, p.monto, COALESCE(NULLIF(pb.moneda, ''), NULLIF(b.moneda, ''){$fallbackCurrency}) AS moneda,
+            p.saldo_acreditable, {$type} AS tipo_movimiento, p.status AS estado, p.id_factura = 2 AS sin_documento,
             LEFT(p.descripcion, 350) AS descripcion, LEFT(p.descripcion_detallada, 350) AS descripcion_detallada,
             LEFT(p.detalle, 350) AS detalle, LEFT(ce.referencia, 130) AS referencia,
             p.fecha_banco, p.fecha_asignacion, ce.id AS linea_bancaria_id
