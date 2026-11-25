@@ -746,17 +746,19 @@ final class ChatQueries
         if ($filters['contar'] ?? false) {
             return $this->countRows($sql, $params, $filters) + $catalog;
         }
-        if ($filters['telefono'] ?? false) {
+        $phone = $filters['telefono'] ?? false;
+        if ($phone) {
             $catalog['detalle_telefono'] = true;
-            if (isset($filters['nombre'])) {
-                $exact = ChatAccess::bind($params, mb_strtolower(trim($filters['nombre'])));
-                $sql = "WITH candidatas AS ({$sql}), marcadas AS (
-                        SELECT candidatas.*, LOWER(TRIM(nombre)) = {$exact} AS exacta FROM candidatas
-                    ), elegibles AS (
-                        SELECT marcadas.*, MAX(exacta) OVER() AS hay_exacta FROM marcadas
-                    ) SELECT id,nombre,estado,telefono FROM elegibles WHERE exacta=hay_exacta";
-            }
-        } elseif (!isset($filters['configuracion']) && $filters['catalogo'] === 'carteras' && (isset($filters['nombre']) || isset($filters['id']) || isset($filters['rfc']))) {
+        }
+        if (isset($filters['nombre']) && ($phone || ($filters['configuracion'] ?? null) === 'correo_principal')) {
+            $exact = ChatAccess::bind($params, mb_strtolower(trim($filters['nombre'])));
+            $sql = "WITH candidatas AS ({$sql}), exactas AS (
+                SELECT id FROM candidatas WHERE LOWER(TRIM(nombre)) = {$exact}
+            ) SELECT candidatas.* FROM candidatas
+                WHERE id IN (SELECT id FROM exactas) OR NOT EXISTS (SELECT 1 FROM exactas)";
+        }
+        if (!$phone && !isset($filters['configuracion']) && $filters['catalogo'] === 'carteras'
+            && (isset($filters['nombre']) || isset($filters['id']) || isset($filters['rfc']))) {
             return $this->walletReport($sql, $params, $filters, $access) + $catalog;
         }
         [$order, $page, $size, $offset] = self::window($filters, 'nombre ASC, id ASC');

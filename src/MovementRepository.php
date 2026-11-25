@@ -75,8 +75,7 @@ final class MovementRepository
         }
         // Las vistas con paginación completa consultan el histórico necesario para
         // calcular un total exacto; las demás conservan su límite rápido sin filtros.
-        $supportsFullPagination = in_array($view, ['sin-asignar', 'cartera', 'asignados'], true);
-        $supportsShowAll = in_array($view, ['cartera', 'asignados'], true);
+        $supportsFullPagination = in_array($view, ['cartera', 'asignados'], true);
         $hasAppliedFilter = $filterByClient || $search !== '' || $documentFilters !== []
             || $movementTypeFilter !== '' || $dateFrom !== '' || $dateTo !== ''
             || $excludedCompanyIds !== [];
@@ -145,9 +144,8 @@ final class MovementRepository
             $queryText .= ' WHERE ' . implode(' AND ', $conditions);
         }
 
-        $showAll = $supportsShowAll
-            && $perPage <= 0
-            && $hasAppliedFilter;
+        $showAll = $view === 'sin-asignar'
+            || ($supportsFullPagination && $perPage <= 0 && $hasAppliedFilter);
         if (!$showAll) {
             $perPage = $perPage > 0 ? $perPage : 25;
         }

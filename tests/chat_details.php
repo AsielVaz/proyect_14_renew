@@ -691,5 +691,16 @@ $check(str_contains($lookupAsk('IVA de la factura #10',44,$oldThread),'IVA segú
     && str_contains($lookupAsk('Saldo bancario actual de la cuenta #41',44,$oldThread),'7,000.00 MXN'),
     'IVA se verifica exclusivamente en el XML timbrado y saldo bancario sale de la última línea de la cuenta.');
 
+$pdo->exec("UPDATE clientes SET correo='exacto@fixture.test' WHERE id=301");
+$pdo->exec("UPDATE clientes SET correo='otra@fixture.test' WHERE id=302");
+foreach (['cual es el correo del cliente 10H','dame solo el correo del cliente 10H'] as $prompt) {
+    $check($lookupAsk($prompt,44,$oldThread) === 'exacto@fixture.test',
+        'La coincidencia exacta entrega solo el correo de saldos, incluso con subcarteras de nombre parecido.');
+}
+$ambiguousEmail = $lookupAsk('Dame solo el correo del cliente Jimmy',44,$oldThread);
+$check(str_contains($ambiguousEmail,'Indica el ID') && !str_contains($ambiguousEmail,'saldos@fixture.test')
+    && str_contains($lookupAsk('Cartera 10H',44,$oldThread),'Saldo conjunto de todas las coincidencias'),
+    'Un correo ambiguo pide un ID. El reporte general de cartera conserva todas las coincidencias.');
+
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

@@ -166,13 +166,13 @@ final class ChatCatalogs
         if (preg_match('/^(.+?) (factura automaticamente|esta marcada para liderar)$/', $text, $reverse)) {
             $text = $reverse[2] . ' de ' . $reverse[1];
         }
-        $nouns = ['carteras'=>'cartera', 'grupos'=>'grupo', 'claves'=>'clave(?: corta)?',
+        $nouns = ['carteras'=>'(?:cartera|cliente)', 'grupos'=>'grupo', 'claves'=>'clave(?: corta)?',
             'conceptos'=>'concepto(?: facturable)?', 'usuarios'=>'usuario', 'bancos'=>'(?:cuenta bancaria|banco)'];
         $keys = ['carteras'=>'cartera_id', 'grupos'=>'grupo_id', 'claves'=>'clave_corta_id',
             'conceptos'=>'concepto_id', 'usuarios'=>'usuario_id', 'bancos'=>'banco_id'];
         foreach ($topics as [$catalog, $field, $topic]) {
             $noun = $nouns[$catalog];
-            $prefix = '(?:(?:cual es|cuales son|dime|dame|consulta|muestra) )?(?:el |la |los |las |una |un )?';
+            $prefix = '(?:(?:solo|solamente) )?(?:(?:cual es|cuales son|dime|dame|consulta|muestra) )?(?:(?:solo|solamente) )?(?:el |la |los |las |una |un )?';
             if (!preg_match("~^{$prefix}(?:{$topic})(?: (?:de|del|para|a|en|tiene)?)?(?: (?:la |el )?({$noun})(?: (.+))?| ((?:esta|este|esa|ese) {$noun}))?$~", $text, $match)) {
                 continue;
             }
@@ -281,6 +281,13 @@ final class ChatCatalogs
         }
         if ($result['filas'] === []) {
             return $request['modo'] === 'pagina' ? 'No hay más ' . $type . ' en ese listado.' : ChatQueries::NOT_FOUND;
+        }
+        if ($configuration === 'correo_principal') {
+            if ($result['pagina'] === 1 && count($result['filas']) === 1 && !$result['hay_mas']) {
+                return trim((string) ($result['filas'][0]['correo_principal_saldos'] ?? '')) ?: 'Sin configurar';
+            }
+            $choices = array_map(static fn (array $row): string => $row['nombre'] . ' (#' . $row['id'] . ')', $result['filas']);
+            return "Encontré varias carteras. Indica el ID de la que quieres consultar.\n" . implode("\n", $choices);
         }
         if (!empty($result['detalle_telefono'])) {
             $lines = [];

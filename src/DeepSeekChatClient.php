@@ -20,7 +20,7 @@ final class DeepSeekChatClient
         }
 
         $payload = [
-            'model' => \env_value('DEEPSEEK_MODEL', 'deepseek-chat'),
+            'model' => 'deepseek-flash',
             'messages' => $messages,
             'thinking' => ['type' => 'disabled'],
             'stream' => false,

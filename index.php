@@ -1946,15 +1946,15 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 $validMovementCompanyIds
             )))
             : [];
-        $movementSupportsFullPagination = in_array($movementKey, ['sin-asignar', 'cartera', 'asignados'], true);
-        $movementSupportsShowAll = in_array($movementKey, ['cartera', 'asignados'], true);
+        $movementListsAll = $movementKey === 'sin-asignar';
+        $movementSupportsFullPagination = in_array($movementKey, ['cartera', 'asignados'], true);
         $movementHasAppliedFilter = $movementSearch !== '' || $movementFrom !== '' || $movementTo !== ''
             || $movementDocumentFilters !== [] || $movementTypeFilter !== ''
             || $movementExcludedCompanies !== [];
         if ($movementSupportsFullPagination && in_array($requestedMovementPerPage, ['25', '50', '100'], true)) {
             $movementPerPageValue = $requestedMovementPerPage;
             $movementPerPage = (int) $requestedMovementPerPage;
-        } elseif ($movementSupportsShowAll && $requestedMovementPerPage === 'all' && $movementHasAppliedFilter) {
+        } elseif ($movementSupportsFullPagination && $requestedMovementPerPage === 'all' && $movementHasAppliedFilter) {
             $movementPerPageValue = 'all';
             $movementPerPage = 0;
         }
@@ -1973,7 +1973,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         $movementResult = ($isTransferForm || $isDocumentAssignment) ? null : movement_repository()->page(
             $movementKey,
             $movement,
-            $movementSearch,
+            $movementListsAll ? '' : $movementSearch,
             $movementPage,
             $movementPerPage,
             $movementClient ? $movementClientId : null,
@@ -2082,8 +2082,8 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </form>
             <?php endif; ?>
             <div class="panel-heading list-tools">
-                <div><p class="eyebrow">Movimientos</p><h2><?= number_format($movementSupportsFullPagination ? (int) $movementResult['total'] : count($movementResult['rows'])) ?> movimientos</h2><p class="panel-copy"><?= $movementSupportsFullPagination ? 'Total de resultados encontrados' : 'Resultados de la página actual' ?></p></div>
-                <form method="get" class="search<?= $movementKey === 'asignados' ? ' movement-filter-toolbar' : '' ?>"<?= $movementHasVisibleSearch ? ' data-visible-movement-search' : '' ?>>
+                <div><p class="eyebrow">Movimientos</p><h2><?= number_format((int) $movementResult['total']) ?> movimientos</h2><p class="panel-copy"><?= $movementListsAll ? 'Total de movimientos pendientes' : ($movementSupportsFullPagination ? 'Total de resultados encontrados' : 'Resultados de la página actual') ?></p></div>
+                <form method="get" class="search<?= $movementKey === 'asignados' ? ' movement-filter-toolbar' : '' ?>"<?= $movementHasVisibleSearch ? ' data-visible-movement-search' : '' ?><?= $movementListsAll ? ' data-local-movement-search' : '' ?>>
                     <input type="hidden" name="movement" value="<?= e($movementKey) ?>">
                     <?php if ($movementClient): ?><input type="hidden" name="client" value="<?= e($movementClient['id']) ?>"><?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><label class="movement-query-filter"><span>Buscar movimientos</span><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>></label><?php else: ?><input type="search" name="q" value="<?= e($movementSearch) ?>" placeholder="Buscar por descripción, detalle, monto…"<?= $movementHasVisibleSearch ? ' autocomplete="off" aria-describedby="visibleMovementSearchStatus" data-visible-movement-input' : '' ?>><?php endif; ?>
@@ -2113,10 +2113,10 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </div>
                     <?php endif; ?>
                     <?php if ($movementKey === 'asignados'): ?><fieldset class="movement-document-filters"><legend>Tipo de relación</legend><div><?php foreach ($movementDocumentFilterLabels as $filterValue => $filterLabel): ?><?php $isDocumentSwitch = in_array($filterValue, ['document', 'none'], true); ?><label<?= $isDocumentSwitch ? ' class="is-switch"' : '' ?>><input type="checkbox" name="doc_filter[]" value="<?= e($filterValue) ?>" <?= in_array($filterValue, $movementDocumentFilters, true) ? 'checked' : '' ?><?= $isDocumentSwitch ? ' role="switch" data-document-switch' . ($movementTypeFilter === 'withdrawal' ? ' disabled aria-disabled="true"' : '') : '' ?>><?php if ($isDocumentSwitch): ?><span class="switch-track" aria-hidden="true"></span><?php endif; ?><span><?= e($filterLabel) ?></span></label><?php endforeach; ?></div><small>Con documento y Sin documento son excluyentes, aplican solo a depósitos y se desactivan al seleccionar Retiros.</small></fieldset><?php endif; ?>
-                    <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementSupportsShowAll && $movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
-                    <button class="button<?= $movementKey === 'asignados' ? ' movement-filter-submit' : '' ?>" type="submit">Buscar</button>
+                    <?php if ($movementSupportsFullPagination): ?><label class="movement-page-size"><span>Registros</span><select name="per_page"><option value="25" <?= $movementPerPageValue === '25' ? 'selected' : '' ?>>25</option><option value="50" <?= $movementPerPageValue === '50' ? 'selected' : '' ?>>50</option><option value="100" <?= $movementPerPageValue === '100' ? 'selected' : '' ?>>100</option><?php if ($movementHasAppliedFilter): ?><option value="all" <?= $movementPerPageValue === 'all' ? 'selected' : '' ?>>Todos</option><?php endif; ?></select></label><?php endif; ?>
+                    <?php if (!$movementListsAll): ?><button class="button<?= $movementKey === 'asignados' ? ' movement-filter-submit' : '' ?>" type="submit">Buscar</button><?php endif; ?>
                     <?php if ($movementKey === 'cartera' && ($movementSearch !== '' || $movementFrom !== '' || $movementTo !== '' || $movementDateType !== 'bank')): ?><a class="button subtle" href="?<?= e(http_build_query(['movement'=>'cartera','client'=>$movementClient['id'] ?? null])) ?>">Limpiar</a><?php endif; ?>
-                    <?php if ($movementHasVisibleSearch): ?><small class="movement-visible-search-status" id="visibleMovementSearchStatus" data-visible-movement-status aria-live="polite"><?= number_format(count($movementResult['rows'])) ?> registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.</small><?php endif; ?>
+                    <?php if ($movementHasVisibleSearch): ?><small class="movement-visible-search-status" id="visibleMovementSearchStatus" data-visible-movement-status aria-live="polite"><?= number_format(count($movementResult['rows'])) ?> registros visibles. <?= $movementListsAll ? 'Escribe para filtrar todos los movimientos pendientes.' : 'Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.' ?></small><?php endif; ?>
                 </form>
             </div>
             <?php if ($movementAction === 'assign' && $movementResult['rows'] !== []): ?>
@@ -2348,7 +2348,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         </tr>
                     <?php endforeach; ?>
                     <?php if ($movementResult['rows'] === []): ?><tr><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">No hay movimientos para mostrar.</td></tr><?php endif; ?>
-                    <?php if ($movementHasVisibleSearch && $movementResult['rows'] !== []): ?><tr class="movement-visible-search-empty" data-visible-search-empty hidden><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty">Ningún registro visible coincide. Presiona Enter para buscar en todo el historial.</td></tr><?php endif; ?>
+                    <?php if ($movementHasVisibleSearch && $movementResult['rows'] !== []): ?><tr class="movement-visible-search-empty" data-visible-search-empty hidden><td colspan="<?= count($movement['columns']) + ($movementAction || $hasMovementContextActions ? 1 : 0) ?>" class="empty"><?= $movementListsAll ? 'Ningún movimiento pendiente coincide con la búsqueda.' : 'Ningún registro visible coincide. Presiona Enter para buscar en todo el historial.' ?></td></tr><?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -2358,6 +2358,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <button class="button primary" type="submit" form="assignmentBatchForm">Guardar asignaciones seleccionadas</button>
                 </div>
             <?php endif; ?>
+            <?php if (!$movementListsAll): ?>
             <div class="pagination">
                 <span><?php if ($movementSupportsFullPagination && $movementPerPageValue === 'all'): ?><?= number_format((int) $movementResult['total']) ?> resultados<?php elseif ($movementSupportsFullPagination): ?>Página <?= e($movementResult['page']) ?> de <?= e($movementResult['lastPage']) ?> · <?= number_format((int) $movementResult['total']) ?> resultados<?php else: ?>Página <?= e($movementResult['page']) ?><?= $movementResult['hasNext'] ? ' · Hay más resultados' : '' ?><?php endif; ?></span>
                 <?php if ($movementSupportsFullPagination && $movementPerPageValue !== 'all'): ?>
@@ -2372,6 +2373,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                     <div><?php if ($movementResult['page'] > 1): ?><a class="button" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['page'] - 1])) ?>">← Anterior</a><?php endif; ?><?php if ($movementResult['hasNext']): ?><a class="button" href="?<?= e(http_build_query($movementPaginationQuery + ['page' => $movementResult['page'] + 1])) ?>">Siguiente →</a><?php endif; ?></div>
                 <?php endif; ?>
             </div>
+            <?php endif; ?>
         </section>
         <?php endif; ?>
         <?php endif; ?>
@@ -3377,6 +3379,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const visibleMovementStatus = visibleMovementSearch?.querySelector('[data-visible-movement-status]');
     const visibleMovementBody = document.querySelector('[data-visible-movement-body]');
     if (visibleMovementSearch && visibleMovementInput && visibleMovementBody) {
+        const localOnly = visibleMovementSearch.hasAttribute('data-local-movement-search');
         const visibleMovementRows = Array.from(visibleMovementBody.querySelectorAll('[data-visible-search-row]'));
         const visibleMovementEmpty = visibleMovementBody.querySelector('[data-visible-search-empty]');
         const discardTimers = new Map();
@@ -3429,17 +3432,27 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             });
             if (visibleMovementEmpty) visibleMovementEmpty.hidden = matches !== 0;
             if (visibleMovementStatus) {
-                visibleMovementStatus.textContent = query
+                visibleMovementStatus.textContent = localOnly
+                    ? (query
+                        ? `${matches} de ${visibleMovementRows.length} movimientos pendientes coinciden.`
+                        : `${visibleMovementRows.length} movimientos pendientes. Escribe para filtrar.`)
+                    : query
                     ? `${matches} de ${visibleMovementRows.length} registros visibles coinciden. Presiona Enter para buscar en todo el historial.`
                     : `${visibleMovementRows.length} registros visibles. Escribe para filtrar esta página; presiona Enter para buscar en todo el historial.`;
             }
         };
         visibleMovementInput.addEventListener('input', filterVisibleMovements);
         visibleMovementInput.addEventListener('search', filterVisibleMovements);
-        visibleMovementSearch.addEventListener('submit', () => {
+        visibleMovementSearch.addEventListener('submit', (event) => {
+            if (localOnly) {
+                event.preventDefault();
+                filterVisibleMovements();
+                return;
+            }
             if (visibleMovementStatus) visibleMovementStatus.textContent = 'Buscando en todo el historial…';
             visibleMovementSearch.classList.add('is-searching-history');
         });
+        if (localOnly && visibleMovementInput.value) filterVisibleMovements();
     }
 
     document.querySelectorAll('[data-company-filter]').forEach((filter) => {
