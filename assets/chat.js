@@ -26,9 +26,10 @@
     let retry = null;
     let hydrated = false;
 
-    function notice(text = '', error = false) {
+    function notice(text = '', error = false, loading = false) {
         status.textContent = text;
         status.dataset.error = String(error);
+        status.dataset.loading = String(loading);
     }
 
     async function api(action, fields = {}, post = false) {
@@ -64,7 +65,7 @@
     async function work(task, pending = '') {
         if (busy) return;
         busy = true;
-        notice(pending);
+        notice(pending, false, Boolean(pending));
         syncControls();
         try {
             await task();
@@ -78,6 +79,7 @@
             }
             notice(error.message, true);
         } finally {
+            if (status.dataset.loading === 'true') notice();
             busy = false;
             syncControls();
         }
@@ -224,7 +226,7 @@
         }, 'Cargando conversación…').then(focusInput);
     });
 
-    moreThreads.addEventListener('click', () => work(() => loadList(true)));
+    moreThreads.addEventListener('click', () => work(() => loadList(true), 'Cargando conversaciones…'));
     older.addEventListener('click', () => work(async () => {
         const first = messages.firstElementChild;
         if (!first) return;
@@ -233,7 +235,7 @@
         messages.prepend(renderMessages(data.mensajes));
         older.hidden = !data.hay_mas;
         transcript.scrollTop += transcript.scrollHeight - height;
-    }));
+    }, 'Cargando mensajes anteriores…'));
 
     end.addEventListener('click', () => work(async () => {
         renderThread(await api('close', { id: active }, true));
@@ -241,7 +243,7 @@
         input.value = '';
         notice('Conversación cerrada.');
         await loadList();
-    }));
+    }, 'Cerrando conversación…'));
 
     dialog.querySelectorAll('[data-chat-suggestion]').forEach((button) => {
         button.addEventListener('click', () => {
