@@ -40,7 +40,7 @@ final class ChatRepository
 
     public function conversation(int $id, int $user, string $scope, array $previousScopes = []): array
     {
-        $query = $this->pdo->prepare("SELECT id, titulo, resumen, contexto_json, cerrado_en
+        $query = $this->pdo->prepare("SELECT id, titulo, resumen, contexto_json, cerrado_en, revision
             FROM s14_chat_conversaciones
             WHERE id = ? AND usuario_id = ? AND JSON_VALUE(contexto_json, '$.alcance') IN (?, ?, ?)");
         $query->execute([$id, $user, ...self::scopes($scope, $previousScopes)]);
@@ -64,7 +64,7 @@ final class ChatRepository
         $conversation = $this->conversation($id, $user, $scope, $previousScopes);
         $messages = $this->history($id, $before, self::HISTORY_SIZE + 1);
         return [
-            'conversacion' => array_intersect_key($conversation, array_flip(['id', 'titulo', 'cerrado_en'])),
+            'conversacion' => array_intersect_key($conversation, array_flip(['id', 'titulo', 'cerrado_en', 'revision'])),
             'mensajes' => array_slice($messages, -self::HISTORY_SIZE),
             'hay_mas' => count($messages) > self::HISTORY_SIZE,
         ];
@@ -106,6 +106,19 @@ final class ChatRepository
         $query = $this->pdo->prepare('UPDATE s14_chat_conversaciones
             SET cerrado_en = CURRENT_TIMESTAMP(6) WHERE id = ? AND cerrado_en IS NULL');
         $query->execute([$id]);
+    }
+
+    public function markForReview(int $id, int $user, string $scope, array $previousScopes = []): void
+    {
+        // Conserva la fecha de actividad administrada por ON UPDATE.
+        $query = $this->pdo->prepare("UPDATE s14_chat_conversaciones
+            SET revision = 1, actualizado_en = actualizado_en
+            WHERE id = ? AND usuario_id = ? AND JSON_VALUE(contexto_json, '$.alcance') IN (?, ?, ?)
+                AND COALESCE(revision, 0) <> 1");
+        $query->execute([$id, $user, ...self::scopes($scope, $previousScopes)]);
+        if ($query->rowCount() === 0) {
+            $this->conversation($id, $user, $scope, $previousScopes);
+        }
     }
 
     public function audit(int $message, string $tool, array $filters, string $status, ?int $count): void

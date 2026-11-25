@@ -19,7 +19,10 @@
         <section class="s14-chat-thread" aria-label="Conversación activa">
             <div class="s14-chat-toolbar">
                 <h3 data-chat-thread-title>Nueva conversación</h3>
-                <button type="button" class="button compact" data-chat-end hidden>Terminar conversación</button>
+                <div class="s14-chat-toolbar-actions">
+                    <button type="button" class="button compact" data-chat-review hidden>Enviar a revisión</button>
+                    <button type="button" class="button compact" data-chat-end hidden>Terminar conversación</button>
+                </div>
             </div>
             <div class="s14-chat-scroll" data-chat-scroll tabindex="0" aria-label="Historial de mensajes">
                 <button type="button" class="button" data-chat-older hidden>Ver mensajes anteriores</button>
@@ -47,5 +50,16 @@
             </div>
         </section>
     </div>
+    <dialog class="s14-chat-review-dialog" aria-labelledby="s14-chat-review-title"
+        aria-describedby="s14-chat-review-description" data-chat-review-confirm>
+        <form method="dialog">
+            <h3 id="s14-chat-review-title">Enviar a revisión</h3>
+            <p id="s14-chat-review-description">Esta conversación se enviará a revisión para entrenar al modelo. ¿Quieres continuar?</p>
+            <div class="s14-chat-review-actions">
+                <button class="button" value="no" autofocus>No</button>
+                <button class="button primary" value="yes">Sí</button>
+            </div>
+        </form>
+    </dialog>
 </dialog>
 

@@ -165,5 +165,24 @@ $pdo->exec('UPDATE cliente_empresa SET id_empresa = 23 WHERE id_usuario = 42');
 $repository->withUserLock(42, static fn () => $repository->close($id, 42, $scope));
 $expectError(409, static fn () => $service->ask(42, $id, str_repeat('d', 32), 'Otra pregunta'));
 
+$reviewSnapshot = static function (int $conversation) use ($pdo): array {
+    $select = $pdo->prepare('SELECT * FROM s14_chat_conversaciones WHERE id=?');
+    $select->execute([$conversation]);
+    return $select->fetch();
+};
+$beforeReview = $reviewSnapshot($id);
+$expectError(404, static fn () => $repository->markForReview($id, 43, $otherAccess->signature()));
+$expectError(404, static fn () => $repository->markForReview($id, 42, str_repeat('0', 64)));
+$assert($reviewSnapshot($id) === $beforeReview, 'Ningún intento fuera del usuario o alcance cambia la conversación.');
+$repository->withUserLock(42, static fn () => $repository->markForReview($id, 42, $scope));
+$afterReview = $reviewSnapshot($id);
+$assert((int) $afterReview['revision'] === 1
+    && array_diff_assoc($afterReview, $beforeReview) === ['revision' => $afterReview['revision']],
+    'Enviar a revisión cambia únicamente la bandera, incluso en una conversación cerrada.');
+$repository->withUserLock(42, static fn () => $repository->markForReview($id, 42, $scope));
+$assert($reviewSnapshot($id) === $afterReview
+    && (int) $repository->thread($id, 42, $scope, 0)['conversacion']['revision'] === 1,
+    'Reintentar es seguro y el historial muestra el estado de revisión.');
+
 echo "chat: permisos, historial, auditoría, reintentos, factura más reciente, listado y conteo verificados\n";
 

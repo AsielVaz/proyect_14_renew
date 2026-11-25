@@ -9,6 +9,8 @@
     const moreThreads = find('more-threads');
     const title = find('thread-title');
     const end = find('end');
+    const review = find('review');
+    const confirmation = find('review-confirm');
     const transcript = find('scroll');
     const messages = find('messages');
     const empty = find('empty');
@@ -21,6 +23,7 @@
 
     let active = null;
     let closed = false;
+    let reviewed = false;
     let busy = false;
     let offset = 0;
     let retry = null;
@@ -59,6 +62,9 @@
         send.disabled = busy || closed || !hydrated;
         input.readOnly = busy || closed || !hydrated;
         end.hidden = !active || closed;
+        review.hidden = !active;
+        review.disabled = busy || reviewed;
+        review.textContent = reviewed ? 'Enviada a revisión' : 'Enviar a revisión';
         form.hidden = closed;
     }
 
@@ -136,6 +142,7 @@
         select(data.conversacion.id);
         title.textContent = data.conversacion.titulo || 'Nueva conversación';
         closed = Boolean(data.conversacion.cerrado_en);
+        reviewed = Number(data.conversacion.revision) === 1;
         empty.hidden = data.mensajes.length > 0;
         older.hidden = !data.hay_mas;
         messages.replaceChildren(renderMessages(data.mensajes));
@@ -145,6 +152,7 @@
     function resetThread() {
         select(null);
         closed = false;
+        reviewed = false;
         title.textContent = 'Nueva conversación';
         empty.hidden = false;
         older.hidden = true;
@@ -241,6 +249,22 @@
         older.hidden = !data.hay_mas;
         transcript.scrollTop += transcript.scrollHeight - height;
     }, 'Cargando mensajes anteriores…'));
+
+    review.addEventListener('click', () => {
+        if (!active || busy || reviewed) return;
+        confirmation.showModal();
+    });
+
+    confirmation.querySelector('form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        confirmation.close();
+        if (event.submitter?.value !== 'yes' || !active || reviewed || !dialog.open) return;
+        work(async () => {
+            const data = await api('review', { id: active }, true);
+            reviewed = Number(data.revision) === 1;
+            notice('Conversación enviada a revisión.');
+        }, 'Enviando a revisión…');
+    });
 
     end.addEventListener('click', () => work(async () => {
         renderThread(await api('close', { id: active }, true));

@@ -65,6 +65,21 @@
 .s14-chat-thread { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .s14-chat-toolbar { padding: 10px 18px; min-height: 52px; }
 .s14-chat-toolbar h3 { margin: 0; font-size: 0.96rem; overflow-wrap: anywhere; }
+.s14-chat-toolbar-actions,
+.s14-chat-review-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.s14-chat-review-dialog {
+    box-sizing: border-box;
+    width: min(400px, calc(100% - 32px));
+    padding: 20px;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--glass-shadow);
+}
+.s14-chat-review-dialog::backdrop { background: var(--glass-overlay); }
+.s14-chat-review-dialog h3 { margin: 0; }
+.s14-chat-review-dialog p { margin: 8px 0 16px; }
 .s14-chat-scroll { overflow: auto; padding: 18px; scrollbar-gutter: stable; }
 .s14-chat-empty { padding: clamp(12px, 5vh, 48px) 0; }
 .s14-chat-empty h3 { margin: 0 0 16px; font-size: 1.32rem; }

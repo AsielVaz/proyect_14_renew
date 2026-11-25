@@ -21,7 +21,7 @@ function handle_chat_endpoint(string $route): never
         $method = $_SERVER['REQUEST_METHOD'] ?? '';
         $expectedMethod = match ($route) {
             'list', 'thread' => 'GET',
-            'new', 'send', 'close' => 'POST',
+            'new', 'send', 'close', 'review' => 'POST',
             default => throw new ChatException('Operación de chat no disponible.', 404),
         };
         if ($method !== $expectedMethod) {
@@ -54,6 +54,11 @@ function handle_chat_endpoint(string $route): never
                 $id = chat_number($_POST['id'] ?? null);
                 $repository->close($id, $user, $scope, $previousScopes);
                 return $repository->thread($id, $user, $scope, 0, $previousScopes);
+            }),
+            'review' => $repository->withUserLock($user, static function () use ($repository, $user, $scope, $previousScopes): array {
+                $id = chat_number($_POST['id'] ?? null);
+                $repository->markForReview($id, $user, $scope, $previousScopes);
+                return ['revision' => 1];
             }),
             'send' => (new ChatService($pdo, $repository, new ChatQueries($pdo), (new DeepSeekChatClient())->complete(...)))
                 ->ask($user, chat_number($_POST['id'] ?? null),
