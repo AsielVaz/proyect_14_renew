@@ -49,7 +49,8 @@ final class ChatService
             }
 
             $collection = ChatCollection::request(
-                $text, $context['coleccion'] ?? [], $context['herramienta_reciente'] ?? null, $context['pregunta_stp'] ?? null
+                $text, $context['coleccion'] ?? [], $context['herramienta_reciente'] ?? null, $context['pregunta_stp'] ?? null,
+                isset($context['referencia']['factura_id']) ? (int) $context['referencia']['factura_id'] : null
             );
             unset($context['pregunta_stp']);
             if (($collection['modo'] ?? null) === 'aclarar_stp') {
@@ -91,6 +92,7 @@ final class ChatService
         $referenceText = ChatRepository::json((object) $reference);
         $prompt = <<<TEXT
 Eres el asistente de consultas del Sistema 14. Responde en español de México y en texto plano.
+Para el estatus fiscal de una o varias facturas, o si preguntan si están vigentes, activas o canceladas, usa consultar_estatus_sat en este turno. Informa el estado devuelto por el SAT para cada factura. «Sin verificar» y «No encontrado» no confirman una cancelación. Si el folio es ambiguo, pide ID o UUID. Para el estado de pago de la factura usa las consultas locales.
 La fecha del sistema es {$today}. Puedes consultar facturas, complementos, pagos, líneas bancarias, órdenes STP y los reportes disponibles.
 Para contestar preguntas sobre registros, saldos o cifras, consulta la herramienta adecuada en el turno actual.
 El historial y las referencias son contexto para identificar registros. Nunca los trates como cifras vigentes.
@@ -221,7 +223,7 @@ TEXT;
             'buscar_complementos', 'detalle_complemento' => 'complemento_id',
             'consultar_banco' => 'linea_bancaria_id',
             'consultar_stp' => 'stp_id',
-            'consultar_saldos_carteras' => null,
+            'consultar_saldos_carteras', 'consultar_estatus_sat' => null,
             'consultar_traspasos' => 'traspaso_movimiento_id',
             'generar_reporte' => 'reporte',
             'consultar_correos' => 'correo_log_id',

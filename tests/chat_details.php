@@ -520,5 +520,52 @@ $check(str_contains($lookupAsk('cuando saldo tiene el grupo de calle ley (2)', 4
     && str_contains($lookupAsk('Suma todas las carteras que tengan «JIMMY» en su nombre', 44, $oldThread), '4 carteras activas'),
     'El chat resuelve las frases del usuario, conserva el texto literal y reconoce nombres con números.');
 
+$pdo->exec('ALTER TABLE facturas ADD COLUMN sello_cfd TEXT');
+$pdo->exec("UPDATE empresas SET rfc='DUBE800923E41' WHERE id=23");
+$pdo->exec("UPDATE claves_cortas SET rfc='MOAF580320PJ1' WHERE id=3");
+$pdo->exec("UPDATE facturas SET uuid='856CAF56-E0B9-4A96-B0E8-7C7C2EC5C534', sello_cfd='rH8/bw==',
+    xml_total=100.25, xml_firmado=NULL WHERE id IN (11,16)");
+$stamp = '<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Total="999.250000" Sello="aBcD+/==">'
+    . '<cfdi:Emisor Rfc="DUBE800923E41"/><cfdi:Receptor Rfc="MOAF580320PJ1"/>'
+    . '<cfdi:Complemento><tfd:TimbreFiscalDigital UUID="a1234567-abcd-1234-ab12-123456789abc"/></cfdi:Complemento></cfdi:Comprobante>';
+$pdo->prepare('UPDATE facturas SET xml_firmado=? WHERE id=10')->execute([$stamp]);
+$soap = static fn (string $code, string $state): string => '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+    . '<ConsultaResponse xmlns="http://tempuri.org/"><ConsultaResult xmlns:a="http://schemas.datacontract.org/2004/07/Sat.Cfdi.Negocio.ConsultaCfdi.Servicio">'
+    . '<a:CodigoEstatus>' . $code . '</a:CodigoEstatus><a:Estado>' . $state . '</a:Estado></ConsultaResult></ConsultaResponse></s:Body></s:Envelope>';
+$sent = [];
+$statusReplies = [
+    10 => $soap('S - Comprobante obtenido satisfactoriamente.', 'Vigente'),
+    11 => $soap('S - Comprobante obtenido satisfactoriamente.', 'Cancelado'),
+];
+$satQueries = new ChatQueries($pdo, new App\SatCfdiStatus(static function (array $requests) use (&$sent, &$statusReplies): array {
+    $sent = $requests;
+    return array_intersect_key($statusReplies, $requests);
+}));
+$satChat = new App\ChatService($pdo, $chatRepository, $satQueries, static function (): never {
+    throw new RuntimeException('La pregunta de estatus debe resolverse con el SAT.');
+});
+$satAsk = static function (string $text) use ($satChat, $lookupChat): string {
+    $turn = $satChat->ask(42, $lookupChat, bin2hex(random_bytes(16)), $text);
+    return end($turn['mensajes'])['contenido'];
+};
+$result = $satAsk('¿Cuál es el estatus de las facturas #10, #11 y #16?');
+$check(array_keys($sent) === [10,11] && str_contains($sent[10], '&amp;tt=999.250000&amp;fe=aBcD%2B%2F%3D%3D')
+    && str_contains($sent[11], '&amp;tt=100.25&amp;fe=rH8%2Fbw%3D%3D'),
+    'SOAP usa el XML timbrado o los datos fiscales guardados y solo envía facturas autorizadas.');
+$check(str_contains($result, 'SAT: Vigente') && str_contains($result, 'SAT: Cancelado') && str_contains($result, 'ID #16: no encontré'),
+    'El chat muestra un estado por CFDI y limita los datos fuera de alcance.');
+$sent = [];
+$check(str_contains($satAsk('¿Factura folio A105 está activa?'), 'varias coincidencias') && $sent === [],
+    'Un folio ambiguo se resuelve antes de consultar al SAT.');
+$statusReplies[11] = $soap('N - 602: Comprobante no encontrado.', 'No Encontrado');
+$check(str_contains($satAsk('¿Está activa la factura UUID 856CAF56-E0B9-4A96-B0E8-7C7C2EC5C534?'), 'SAT: No encontrado'),
+    'No encontrado se distingue de Cancelado.');
+$statusReplies[11] = '<html>Servicio no disponible</html>';
+$check(str_contains($satAsk('Estado fiscal de la factura #11'), 'SAT: Sin verificar'),
+    'La falla del servicio conserva el estado como sin verificar.');
+$sent = [];
+$check(str_contains($satAsk('¿Está vigente la factura #13?'), 'Faltan datos fiscales') && $sent === [],
+    'Un CFDI con datos incompletos queda sin verificar sin enviar una petición.');
+
 echo "chat_details: permisos, cruces fiscales y bancarios, totales y descargas verificados\n";
 

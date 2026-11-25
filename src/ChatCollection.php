@@ -18,7 +18,7 @@ final class ChatCollection
     ];
 
     public static function request(
-        string $text, array $previous, ?string $lastTool = null, ?array $pendingStp = null
+        string $text, array $previous, ?string $lastTool = null, ?array $pendingStp = null, ?int $recentInvoice = null
     ): ?array
     {
         $text = preg_replace('/^\h*\d+[.)]\h*/m', '', $text) ?? $text;
@@ -61,6 +61,11 @@ final class ChatCollection
             && (int) $companyMatch[1] <= 4294967295) {
             $company = ['empresa_id' => (int) $companyMatch[1]];
             $text = substr($text, 0, -strlen($companyMatch[0]));
+        }
+
+        $sat = self::invoiceSatRequest($text, $period + $company, $lastTool, $recentInvoice);
+        if ($sat !== null) {
+            return $sat;
         }
 
         if (preg_match('/^(?:que|cuales) depositos (?:siguen|estan|quedaron) pendientes (de conciliar|de documentar|sin documento)$/', $text, $pending)) {
@@ -135,6 +140,45 @@ final class ChatCollection
                 $quantity = (int) (($matches[2] ?? '') ?: ChatQueries::DEFAULT_LIMIT);
                 return self::make($tool, ['limite' => min(ChatQueries::MAX_LIMIT, max(1, $quantity)), 'orden' => $order] + $period + $company, 'lista');
             }
+        }
+        return null;
+    }
+
+    private static function invoiceSatRequest(string $text, array $filters, ?string $lastTool, ?int $recentInvoice): ?array
+    {
+        $text = preg_replace('/\s+en (?:el )?sat$/', '', $text) ?? $text;
+        $text = preg_replace('/^(?:verifica|revisa|confirma|valida|consulta) si /', '', $text) ?? $text;
+        $state = '(?:vigentes?|activ[oa]s?|cancelad[oa]s?)';
+        $current = '(?:aun |todavia )?(?:sigue[n]?|esta[n]?|es|son) (?:aun |todavia )?';
+        if ($recentInvoice !== null && in_array($lastTool, ['buscar_facturas', 'detalle_factura'], true)
+            && preg_match("~^(?:y )?{$current}{$state}$~", $text)) {
+            return self::make('consultar_estatus_sat', ['referencias' => 'id:' . $recentInvoice], 'estatus_sat');
+        }
+        $subject = '(?:la |las |una )?(?:(ultima[s]?(?: \d{1,3})?) )?facturas?';
+        $status = '(?:estatus|estado|vigencia)(?: fiscal)?(?: (?:en (?:el )?)?sat)?';
+        $prefix = "(?:(?:cual es|cuales son|dime|dame|consulta|consultar|muestra|verifica|revisa|valida) (?:el )?)?(?:{$status}(?: de)?|(?:que|cual) {$status} tiene[n]?)";
+        $patterns = [
+            "~^{$prefix} {$subject}(?:[: ]+(.+))?$~",
+            "~^{$current}{$state} {$subject}(?:[: ]+(.+))?$~",
+            "~^{$subject}(?:[: ]+(.+?))? {$current}{$state}$~",
+        ];
+        foreach ($patterns as $pattern) {
+            if (!preg_match($pattern, $text, $match)) {
+                continue;
+            }
+            $tail = preg_replace('/^con /', '', trim($match[2] ?? ''));
+            if (in_array($tail, ['mas reciente', 'mas recientes'], true)) {
+                $filters += ['limite' => $tail === 'mas reciente' ? 1 : 5, 'orden' => 'recientes'];
+            } elseif ($tail !== '') {
+                if (ChatQueries::satReferences($tail) === null) {
+                    return null;
+                }
+                $filters['referencias'] = $tail;
+            } elseif (!empty($match[1])) {
+                $parts = explode(' ', $match[1]);
+                $filters += ['limite' => isset($parts[1]) ? (int) $parts[1] : ($parts[0] === 'ultima' ? 1 : 5), 'orden' => 'recientes'];
+            }
+            return self::make('consultar_estatus_sat', $filters, 'estatus_sat');
         }
         return null;
     }
@@ -333,6 +377,9 @@ final class ChatCollection
             return $result['error'];
         }
         $tool = $request['herramienta'];
+        if ($tool === 'consultar_estatus_sat') {
+            return self::invoiceSatReply($result);
+        }
         if ($tool === 'consultar_saldos_carteras') {
             return self::walletBalanceReply($request['filtros'], $result);
         }
@@ -496,6 +543,38 @@ final class ChatCollection
         }
         if ($states === []) {
             $lines[] = 'Total: ' . number_format($totals['registros'], 0, '.', ',');
+        }
+        return implode("\n", $lines);
+    }
+
+    private static function invoiceSatReply(array $result): string
+    {
+        $lines = [];
+        foreach ($result['filas'] as $row) {
+            $label = 'Factura · ID #' . $row['id'];
+            if (!empty($row['folio'])) {
+                $label .= ' · folio ' . $row['folio'];
+            }
+            if (!empty($row['uuid'])) {
+                $label .= ' · UUID ' . $row['uuid'];
+            }
+            $lines[] = $label . ' · SAT: ' . $row['estado_sat'] . (!empty($row['detalle_sat']) ? '. ' . $row['detalle_sat'] : '.');
+            $lines[] = $row['enlace'];
+        }
+        foreach ($result['referencias_sin_resolver'] as $item) {
+            if ($item['coincidencias'] === []) {
+                $lines[] = $item['referencia'] . ': no encontré una factura accesible.';
+                continue;
+            }
+            $ids = array_map(static fn (array $row): string => '#' . $row['id'], $item['coincidencias']);
+            $lines[] = $item['referencia'] . ': tiene varias coincidencias (por ejemplo, IDs ' . implode(' y ', $ids)
+                . '). Indica el ID o UUID de la factura.';
+        }
+        if ($lines === []) {
+            return $result['mensaje'] ?? ChatQueries::NOT_FOUND;
+        }
+        if ($result['hay_mas'] && $result['limite'] > 1) {
+            $lines[] = 'Escribe «siguiente página» para verificar más facturas.';
         }
         return implode("\n", $lines);
     }

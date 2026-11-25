@@ -81,7 +81,7 @@ final class ChatAccess
     {
         $movements = Movements::allowedFor($this->role);
         return match ($tool) {
-            'buscar_facturas', 'detalle_factura', 'buscar_complementos', 'detalle_complemento', 'pendientes_ppd' => true,
+            'buscar_facturas', 'detalle_factura', 'consultar_estatus_sat', 'buscar_complementos', 'detalle_complemento', 'pendientes_ppd' => true,
             'consultar_pagos', 'detalle_movimiento', 'consultar_banco' => isset($movements['totales']),
             'consultar_stp' => isset($movements['stp']),
             'consultar_saldos_carteras' => true,

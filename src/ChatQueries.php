@@ -44,7 +44,7 @@ final class ChatQueries
         'traspaso' => 'consultar_traspasos',
     ];
 
-    public function __construct(private readonly PDO $pdo) {}
+    public function __construct(private readonly PDO $pdo, private readonly ?SatCfdiStatus $sat = null) {}
 
     private static function definitions(): array
     {
@@ -71,6 +71,9 @@ final class ChatQueries
         $uuid = ['uuid' => ['type' => 'string', 'description' => 'UUID fiscal exacto, distinto del folio y del ID interno']];
         return [
             'buscar_facturas' => ['Lista, cuenta o busca facturas por ID, folio, UUID, importe o filtros. Para la factura más reciente usa limite=1 y orden=recientes sin fechas, salvo que el usuario indique un periodo.', $common + $uuid + $amount + $listing, []],
+            'consultar_estatus_sat' => ['Verifica en el SAT el estado fiscal actual de una o varias facturas autorizadas. Usa referencias para IDs, folios o UUID. Para las últimas facturas usa orden=recientes y limite. Admite hasta 10 por consulta.', [
+                'referencias' => ['type' => 'string', 'description' => 'Hasta 10 referencias separadas por comas. Escribe id:123, folio:A42 o uuid:... según el identificador indicado.'],
+            ] + array_diff_key($common, ['folio' => true]) + $uuid + array_diff_key($listing, ['contar' => true, 'totalizar' => true]), []],
             'detalle_factura' => ['Factura exacta, conceptos, tratamiento fiscal, complementos, pagos y saldo PPD si es verificable.', $id, ['id']],
             'buscar_complementos' => ['Busca complementos de pago por ID, folio, UUID, importe o filtros.', $common + $uuid + $amount + $listing, []],
             'detalle_complemento' => ['Complemento exacto, facturas, montos aplicados y movimiento asociado.', $id, ['id']],
@@ -162,7 +165,7 @@ final class ChatQueries
                 'number' => (is_int($value) || is_float($value)) && is_finite($value)
                     && abs($value) <= 999999999999 && abs(round($value, 2) - $value) < 0.000001,
                 'boolean' => is_bool($value),
-                'string' => is_string($value) && mb_strlen($value) <= 120,
+                'string' => is_string($value) && mb_strlen($value) <= ($key === 'referencias' ? 450 : 120),
                 default => false,
             };
             if (!$valid || (isset($property['enum']) && !in_array($value, $property['enum'], true))) {
@@ -180,7 +183,7 @@ final class ChatQueries
         if ($tool === 'consultar_saldos_carteras' && $filters === []) {
             throw new ChatException('Indica el grupo o el texto que debe aparecer en el nombre de las carteras.');
         }
-        if (in_array($tool, ['buscar_facturas', 'buscar_complementos'], true)) {
+        if (in_array($tool, ['buscar_facturas', 'buscar_complementos', 'consultar_estatus_sat'], true)) {
             $uuidPattern = '/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iD';
             if (!isset($filters['uuid']) && preg_match($uuidPattern, $filters['folio'] ?? '')) {
                 $filters['uuid'] = $filters['folio'];
@@ -191,6 +194,16 @@ final class ChatQueries
                     throw new ChatException('El UUID debe tener el formato fiscal de 36 caracteres.');
                 }
                 $filters['uuid'] = strtoupper($filters['uuid']);
+            }
+        }
+        if ($tool === 'consultar_estatus_sat') {
+            $references = isset($filters['referencias']) ? self::satReferences($filters['referencias']) : [];
+            if ($references === null || count($references) > SatCfdiStatus::MAX_BATCH
+                || ($filters['limite'] ?? 1) > SatCfdiStatus::MAX_BATCH) {
+                throw new ChatException('Indica hasta 10 facturas por consulta, con su ID, folio o UUID.');
+            }
+            if ($filters === []) {
+                throw new ChatException('Indica el ID, folio o UUID de la factura, o cuáles facturas quieres verificar.');
             }
         }
         if (isset($filters['referencia_stp']) && !preg_match('/^[0-9]{1,20}$/D', $filters['referencia_stp'])) {
@@ -228,6 +241,7 @@ final class ChatQueries
         }
         $result = match ($tool) {
             'buscar_facturas' => $this->invoices($filters, $access),
+            'consultar_estatus_sat' => $this->invoiceSatStatus($filters, $access),
             'detalle_factura' => $this->invoiceDetail($filters['id'], $access),
             'buscar_complementos' => $this->complements($filters, $access),
             'detalle_complemento' => $this->complementDetail($filters['id'], $access),
@@ -294,6 +308,108 @@ final class ChatQueries
             throw new ChatException(self::NOT_FOUND, 404);
         }
         return ['filename' => "Factura-{$id}.xml", 'bytes' => $bytes];
+    }
+
+    public static function satReferences(string $value): ?array
+    {
+        $items = preg_split('/\s*[,;]\s*|\s+y\s+/iu', trim($value));
+        $references = [];
+        $kind = '';
+        $uuid = SatCfdiStatus::UUID;
+        foreach ($items as $item) {
+            $item = preg_replace('/^(?:(?:la|las) )?facturas?\s+/iu', '', $item) ?? $item;
+            if (preg_match('/^(ids?|folios?|uuids?)[:#\s]+(.+)$/iu', $item, $match)) {
+                $kind = rtrim(strtolower($match[1]), 's');
+                $item = trim($match[2]);
+            }
+            $type = str_starts_with($item, '#') ? 'id' : $kind;
+            $item = ltrim($item, '# ');
+            $type = $type ?: (preg_match("~^{$uuid}$~iD", $item) ? 'uuid' : (ctype_digit($item) ? 'numero' : 'folio'));
+            $valid = match ($type) {
+                'id' => ctype_digit($item) && (int) $item > 0 && (int) $item <= 4294967295,
+                'uuid' => (bool) preg_match("~^{$uuid}$~iD", $item),
+                default => (bool) preg_match('/^[a-z0-9][a-z0-9-]{0,39}$/iD', $item),
+            };
+            if (!$valid) {
+                return null;
+            }
+            $references[$type . ':' . strtoupper($item)] = [$type, strtoupper($item)];
+        }
+        return array_values($references);
+    }
+
+    private function invoiceSatStatus(array $filters, ChatAccess $access): array
+    {
+        $filters['limite'] ??= 5;
+        $references = isset($filters['referencias']) ? self::satReferences($filters['referencias']) : [];
+        $selected = [];
+        $unresolved = [];
+        $hasMore = false;
+        if ($references === []) {
+            $matches = $this->satInvoiceRows($filters, $access);
+            $hasMore = count($matches) > $filters['limite'];
+            $selected = array_column(array_slice($matches, 0, $filters['limite']), null, 'id');
+        }
+        foreach ($references as [$kind, $value]) {
+            $matches = $this->satInvoiceRows($filters, $access, [$kind, $value]);
+            $label = match ($kind) {
+                'id' => 'ID #' . $value,
+                'folio' => 'folio ' . $value,
+                'uuid' => 'UUID ' . $value,
+                default => 'referencia ' . $value,
+            };
+            if (count($matches) === 1) {
+                $selected[$matches[0]['id']] = $matches[0];
+            } else {
+                $unresolved[] = ['referencia' => $label, 'coincidencias' => array_map(static fn (array $row): array =>
+                    array_intersect_key($row, array_flip(['id', 'folio', 'uuid', 'fecha'])), $matches)];
+            }
+        }
+
+        $statuses = ($this->sat ?? new SatCfdiStatus())->check($selected);
+        $rows = [];
+        foreach ($selected as $id => $row) {
+            $rows[] = array_intersect_key($row, array_flip(['id', 'folio', 'uuid', 'fecha'])) + $statuses[$id]
+                + ['enlace' => '?chat_registro=factura&id=' . (int) $id];
+        }
+        $result = ['filas' => $rows, 'hay_mas' => $hasMore, 'referencias_sin_resolver' => $unresolved];
+        if ($references === []) {
+            $result += ['pagina' => $filters['pagina'] ?? 1, 'limite' => $filters['limite']];
+        }
+        if ($unresolved !== []) {
+            $result['mensaje'] = 'Algunas referencias requieren precisar el identificador o no tienen coincidencias accesibles.';
+        }
+        return $result;
+    }
+
+    private function satInvoiceRows(array $filters, ChatAccess $access, ?array $reference = null): array
+    {
+        $params = [];
+        $where = $access->conditions('f.razon', 'f.nombre', $params, false);
+        $folio = ["CONCAT_WS('', f.serie, f.folio)", 'CAST(f.folio AS CHAR)', "CONCAT_WS('-', f.serie, f.folio)"];
+        $where .= self::condition($filters, [
+            'id' => 'f.id', 'empresa_id' => 'f.razon', 'empresa' => 'e.razon', 'cliente' => 'c.nombre',
+            'uuid' => 'UPPER(TRIM(f.uuid))', 'fecha' => 'f.fecha',
+        ], $params);
+        if ($reference !== null) {
+            [$kind, $value] = $reference;
+            $columns = match ($kind) {
+                'id' => ['f.id'],
+                'uuid' => ['UPPER(TRIM(f.uuid))'],
+                'numero' => [...$folio, 'CAST(f.id AS CHAR)'],
+                default => $folio,
+            };
+            $where .= self::condition(['folio' => $kind === 'id' ? (int) $value : $value], ['folio' => $columns], $params);
+        }
+        [$order, , $limit, $offset] = self::window($filters, 'f.fecha DESC, f.id DESC');
+        $window = $reference === null ? 'LIMIT ' . ($limit + 1) . " OFFSET {$offset}" : 'LIMIT 2';
+        return $this->fetch("SELECT f.id, CONCAT_WS('', f.serie, f.folio) AS folio, f.uuid, f.fecha,
+                f.xml_firmado, f.sello_cfd, e.rfc AS empresa_rfc, cc.rfc AS receptor_rfc,
+                CASE WHEN LOWER(TRIM(f.retencion_transporte)) = 'si' AND f.total_iva > 0 THEN f.total_iva
+                    ELSE COALESCE(f.xml_total, f.total_iva) END AS total_sat
+            FROM facturas f LEFT JOIN empresas e ON e.id = f.razon
+            LEFT JOIN claves_cortas cc ON cc.id = f.id_clave_corta LEFT JOIN clientes c ON c.id = f.nombre
+            WHERE {$where} ORDER BY {$order} {$window}", $params);
     }
 
     private function invoices(array $filters, ChatAccess $access, bool $pending = false): array
