@@ -23,7 +23,7 @@ try {
         id INT PRIMARY KEY, fecha DATETIME, serie VARCHAR(20), folio VARCHAR(50),
         total_iva DECIMAL(18,2), uuid VARCHAR(100), token VARCHAR(100), status VARCHAR(50),
         status_error TEXT, status_pago VARCHAR(50), id_pago INT, metodo_pago INT,
-        forma_pago INT, nombre INT, razon INT, id_clave_corta INT, usuario_crea INT
+        forma_pago INT, nombre INT, razon INT, id_clave_corta INT, usuario_crea INT, sello_sat TEXT NULL
     )');
 
     $pdo->exec("INSERT INTO clientes VALUES (1, 'Cliente de prueba', 'cliente@example.test')");
@@ -33,7 +33,7 @@ try {
     $pdo->exec("INSERT INTO metodos_pago VALUES (1, 'PUE')");
     $pdo->exec("INSERT INTO usuarios VALUES (1, 'Operador')");
     $pdo->exec("INSERT INTO facturas VALUES
-        (700001, '2026-11-20 10:00:00', 'A', 'F-100', 456321.34, 'UUID-PRUEBA', '', '', '', 'Pagado', 0, 1, 1, 1, 1, 1, 1)");
+        (700001, '2026-11-20 10:00:00', 'A', 'F-100', 456321.34, 'UUID-PRUEBA', '', '', '', 'Pagado', 0, 1, 1, 1, 1, 1, 1, 'SELLO')");
 
     $repository = new InvoiceRepository($pdo);
     foreach (['456321.34', '456,321.34', '$456,321.34'] as $search) {
@@ -43,6 +43,17 @@ try {
     }
     $assert(count($repository->page('Cliente de prueba', 1)['rows']) === 1,
         'La búsqueda textual existente debe conservarse.');
+
+    $pdo->exec("INSERT INTO facturas VALUES
+        (700002, '2024-01-02 10:00:00', 'A', 'F-101', 100.00, NULL, '', '', '', '', 0, 1, 1, 1, 1, 1, 1, NULL),
+        (700003, '2024-01-02 10:00:00', 'A', 'F-102', 100.00, NULL, '', '', '', '', 0, 1, 1, 1, 1, 1, 1, '')");
+    $ids = static fn (array $rows): array => array_map('intval', array_column($rows, 'id'));
+    $assert($ids($repository->page('', 1, pendingStampOnly: true)['rows']) === [700002],
+        'Pendientes debe filtrar únicamente por sello SAT NULL.');
+    $assert($repository->page('', 1, dateFrom: '2024-02-01', pendingStampOnly: true)['rows'] === [],
+        'El filtro de pendientes debe respetar el rango de fechas.');
+    $assert($ids($repository->exportRows('', pendingStampOnly: true)) === [700002],
+        'El filtro de pendientes debe conservarse al exportar, incluso fuera de los últimos diez días.');
 } finally {
     foreach (['facturas', 'facturar_rel_complementos', 'usuarios', 'metodos_pago', 'formas_pago', 'claves_cortas', 'empresas', 'clientes'] as $table) {
         $pdo->exec("DROP TEMPORARY TABLE IF EXISTS `{$table}`");

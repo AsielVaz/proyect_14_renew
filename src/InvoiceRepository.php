@@ -26,10 +26,14 @@ final class InvoiceRepository
         int $page,
         int $perPage = 25,
         string $dateFrom = '',
-        string $dateTo = ''
+        string $dateTo = '',
+        bool $pendingStampOnly = false
     ): array
     {
         $where = 'WHERE f.razon <> 132';
+        if ($pendingStampOnly) {
+            $where .= ' AND f.sello_sat IS NULL';
+        }
         $params = [];
         if ($search !== '') {
             $textCondition = "CONCAT_WS(' ', CAST(f.id AS CHAR), CAST(f.folio AS CHAR), f.serie,
@@ -83,15 +87,15 @@ final class InvoiceRepository
         ];
     }
 
-    public function exportRows(string $search, string $dateFrom = '', string $dateTo = ''): array
+    public function exportRows(string $search, string $dateFrom = '', string $dateTo = '', bool $pendingStampOnly = false): array
     {
-        if ($search === '' && $dateFrom === '' && $dateTo === '') {
+        if (!$pendingStampOnly && $search === '' && $dateFrom === '' && $dateTo === '') {
             $today = new \DateTimeImmutable('today');
             $dateFrom = $today->modify('-9 days')->format('Y-m-d');
             $dateTo = $today->format('Y-m-d');
         }
 
-        return $this->page($search, 1, 10000, $dateFrom, $dateTo)['rows'];
+        return $this->page($search, 1, 10000, $dateFrom, $dateTo, $pendingStampOnly)['rows'];
     }
 
     private static function numericSearchValue(string $value): ?float

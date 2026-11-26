@@ -223,6 +223,7 @@ if ($knownMovement && !$movement) {
 $movementAction = $movement['action'] ?? null;
 $invoiceView = (string) ($_GET['invoice'] ?? '');
 $invoiceModule = in_array($invoiceView, ['list', 'create', 'complements'], true);
+$invoicePendingOnly = $invoiceView === 'list' && ($_GET['pending'] ?? '') === '1';
 $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
 $companyView = (string) ($_GET['companies'] ?? '');
@@ -331,7 +332,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['export'] ?? '') === 'xlsx'
         $search = mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 160);
         [$dateFrom, $dateTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? '');
         if ($invoiceModule) {
-            $sourceRows = invoice_repository()->exportRows($search, $dateFrom, $dateTo);
+            $sourceRows = invoice_repository()->exportRows($search, $dateFrom, $dateTo, $invoicePendingOnly);
             $headers = [
                 'id' => 'ID', 'fecha' => 'Fecha', 'serie' => 'Serie', 'folio' => 'Folio',
                 'uuid' => 'UUID', 'empresa' => 'Empresa emisora', 'cliente' => 'Cliente',
@@ -663,20 +664,42 @@ try {
         verify_csrf();
         $postAction = (string) ($_POST['action'] ?? '');
         if ($complementModule) {
-            if ($postAction === 'complement_create') {
-                $complementId = payment_complement_repository()->create($_POST);
-                flash('success', 'Complemento #' . $complementId . ' guardado con sus facturas relacionadas. Quedó pendiente de timbrado.');
-                redirect('?complement=detail&id=' . $complementId);
-            } elseif ($postAction === 'complement_delete') {
-                payment_complement_repository()->deletePending((int) ($_POST['id'] ?? 0));
-                flash('success', 'Complemento pendiente eliminado junto con sus relaciones.');
-                redirect('?complement=list');
-            } elseif ($postAction === 'complement_stamp') {
-                $complementId = (int) ($_POST['id'] ?? 0);
+            if (in_array($postAction, ['complement_create', 'complement_stamp'], true)) {
                 $operatorId = current_operator_id();
+                $isNewComplement = $postAction === 'complement_create';
+                $stampOnSave = $isNewComplement && ($_POST['stamp_on_save'] ?? '') === '1';
+                if ($isNewComplement) {
+                    if ($stampOnSave) {
+                        $submission = $_POST['stamp_submission'] ?? '';
+                        if (!is_string($submission) || preg_match('/^[a-f0-9]{32}$/D', $submission) !== 1) {
+                            throw new RuntimeException('Recarga el formulario antes de guardar y timbrar el complemento.');
+                        }
+                        $previousComplementId = (int) ($_SESSION['complement_stamp_submissions'][$submission] ?? 0);
+                        if ($previousComplementId > 0) {
+                            redirect('?complement=detail&id=' . $previousComplementId);
+                        }
+                        ignore_user_abort(true);
+                    }
+                    $complementId = payment_complement_repository()->create($_POST);
+                    if (!$stampOnSave) {
+                        flash('success', 'Complemento #' . $complementId . ' guardado con sus facturas relacionadas. Quedó pendiente de timbrado.');
+                        redirect('?complement=detail&id=' . $complementId);
+                    }
+                    $_SESSION['complement_stamp_submissions'][$submission] = $complementId;
+                    $_SESSION['complement_stamp_submissions'] = array_slice($_SESSION['complement_stamp_submissions'], -50, null, true);
+                } else {
+                    $complementId = (int) ($_POST['id'] ?? 0);
+                }
                 ignore_user_abort(true);
                 @set_time_limit(0);
-                $stampResult = local_complement_stamp_service()->stamp($complementId, $operatorId);
+                try {
+                    $stampResult = local_complement_stamp_service()->stamp($complementId, $operatorId);
+                } catch (Throwable $stampException) {
+                    if (!$stampOnSave) throw $stampException;
+                    flash('error', 'El complemento #' . $complementId . ' se guardó, pero no se pudo confirmar el timbrado. '
+                        . $stampException->getMessage() . ' Revisa su estado antes de reintentar.');
+                    redirect('?complement=detail&id=' . $complementId);
+                }
                 $message = (string) $stampResult['message'];
                 try {
                     $emailResult = complement_email_service()->sendToComplementContact($complementId, $operatorId, true, true);
@@ -687,7 +710,11 @@ try {
                     error_log('Complement automatic email #' . $complementId . ': ' . $emailException->getMessage());
                     $message .= ' El complemento quedó timbrado, pero el correo automático no pudo completarse: ' . $emailException->getMessage();
                 }
-                flash('success', $message);
+                flash('success', $stampOnSave ? 'Complemento #' . $complementId . ' guardado. ' . $message : $message);
+                redirect($stampOnSave ? '?complement=detail&id=' . $complementId : '?complement=list');
+            } elseif ($postAction === 'complement_delete') {
+                payment_complement_repository()->deletePending((int) ($_POST['id'] ?? 0));
+                flash('success', 'Complemento pendiente eliminado junto con sus relaciones.');
                 redirect('?complement=list');
             } elseif ($postAction === 'complement_resend') {
                 $complementId = (int) ($_POST['id'] ?? 0);
@@ -705,16 +732,42 @@ try {
                 throw new RuntimeException('Acción de complemento no permitida.');
             }
         } elseif ($invoiceModule) {
-            if ($postAction === 'invoice_create') {
-                $invoiceId = invoice_repository()->create($_POST, current_operator_id());
-                flash('success', 'Factura #' . $invoiceId . ' guardada con sus conceptos y relaciones. Quedó pendiente de timbrado.');
-                redirect('?invoice=list');
-            } elseif ($postAction === 'invoice_stamp') {
-                $invoiceId = (int) ($_POST['id'] ?? 0);
+            if (in_array($postAction, ['invoice_create', 'invoice_stamp'], true)) {
                 $operatorId = current_operator_id();
+                $isNewInvoice = $postAction === 'invoice_create';
+                $stampOnSave = $isNewInvoice && ($_POST['stamp_on_save'] ?? '') === '1';
+                if ($isNewInvoice) {
+                    if ($stampOnSave) {
+                        $submission = $_POST['stamp_submission'] ?? '';
+                        if (!is_string($submission) || preg_match('/^[a-f0-9]{32}$/D', $submission) !== 1) {
+                            throw new RuntimeException('Recarga el formulario antes de guardar y timbrar la factura.');
+                        }
+                        $previousInvoiceId = (int) ($_SESSION['invoice_stamp_submissions'][$submission] ?? 0);
+                        if ($previousInvoiceId > 0) {
+                            redirect('?invoice=list&q=' . $previousInvoiceId);
+                        }
+                        ignore_user_abort(true);
+                    }
+                    $invoiceId = invoice_repository()->create($_POST, $operatorId);
+                    if (!$stampOnSave) {
+                        flash('success', 'Factura #' . $invoiceId . ' guardada con sus conceptos y relaciones. Quedó pendiente de timbrado.');
+                        redirect('?invoice=list');
+                    }
+                    $_SESSION['invoice_stamp_submissions'][$submission] = $invoiceId;
+                    $_SESSION['invoice_stamp_submissions'] = array_slice($_SESSION['invoice_stamp_submissions'], -50, null, true);
+                } else {
+                    $invoiceId = (int) ($_POST['id'] ?? 0);
+                }
                 ignore_user_abort(true);
                 @set_time_limit(0);
-                $message = fiscal_document_service()->stampInvoice($invoiceId, $operatorId);
+                try {
+                    $message = fiscal_document_service()->stampInvoice($invoiceId, $operatorId);
+                } catch (Throwable $stampException) {
+                    if (!$stampOnSave) throw $stampException;
+                    flash('error', 'La factura #' . $invoiceId . ' se guardó, pero no se pudo confirmar el timbrado. '
+                        . $stampException->getMessage() . ' Revisa su estado antes de reintentar.');
+                    redirect('?invoice=list&q=' . $invoiceId);
+                }
                 try {
                     $emailResult = invoice_email_service()->sendToInvoiceContact($invoiceId, $operatorId, true, true);
                     $message .= ' ' . ($emailResult['status'] === 'skipped'
@@ -724,8 +777,8 @@ try {
                     error_log('Invoice automatic email #' . $invoiceId . ': ' . $emailException->getMessage());
                     $message .= ' La factura quedó timbrada, pero el correo automático no pudo completarse: ' . $emailException->getMessage();
                 }
-                flash('success', $message);
-                redirect('?invoice=list');
+                flash('success', $stampOnSave ? 'Factura #' . $invoiceId . ' guardada. ' . $message : $message);
+                redirect($stampOnSave ? '?invoice=list&q=' . $invoiceId : '?invoice=list');
             } elseif ($postAction === 'invoice_resend') {
                 $invoiceId = (int) ($_POST['id'] ?? 0);
                 ignore_user_abort(true);
@@ -1618,6 +1671,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <section class="report-intro"><p>Registra el pago y relaciónalo con una o varias facturas PPD. Los saldos se verifican nuevamente al guardar.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="complementForm" data-confirm="¿Guardar este complemento y aplicar los montos a las facturas seleccionadas?" data-confirm-title="Confirmar complemento"<?= $invoiceComplementContext ? ' data-prefill-invoice-uuid="' . e($complementPrefill['uuid']) . '"' : '' ?><?= $paymentComplementContext ? ' data-prefill-payment-maximum="' . e($complementPaymentPrefill['maximum']) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="complement_create">
+                <input type="hidden" name="stamp_submission" value="<?= e(bin2hex(random_bytes(16))) ?>">
                 <?php if ($invoiceComplementContext): ?><input type="hidden" name="source_invoice_id" value="<?= e($complementPrefill['id']) ?>"><?php endif; ?>
                 <?php if ($paymentComplementContext): ?><input type="hidden" name="payment_id" value="<?= e($complementPaymentPrefill['id']) ?>"><?php endif; ?>
                 <section class="panel invoice-form-panel">
@@ -1657,7 +1711,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <div class="complement-uuid-control"><input type="text" id="complementManualUuid" maxlength="50" placeholder="UUID fiscal" aria-label="UUID fiscal"><button type="button" class="button" id="complementLookupUuid">Consultar</button></div>
                     </details>
                     <div class="table-wrap"><table class="invoice-lines complement-lines"><thead><tr><th>UUID / factura</th><th>Saldo anterior</th><th>Monto pagado</th><th>Parcialidad</th><th>Saldo restante</th><th>Tratamiento fiscal</th><th></th></tr></thead><tbody id="complementLines"></tbody></table></div>
-                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar complemento</button></div>
+                    <div class="invoice-summary"><div><span>Facturas</span><strong id="complementCount">0</strong></div><div><span>Total del complemento</span><strong id="complementTotal">$0.00</strong></div><button type="submit" class="button">Guardar complemento</button><button type="submit" class="button primary" name="stamp_on_save" value="1">Timbrar</button></div>
                 </section>
             </form>
         <?php elseif ($complementView === 'detail'): ?>
@@ -1721,6 +1775,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             <section class="report-intro"><p>Genera facturas con los catálogos de empresas, clientes, razones sociales, conceptos y claves fiscales de Sistema 14.</p><span class="operation-badge">Guardado transaccional</span></section>
             <form method="post" id="invoiceForm" data-confirm="¿Guardar esta factura y todos sus conceptos?" data-confirm-title="Confirmar factura"<?= $invoicePaymentPrefill ? ' data-prefill-receiver="' . e($invoiceInitialReceiverId) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_create">
+                <input type="hidden" name="stamp_submission" value="<?= e(bin2hex(random_bytes(16))) ?>">
                 <section class="panel invoice-form-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Datos fiscales</p><h2>Emisor y receptor</h2></div><a class="button" href="?invoice=list">Volver</a></div>
                     <div class="form-grid invoice-header-grid">
@@ -1742,7 +1797,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 <section class="panel invoice-concepts-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Partidas</p><h2>Conceptos de factura</h2><p class="panel-copy">Aquí se muestra el resumen. La configuración de cada partida se realiza en una ventana independiente.</p></div><div class="panel-actions"><button type="button" class="button" id="importInvoiceCapture" aria-haspopup="dialog" aria-controls="invoiceImportModal" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg><span>Importar captura</span></button><button type="button" class="button primary" id="addInvoiceConcept" aria-haspopup="dialog" aria-controls="invoiceConceptModal" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Agregar concepto</span></button></div></div>
                     <div class="table-wrap"><table class="invoice-lines"><thead><tr><th>Concepto / descripción</th><th>Cantidad</th><th>P/U con IVA</th><th>IVA</th><th>Total</th><th>Acciones</th></tr></thead><tbody id="invoiceLines"><tr class="invoice-empty"><td colspan="6" class="empty">Selecciona una empresa y agrega al menos un concepto.</td></tr></tbody></table></div>
-                    <div class="invoice-summary"><div><span>Subtotal</span><strong id="invoiceSubtotal">$0.00</strong></div><div><span>IVA trasladado</span><strong id="invoiceTax">$0.00</strong></div><div><span>Retención IVA 4%</span><strong id="invoiceRetainedTax">$0.00</strong></div><div><span>Total</span><strong id="invoiceTotal">$0.00</strong></div><button type="submit" class="button primary">Guardar factura</button></div>
+                    <div class="invoice-summary"><div><span>Subtotal</span><strong id="invoiceSubtotal">$0.00</strong></div><div><span>IVA trasladado</span><strong id="invoiceTax">$0.00</strong></div><div><span>Retención IVA 4%</span><strong id="invoiceRetainedTax">$0.00</strong></div><div><span>Total</span><strong id="invoiceTotal">$0.00</strong></div><button type="submit" class="button">Guardar factura</button><button type="submit" class="button primary" name="stamp_on_save" value="1">Timbrar</button></div>
                 </section>
             </form>
                 <div class="glass-modal-backdrop invoice-concept-modal" id="invoiceConceptModal" hidden>
@@ -1800,9 +1855,31 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                 </section>
             <?php endif; ?>
         <?php else: ?>
-            <?php $invoicePage = max(1, (int) ($_GET['page'] ?? 1)); $invoiceSearch = trim((string) ($_GET['q'] ?? '')); [$invoiceFrom, $invoiceTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? ''); $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage, 25, $invoiceFrom, $invoiceTo); $invoiceFilters = ['invoice'=>'list','q'=>$invoiceSearch,'from'=>$invoiceFrom,'to'=>$invoiceTo]; ?>
+            <?php
+            $invoicePage = max(1, (int) ($_GET['page'] ?? 1));
+            $invoiceSearch = trim((string) ($_GET['q'] ?? ''));
+            [$invoiceFrom, $invoiceTo] = filter_date_range($_GET['from'] ?? '', $_GET['to'] ?? '');
+            $invoiceResult = invoice_repository()->page($invoiceSearch, $invoicePage, 25, $invoiceFrom, $invoiceTo, $invoicePendingOnly);
+            $invoiceFilters = ['invoice' => 'list', 'q' => $invoiceSearch, 'from' => $invoiceFrom, 'to' => $invoiceTo,
+                'pending' => $invoicePendingOnly ? '1' : null];
+            $invoiceToggleFilters = array_replace($invoiceFilters, ['pending' => $invoicePendingOnly ? null : '1']);
+            ?>
             <section class="report-intro"><p>Facturas guardadas en la tabla original, con emisor, receptor, relación de pago y estado fiscal.</p></section>
-            <section class="panel"><div class="panel-heading list-tools"><div><p class="eyebrow">Facturación</p><h2>Facturas</h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div><form method="get" class="report-filters document-filters"><input type="hidden" name="invoice" value="list"><input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente o monto…" aria-label="Buscar facturas"><label><span>Desde</span><input type="date" name="from" value="<?= e($invoiceFrom) ?>"></label><label><span>Hasta</span><input type="date" name="to" value="<?= e($invoiceTo) ?>"></label><button class="button">Filtrar</button><a class="button" href="?<?= e(http_build_query($invoiceFilters + ['export'=>'xlsx'])) ?>">Exportar a Excel</a><?php if ($invoiceSearch !== '' || $invoiceFrom !== '' || $invoiceTo !== ''): ?><a class="button subtle" href="?invoice=list">Limpiar</a><?php endif; ?></form></div>
+            <section class="panel">
+                <div class="panel-heading list-tools">
+                    <div><p class="eyebrow">Facturación</p><h2><?= $invoicePendingOnly ? 'Facturas pendientes de timbrado' : 'Facturas' ?></h2><p class="panel-copy"><?= number_format(count($invoiceResult['rows'])) ?> resultados en esta página</p></div>
+                    <form method="get" class="report-filters document-filters">
+                        <input type="hidden" name="invoice" value="list">
+                        <?php if ($invoicePendingOnly): ?><input type="hidden" name="pending" value="1"><?php endif; ?>
+                        <input type="search" name="q" value="<?= e($invoiceSearch) ?>" placeholder="Folio, UUID, cliente o monto…" aria-label="Buscar facturas">
+                        <label><span>Desde</span><input type="date" name="from" value="<?= e($invoiceFrom) ?>"></label>
+                        <label><span>Hasta</span><input type="date" name="to" value="<?= e($invoiceTo) ?>"></label>
+                        <button class="button" type="submit">Filtrar</button>
+                        <a class="button" href="?<?= e(http_build_query($invoiceToggleFilters)) ?>"><?= $invoicePendingOnly ? 'Ver todas las facturas' : 'Ver facturas pendientes' ?></a>
+                        <a class="button" href="?<?= e(http_build_query($invoiceFilters + ['export' => 'xlsx'])) ?>">Exportar a Excel</a>
+                        <?php if ($invoiceSearch !== '' || $invoiceFrom !== '' || $invoiceTo !== ''): ?><a class="button subtle" href="?<?= $invoicePendingOnly ? 'invoice=list&amp;pending=1' : 'invoice=list' ?>">Limpiar</a><?php endif; ?>
+                    </form>
+                </div>
                 <div class="table-wrap"><table class="movement-table invoice-table document-table"><thead><tr><th>ID / folio</th><th>Emisor</th><th>Receptor</th><th>Pago</th><th>Total</th><th>Fecha</th><th>Timbrar</th><th>Estado fiscal / acciones</th></tr></thead><tbody><?php foreach ($invoiceResult['rows'] as $row): ?><?php $invoiceStamped = trim((string) ($row['uuid'] ?? '')) !== ''; ?><tr data-record-row data-record-kind="invoice" data-record-id="<?= e($row['id']) ?>">
                     <td><span class="movement-cell-main">#<?= e($row['id']) ?></span><span class="movement-cell-secondary"><?= e(($row['serie'] ?? '') . ($row['folio'] ?? '')) ?></span></td>
                     <td><span class="movement-cell-main"><?= e($row['empresa']) ?></span><span class="movement-cell-secondary"><?= e($row['usuario']) ?></span></td>
@@ -2994,12 +3071,14 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         const form = event.target;
         if (!(form instanceof HTMLFormElement)) return;
         const action = form.querySelector('[name="action"]')?.value || '';
-        const operation = thirdPartyOperations[action];
+        const submitter = event.submitter;
+        const isStampOnSave = (action === 'invoice_create' || action === 'complement_create')
+            && submitter?.name === 'stamp_on_save' && submitter.value === '1';
+        const operation = thirdPartyOperations[isStampOnSave ? action.replace('_create', '_stamp') : action];
         if (operation) {
             showSystemLoader(operation[0], operation[1], {delay: 80});
             return;
         }
-        const submitter = event.submitter;
         if (form.target === '_blank' || submitter?.formTarget === '_blank'
             || submitter?.name === 'export' || submitter?.value === 'xlsx') return;
         const target = new URL(form.getAttribute('action') || window.location.href, window.location.href);
@@ -4553,6 +4632,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     const details = document.getElementById('confirmationDetails');
     const modal = backdrop.querySelector('.glass-modal');
     let pendingForm = null;
+    let pendingDocumentSubmitter = null;
 
     const money = new Intl.NumberFormat('es-MX', {
         style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 6
@@ -5143,6 +5223,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     };
 
     const closeModal = () => {
+        pendingDocumentSubmitter = null;
         backdrop.classList.remove('is-visible');
         window.setTimeout(() => { backdrop.hidden = true; }, 220);
     };
@@ -5294,9 +5375,20 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             title.textContent = form.dataset.confirmTitle || 'Confirmar operación';
             message.textContent = form.dataset.confirm || '¿Deseas continuar?';
             if (form.dataset.confirmAccept) accept.textContent = form.dataset.confirmAccept;
-            if (form.id === 'invoiceForm') {
-                renderInvoicePreview(form);
-                accept.textContent = 'Aceptar y guardar';
+            const isInvoiceForm = form.id === 'invoiceForm';
+            const isComplementForm = form.id === 'complementForm';
+            pendingDocumentSubmitter = isInvoiceForm || isComplementForm ? event.submitter : null;
+            if (isInvoiceForm) renderInvoicePreview(form);
+            if (isInvoiceForm || isComplementForm) {
+                if (pendingDocumentSubmitter?.name === 'stamp_on_save' && pendingDocumentSubmitter.value === '1') {
+                    title.textContent = isInvoiceForm ? 'Guardar y timbrar factura' : 'Guardar y timbrar complemento';
+                    message.textContent = isInvoiceForm
+                        ? 'Al confirmar, se guardará la factura y se solicitará el timbrado fiscal del CFDI.'
+                        : 'Al confirmar, se guardará el complemento y se solicitará el timbrado fiscal del CFDI.';
+                    accept.textContent = 'Confirmar y timbrar';
+                } else if (isInvoiceForm) {
+                    accept.textContent = 'Aceptar y guardar';
+                }
             }
             openModal();
         });
@@ -5350,10 +5442,12 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
     accept.addEventListener('click', () => {
         if (!pendingForm) return;
         const form = pendingForm;
+        const submitter = pendingDocumentSubmitter?.form === form ? pendingDocumentSubmitter : null;
         pendingForm = null;
         closeModal();
         form.dataset.confirmed = 'true';
-        form.requestSubmit();
+        if (submitter) form.requestSubmit(submitter);
+        else form.requestSubmit();
     });
 
     backdrop.addEventListener('click', (event) => {
