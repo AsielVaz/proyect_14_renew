@@ -21,6 +21,11 @@ final class Movements
                 'action' => 'unassign',
                 'columns' => self::baseColumns(true, false),
             ],
+            'consiliador-manual' => [
+                'label' => 'Consiliador manual',
+                'description' => 'Identifica al receptor de los depósitos internos pendientes de factura.',
+                'columns' => [],
+            ],
             'reasignar' => [
                 'label' => 'Reasignación de movimientos',
                 'description' => 'Revierte la asignación actual y vuelve a calcularla para otra cartera.',

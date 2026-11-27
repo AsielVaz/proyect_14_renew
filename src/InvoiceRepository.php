@@ -116,6 +116,145 @@ final class InvoiceRepository
         ];
     }
 
+    public function manualReconciliation(string $day, ?int $paymentId = null): array
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $day);
+        if (!$date || $date->format('Y-m-d') !== $day) {
+            throw new RuntimeException('Selecciona una fecha válida para conciliar.');
+        }
+
+        $sql = "SELECT p.id, p.monto, p.empresa, p.banco, p.id_factura_res,
+                       COALESCE(NULLIF(p.descripcion_detallada, ''), NULLIF(p.descripcion, ''), p.detalle) AS detalle,
+                       e.id AS company_id, e.razon AS emisor
+                FROM pagos p
+                LEFT JOIN captura ca ON ca.id = p.id_captura
+                LEFT JOIN empresas e ON e.id = COALESCE(ca.razon, p.empresa)
+                WHERE p.nombre = '13' AND p.fecha_asignacion = ?
+                  AND p.status = 'asignado' AND p.tipo_movimiento = 'Deposito'
+                  AND COALESCE(p.id_factura, 0) <= 0";
+        $params = [$day];
+        if ($paymentId !== null) {
+            $sql .= ' AND p.id = ?';
+            $params[] = $paymentId;
+        }
+        $deposits = $this->pdo->prepare($sql . ' ORDER BY p.id DESC');
+        $deposits->execute($params);
+        $rows = $deposits->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) return [];
+
+        $placeholders = static fn (array $values): string => implode(',', array_fill(0, count($values), '?'));
+        $amountKey = static fn (mixed $amount): string => number_format(abs((float) $amount), 2, '.', '');
+        $ids = array_column($rows, 'id');
+        $amounts = array_values(array_unique(array_map($amountKey, array_column($rows, 'monto'))));
+        $idList = $placeholders($ids);
+        $invoices = $this->pdo->prepare("SELECT f.id_pago, f.nombre, f.total_iva FROM facturas f
+            WHERE f.id_pago IN ({$idList}) OR (f.nombre = 13 AND f.total_iva IN (" . $placeholders($amounts) . "))
+            UNION ALL
+            SELECT rel.id_pago, NULL, NULL FROM relacion_factura_pago rel
+            INNER JOIN facturas f ON f.id = rel.id_factura WHERE rel.id_pago IN ({$idList})");
+        $invoices->execute([...$ids, ...$amounts, ...$ids]);
+        $invoicedIds = [];
+        $invoicedAmounts = [];
+        foreach ($invoices->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
+            $invoicedIds[(int) $invoice['id_pago']] = true;
+            if ((int) $invoice['nombre'] === 13) {
+                $invoicedAmounts[$amountKey((float) $invoice['total_iva'])] = true;
+            }
+        }
+        $rows = array_values(array_filter($rows, static fn (array $row): bool =>
+            !isset($invoicedIds[(int) $row['id']]) && !isset($invoicedAmounts[$amountKey((float) $row['monto'])])));
+        if ($rows === []) return [];
+
+        $amounts = array_values(array_unique(array_map($amountKey, array_column($rows, 'monto'))));
+        $signedAmounts = [...$amounts, ...array_map(static fn (string $amount): string => '-' . $amount, $amounts)];
+        $withdrawals = $this->pdo->prepare("SELECT r.id, r.monto, r.fecha_asignacion, r.nombre AS cartera,
+                   CONCAT_WS(' ', r.detalle, r.descripcion, r.descripcion_detallada, ce.referencia) AS referencia
+            FROM pagos r
+            LEFT JOIN captura_edo_cta ce ON ce.id = r.id_captura_edo_cta
+            WHERE r.tipo_movimiento = 'Retiro' AND r.monto IN (" . $placeholders($signedAmounts) . ")
+            ORDER BY r.id DESC");
+        $withdrawals->execute($signedAmounts);
+        $byAmount = [];
+        $walletIds = [13];
+        foreach ($withdrawals->fetchAll(PDO::FETCH_ASSOC) as $withdrawal) {
+            $byAmount[$amountKey((float) $withdrawal['monto'])][] = $withdrawal;
+            $walletId = self::positiveIntegerReference($withdrawal['cartera']);
+            if ($walletId > 0) $walletIds[] = $walletId;
+        }
+        $walletIds = array_values(array_unique($walletIds));
+        $keys = $this->pdo->prepare("SELECT cc.id, cc.clave_corta, cc.id_cliente, cc.razon_social, cc.rfc
+            FROM claves_cortas cc INNER JOIN clientes c ON c.id = cc.id_cliente
+            WHERE COALESCE(c.activo, 1) = 1 AND cc.id_cliente IN (" . $placeholders($walletIds) . ")");
+        $keys->execute($walletIds);
+        $keysByCode = [];
+        $keysByWallet = [];
+        foreach ($keys->fetchAll(PDO::FETCH_ASSOC) as $key) {
+            $keysByCode[strtoupper(trim((string) $key['clave_corta']))][] = $key;
+            $keysByWallet[(int) $key['id_cliente']][] = $key;
+        }
+
+        foreach ($rows as &$row) {
+            $matches = $byAmount[$amountKey((float) $row['monto'])] ?? [];
+            $sameDay = array_filter($matches, static fn (array $withdrawal): bool => $withdrawal['fecha_asignacion'] === $day);
+            $row['receiver'] = self::manualReconciliationReceiver($sameDay ?: $matches, $keysByCode, $keysByWallet);
+            $row['reason'] = match (true) {
+                $amountKey($row['monto']) === '0.00' => 'El depósito no tiene un importe válido.',
+                self::positiveIntegerReference($row['id_factura_res']) > 0 => 'El depósito ya tiene un complemento asociado.',
+                (int) $row['company_id'] <= 0 => 'El depósito no tiene una empresa emisora válida.',
+                in_array(strtoupper((string) $row['banco']), ['STP', '99', ''], true) => 'Este tipo de movimiento no está disponible para facturación.',
+                $matches === [] => 'No se encontró un retiro del mismo importe.',
+                $row['receiver'] === null => 'El retiro no identifica un receptor único.',
+                default => '',
+            };
+        }
+        unset($row);
+        return $rows;
+    }
+
+    private static function manualReconciliationReceiver(array $withdrawals, array $keysByCode, array $keysByWallet): ?array
+    {
+        $identified = [];
+        foreach ($withdrawals as $withdrawal) {
+            $wallet = (int) $withdrawal['cartera'];
+            preg_match_all('/[A-Z0-9_-]+/', strtoupper((string) $withdrawal['referencia']), $tokens);
+            foreach (array_unique($tokens[0]) as $token) {
+                foreach ($keysByCode[$token] ?? [] as $key) {
+                    if ((int) $key['id_cliente'] === $wallet || (int) $key['id_cliente'] === 13) {
+                        $identified[(int) $key['id']] ??= $key + ['withdrawal_id' => (int) $withdrawal['id']];
+                    }
+                }
+            }
+        }
+        // Un código explícito del retiro prevalece sobre la clave única de una cartera.
+        if ($identified === []) {
+            foreach ($withdrawals as $withdrawal) {
+                $wallet = (int) $withdrawal['cartera'];
+                $walletKeys = $keysByWallet[$wallet] ?? [];
+                if ($wallet !== 13 && count($walletKeys) === 1) {
+                    $key = $walletKeys[0];
+                    $identified[(int) $key['id']] ??= $key + ['withdrawal_id' => (int) $withdrawal['id']];
+                }
+            }
+        }
+        return count($identified) === 1 ? reset($identified) : null;
+    }
+
+    public function manualReconciliationPrefill(int $paymentId, string $day): array
+    {
+        $row = $this->manualReconciliation($day, $paymentId)[0] ?? null;
+        if ($row === null) {
+            throw new RuntimeException('El depósito ya tiene una factura o no pertenece al día seleccionado.');
+        }
+        if ($row['reason'] !== '') throw new RuntimeException($row['reason']);
+
+        return array_replace($this->paymentPrefill($paymentId), [
+            'client_id' => (int) $row['receiver']['id_cliente'],
+            'receiver_id' => (int) $row['receiver']['id'],
+            'withdrawal_id' => $row['receiver']['withdrawal_id'],
+            'reconciliation_day' => $day,
+        ]);
+    }
+
     public function paymentPrefill(int $paymentId): array
     {
         if ($paymentId <= 0) {

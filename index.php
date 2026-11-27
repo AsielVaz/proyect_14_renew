@@ -214,6 +214,7 @@ $catalog = $key !== '' ? Catalogs::get($key) : null;
 $reportKey = (string) ($_GET['report'] ?? '');
 $report = $reportKey !== '' ? Reports::get($reportKey) : null;
 $movementKey = (string) ($_GET['movement'] ?? '');
+$isManualReconciliation = $movementKey === 'consiliador-manual';
 $movement = $movementKey !== '' ? ($movements[$movementKey] ?? null) : null;
 $knownMovement = $movementKey !== '' ? Movements::get($movementKey) : null;
 if ($knownMovement && !$movement) {
@@ -223,6 +224,8 @@ if ($knownMovement && !$movement) {
 $movementAction = $movement['action'] ?? null;
 $invoiceView = (string) ($_GET['invoice'] ?? '');
 $invoiceModule = in_array($invoiceView, ['list', 'create', 'complements'], true);
+$invoiceReconciliationDay = $invoiceView === 'create' && is_string($_GET['reconciliation_day'] ?? null)
+    ? $_GET['reconciliation_day'] : null;
 $invoicePendingOnly = $invoiceView === 'list' && ($_GET['pending'] ?? '') === '1';
 $complementView = (string) ($_GET['complement'] ?? '');
 $complementModule = in_array($complementView, ['list', 'create', 'detail'], true);
@@ -748,10 +751,22 @@ try {
                         }
                         ignore_user_abort(true);
                     }
+                    if ($invoiceReconciliationDay !== null) {
+                        $reconciliationPaymentId = filter_var($_GET['payment_id'] ?? null, FILTER_VALIDATE_INT) ?: 0;
+                        if ($reconciliationPaymentId !== (int) ($_POST['payment_id'] ?? 0)) {
+                            throw new RuntimeException('El depósito asociado a la conciliación no coincide.');
+                        }
+                        invoice_repository()->manualReconciliationPrefill(
+                            $reconciliationPaymentId,
+                            $invoiceReconciliationDay
+                        );
+                    }
                     $invoiceId = invoice_repository()->create($_POST, $operatorId);
                     if (!$stampOnSave) {
                         flash('success', 'Factura #' . $invoiceId . ' guardada con sus conceptos y relaciones. Quedó pendiente de timbrado.');
-                        redirect('?invoice=list');
+                        redirect($invoiceReconciliationDay !== null
+                            ? '?movement=consiliador-manual&day=' . rawurlencode($invoiceReconciliationDay)
+                            : '?invoice=list');
                     }
                     $_SESSION['invoice_stamp_submissions'][$submission] = $invoiceId;
                     $_SESSION['invoice_stamp_submissions'] = array_slice($_SESSION['invoice_stamp_submissions'], -50, null, true);
@@ -1006,6 +1021,13 @@ try {
         exit;
     }
     flash('error', $exception->getMessage());
+    if ($invoiceReconciliationDay !== null && ($postAction ?? '') === 'invoice_create') {
+        redirect('?' . http_build_query([
+            'invoice' => 'create',
+            'payment_id' => filter_var($_GET['payment_id'] ?? null, FILTER_VALIDATE_INT) ?: 0,
+            'reconciliation_day' => $invoiceReconciliationDay,
+        ]));
+    }
     $target = $movementKey === 'capturas-manuales' && (string) ($_POST['action'] ?? '') === 'manual_capture_create'
         ? '?movement=capturas-manuales&view=manual&action=form'
         : ($movementKey === 'capturas-manuales'
@@ -1057,10 +1079,14 @@ if ($complementView === 'create' && isset($_GET['invoice_id'])) {
 if ($invoiceView === 'create' && isset($_GET['payment_id'])) {
     try {
         $sourcePaymentId = filter_var($_GET['payment_id'], FILTER_VALIDATE_INT) ?: 0;
-        $invoicePaymentPrefill = invoice_repository()->paymentPrefill($sourcePaymentId);
+        $invoicePaymentPrefill = $invoiceReconciliationDay !== null
+            ? invoice_repository()->manualReconciliationPrefill($sourcePaymentId, $invoiceReconciliationDay)
+            : invoice_repository()->paymentPrefill($sourcePaymentId);
     } catch (Throwable $exception) {
         flash('error', $exception->getMessage());
-        redirect('?movement=asignados');
+        redirect($invoiceReconciliationDay !== null
+            ? '?movement=consiliador-manual&day=' . rawurlencode($invoiceReconciliationDay)
+            : '?movement=asignados');
     }
 }
 $record = null;
@@ -1221,25 +1247,26 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </div>
         </details>
         <?php endif; ?>
-        <details class="catalog-menu movement-menu" <?= $movement && !in_array($movementKey, ['totales', 'stp'], true) ? 'open' : '' ?>>
+        <details class="catalog-menu movement-menu" <?= $movement && !in_array($movementKey, ['totales', 'stp', 'consiliador-manual'], true) ? 'open' : '' ?>>
             <summary>
                 <span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h14m0 0-3-3m3 3-3 3M20 16H6m0 0 3 3m-3-3 3-3"/></svg></span> Movimientos</span>
                 <span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span>
             </summary>
             <div class="catalog-links">
                 <?php foreach ($movements as $navKey => $item): ?>
-                    <?php if (in_array($navKey, ['totales', 'cartera', 'stp'], true)) continue; ?>
+                    <?php if (in_array($navKey, ['totales', 'cartera', 'stp', 'consiliador-manual'], true)) continue; ?>
                     <a class="<?= $movementKey === $navKey ? 'active' : '' ?>" href="?movement=<?= e($navKey) ?>">
                         <span></span><?= e($item['label']) ?>
                     </a>
                 <?php endforeach; ?>
             </div>
         </details>
-        <details class="catalog-menu" <?= $invoiceModule || $complementModule ? 'open' : '' ?>>
+        <details class="catalog-menu" <?= $invoiceModule || $complementModule || $isManualReconciliation ? 'open' : '' ?>>
             <summary><span><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6V3Zm10 0v4h4M9 11h6m-6 4h6m-6 4h4"/></svg></span> Facturación</span><span class="chevron"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></span></summary>
             <div class="catalog-links">
                 <a class="<?= $invoiceView === 'list' ? 'active' : '' ?>" href="?invoice=list"><span></span>Facturas</a>
                 <a class="<?= $complementModule ? 'active' : '' ?>" href="?complement=list"><span></span>Complementos de pago</a>
+                <a class="<?= $isManualReconciliation ? 'active' : '' ?>" href="?movement=consiliador-manual"><span></span>Consiliador manual</a>
             </div>
         </details>
         <details class="catalog-menu report-menu" <?= ($report && !in_array($reportKey, ['correos-factura', 'correos-contexto'], true)) || in_array($movementKey, ['totales', 'stp'], true) || $bankingModule ? 'open' : '' ?>>
@@ -1773,7 +1800,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         <?php if ($invoiceView === 'create'): ?>
             <?php $invoiceData = invoice_repository()->formData(); $invoiceInitialCompanyId = (int) ($invoicePaymentPrefill['company_id'] ?? 0); $invoiceInitialClientId = (int) ($invoicePaymentPrefill['client_id'] ?? 0); $invoiceInitialReceiverId = (int) ($invoicePaymentPrefill['receiver_id'] ?? 0); ?>
             <section class="report-intro"><p>Genera facturas con los catálogos de empresas, clientes, razones sociales, conceptos y claves fiscales de Sistema 14.</p><span class="operation-badge">Guardado transaccional</span></section>
-            <form method="post" id="invoiceForm" data-confirm="¿Guardar esta factura y todos sus conceptos?" data-confirm-title="Confirmar factura"<?= $invoicePaymentPrefill ? ' data-prefill-receiver="' . e($invoiceInitialReceiverId) . '"' : '' ?>>
+            <form method="post" id="invoiceForm" data-confirm="¿Guardar esta factura y todos sus conceptos?" data-confirm-title="Confirmar factura"<?= $invoicePaymentPrefill ? ' data-prefill-receiver="' . e($invoiceInitialReceiverId) . '"' : '' ?><?= isset($invoicePaymentPrefill['withdrawal_id']) ? ' data-reconciliation-amount="' . e($invoicePaymentPrefill['amount']) . '"' : '' ?>>
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="invoice_create">
                 <input type="hidden" name="stamp_submission" value="<?= e(bin2hex(random_bytes(16))) ?>">
                 <section class="panel invoice-form-panel">
@@ -1792,7 +1819,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
                         <label class="field"><span>Retención de IVA 4%</span><select name="retention" id="invoiceRetention"><option value="No">No</option><option value="Si">Sí</option></select></label>
                         <?php if ($invoicePaymentPrefill): ?><input type="hidden" name="payment_id" value="<?= e($invoicePaymentPrefill['id']) ?>"><label class="field"><span>Pago asociado</span><input type="text" value="#<?= e($invoicePaymentPrefill['id']) ?> · <?= e(report_value($invoicePaymentPrefill['amount'], 'money')) ?>" readonly aria-readonly="true"></label><?php else: ?><label class="field"><span>Pago asociado</span><input type="number" name="payment_id" min="1" placeholder="ID opcional"></label><?php endif; ?>
                     </div>
-                    <?php if ($invoicePaymentPrefill): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($invoicePaymentPrefill['id']) ?> precargado</strong><p>Empresa y cliente se sugieren automáticamente, pero ambos permanecen editables.</p></div></div><?php endif; ?>
+                    <?php if ($invoicePaymentPrefill): ?><div class="complement-payment-context" role="note"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8m-8 4h5"/></svg></span><div><strong>Movimiento #<?= e($invoicePaymentPrefill['id']) ?> precargado</strong><?php if (isset($invoicePaymentPrefill['withdrawal_id'])): ?><p>Receptor identificado por el retiro #<?= e($invoicePaymentPrefill['withdrawal_id']) ?>. <a href="?movement=consiliador-manual&amp;day=<?= e($invoicePaymentPrefill['reconciliation_day']) ?>">Volver al Consiliador manual</a></p><?php else: ?><p>Empresa y cliente se sugieren automáticamente, pero ambos permanecen editables.</p><?php endif; ?></div></div><?php endif; ?>
                 </section>
                 <section class="panel invoice-concepts-panel">
                     <div class="panel-heading"><div><p class="eyebrow">Partidas</p><h2>Conceptos de factura</h2><p class="panel-copy">Aquí se muestra el resumen. La configuración de cada partida se realiza en una ventana independiente.</p></div><div class="panel-actions"><button type="button" class="button" id="importInvoiceCapture" aria-haspopup="dialog" aria-controls="invoiceImportModal" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg><span>Importar captura</span></button><button type="button" class="button primary" id="addInvoiceConcept" aria-haspopup="dialog" aria-controls="invoiceConceptModal" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Agregar concepto</span></button></div></div>
@@ -1916,7 +1943,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             </section>
         <?php endif; ?>
     <?php elseif ($movement): ?>
-        <?php if ($movementKey === 'notificador'): ?>
+        <?php if ($isManualReconciliation): ?>
+            <?php require __DIR__ . '/views/manual-reconciliation.php'; ?>
+        <?php elseif ($movementKey === 'notificador'): ?>
             <?php require __DIR__ . '/views/payment-notifier.php'; ?>
         <?php elseif ($movementKey === 'correos-manuales'): ?>
             <?php $manualEmailCompanies = manual_email_service()->companies(); ?>
@@ -3779,6 +3808,9 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         invoiceConceptPreviewTotal.textContent = invoiceMoney.format(quantity > 0 ? total / quantity : 0);
     };
 
+    const defaultInvoiceConceptTotal = () => invoiceLines?.querySelector('tr[data-invoice-line]')
+        ? '0' : invoiceForm?.dataset.reconciliationAmount || '0';
+
     const configureInvoiceConcept = (useDefaults = true) => {
         const option = invoiceConcept?.options[invoiceConcept.selectedIndex];
         if (!option?.value) {
@@ -3794,7 +3826,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
         if (invoiceConceptPrice) {
             invoiceConceptPrice.min = '0';
             invoiceConceptPrice.removeAttribute('max');
-            if (useDefaults) invoiceConceptPrice.value = '0';
+            if (useDefaults) invoiceConceptPrice.value = defaultInvoiceConceptTotal();
         }
         if (useDefaults && invoiceConceptDescription) invoiceConceptDescription.value = option.dataset.description || '';
         if (invoiceConceptTax) {
@@ -3837,7 +3869,7 @@ $passkeys = $securityModule ? passkey_repository()->publicCredentialsForUser(cur
             invoiceConcept.value = '';
             configureInvoiceConcept(true);
             invoiceConceptQuantity.value = '1';
-            invoiceConceptPrice.value = '0';
+            invoiceConceptPrice.value = defaultInvoiceConceptTotal();
             invoiceConceptTax.value = '16';
             invoiceConceptTitle.textContent = 'Agregar concepto';
             saveInvoiceConcept.textContent = 'Agregar al resumen';
