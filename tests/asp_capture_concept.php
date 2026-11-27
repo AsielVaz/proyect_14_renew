@@ -33,3 +33,19 @@ assert($movement['amount'] === 23733.60);
 assert($movement['date'] === '2026-11-24');
 
 echo "9 comprobaciones de captura ASP superadas.\n";
+
+$enclenciRows = [
+    ['Fecha', 'Tipo', 'Cargo', 'Abono', 'Comentario', 'SPEI_Concepto', 'Saldo'],
+    ['2026-11-26', 'Transferencia recibida', '0', '324595.36', 'Comentario bancario', 'FC4EST', '724595.36'],
+    ['2026-11-26', 'Transferencia recibida', '0', '238071.36', '', 'FC4EST', '400000.00'],
+];
+[$headerIndex, $columns] = $detectColumns->invoke($service, $enclenciRows);
+assert($headerIndex === 0);
+assert($columns['detail'] === 4 && $columns['spei_concept'] === 5);
+foreach (array_slice($enclenciRows, 1) as $row) {
+    $movement = $movementFromRow->invoke($service, $row, $columns);
+    assert($movement['description'] === 'Transferencia recibida · FC4EST');
+    assert($movement['detail'] === $row[4]);
+    assert($movement['type'] === 'Deposito');
+}
+echo "SPEI_Concepto conserva FC4EST con y sin comentario.\n";

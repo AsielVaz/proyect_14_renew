@@ -903,7 +903,8 @@ final class CaptureAnalysisService
             // Tipo Operación. Se conserva como campo independiente para no
             // perderla cuando ambas columnas están presentes.
             'concept' => ['concepto'],
-            'detail' => ['detalle', 'concepto spei', 'spei concepto', 'comentario', 'leyenda'],
+            'spei_concept' => ['concepto spei', 'spei concepto'],
+            'detail' => ['detalle', 'comentario', 'leyenda'],
             'reference' => ['referencia', 'clave rastreo', 'clave de rastreo', 'spei clave rastreo', 'spei referencia'],
             'origin_name' => ['spei cuenta origen nombre', 'cuenta origen nombre', 'nombre ordenante', 'ordenante'],
             'beneficiary_name' => ['spei beneficiario', 'beneficiario', 'nombre beneficiario'],
@@ -952,6 +953,7 @@ final class CaptureAnalysisService
         $descriptionParts = array_values(array_unique(array_filter(array_map('trim', [
             (string) ($row[$columns['description'] ?? -1] ?? ''),
             (string) ($row[$columns['concept'] ?? -1] ?? ''),
+            (string) ($row[$columns['spei_concept'] ?? -1] ?? ''),
         ]), static fn (string $value): bool => $value !== '')));
         $detailParts = array_values(array_unique(array_filter(array_map('trim', [
             (string) ($row[$columns['detail'] ?? -1] ?? ''),
